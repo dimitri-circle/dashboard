@@ -1,4 +1,4 @@
-import { MongoClient, type Collection, type Db } from "mongodb";
+import { MongoClient, ServerApiVersion, type Collection, type Db } from "mongodb";
 import type {
   SeoAuditEvent,
   SeoClient,
@@ -21,7 +21,13 @@ function getMongoUri() {
 
 export async function getMongoClient() {
   if (!clientPromise) {
-    clientPromise = new MongoClient(getMongoUri()).connect();
+    clientPromise = new MongoClient(getMongoUri(), {
+      serverApi: {
+        version: ServerApiVersion.v1,
+        strict: true,
+        deprecationErrors: true,
+      },
+    }).connect();
   }
 
   return clientPromise;
