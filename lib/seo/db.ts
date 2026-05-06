@@ -21,13 +21,19 @@ function getMongoUri() {
 
 export async function getMongoClient() {
   if (!clientPromise) {
-    clientPromise = new MongoClient(getMongoUri(), {
+    const client = new MongoClient(getMongoUri(), {
       serverApi: {
         version: ServerApiVersion.v1,
         strict: true,
         deprecationErrors: true,
       },
-    }).connect();
+    });
+
+    clientPromise = client.connect().catch((error) => {
+      clientPromise = null;
+      dbInstance = null;
+      throw error;
+    });
   }
 
   return clientPromise;
@@ -40,6 +46,12 @@ export async function getSeoDb() {
   }
 
   return dbInstance;
+}
+
+export async function pingSeoDb() {
+  const client = await getMongoClient();
+  await client.db(process.env.MONGODB_DB || "seo_intelligence").command({ ping: 1 });
+  return true;
 }
 
 export async function getSeoCollections(): Promise<{
