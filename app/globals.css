@@ -79,6 +79,9 @@ select {
 
 .hero p,
 .section-heading p,
+.analysis-card p,
+.analysis-card dd,
+.analysis-card footer,
 .insight-card p,
 .insight-card dd,
 .status-card span,
@@ -342,7 +345,7 @@ select {
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.8fr);
+  grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.85fr);
   gap: 18px;
   align-items: start;
 }
@@ -386,14 +389,42 @@ select {
 }
 
 .form input,
-.form select {
+.form select,
+.competitive-form input,
+.competitive-form textarea {
   width: 100%;
-  min-height: 40px;
   border: 1px solid rgba(17, 18, 20, 0.16);
   border-radius: 8px;
-  padding: 0 10px;
   background: rgba(255, 255, 255, 0.86);
   color: var(--ink);
+}
+
+.form input,
+.form select,
+.competitive-form input {
+  min-height: 40px;
+  padding: 0 10px;
+}
+
+.competitive-form textarea {
+  min-height: 86px;
+  padding: 10px;
+  font: inherit;
+  resize: vertical;
+}
+
+.competitive-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.competitive-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 750;
+  color: rgba(17, 18, 20, 0.74);
 }
 
 .check {
@@ -560,6 +591,77 @@ select {
   display: grid;
   gap: 8px;
   padding: 14px;
+}
+
+.analysis-results {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.analysis-card {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow: 0 16px 36px rgba(31, 20, 10, 0.06);
+}
+
+.analysis-card dl {
+  margin: 0;
+}
+
+.analysis-card dt,
+.analysis-card h5 {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.analysis-card dd {
+  margin: 6px 0 0;
+  line-height: 1.5;
+}
+
+.analysis-card ul {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.analysis-lists,
+.recommendations {
+  display: grid;
+  gap: 12px;
+}
+
+.recommendation {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.analysis-card footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 0.78rem;
+}
+
+.empty-state {
+  border: 1px dashed rgba(17, 18, 20, 0.18);
+  border-radius: 8px;
+  padding: 14px;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .insights {

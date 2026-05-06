@@ -1,5 +1,12 @@
 import { MongoClient, type Collection, type Db } from "mongodb";
-import type { SeoAuditEvent, SeoClient, SeoInsight, SeoIntegration, SeoMetricSnapshot } from "./types";
+import type {
+  SeoAuditEvent,
+  SeoClient,
+  SeoCompetitiveAnalysis,
+  SeoInsight,
+  SeoIntegration,
+  SeoMetricSnapshot,
+} from "./types";
 
 let clientPromise: Promise<MongoClient> | null = null;
 let dbInstance: Db | null = null;
@@ -33,6 +40,7 @@ export async function getSeoCollections(): Promise<{
   integrations: Collection<SeoIntegration>;
   insights: Collection<SeoInsight>;
   metricSnapshots: Collection<SeoMetricSnapshot>;
+  competitiveAnalyses: Collection<SeoCompetitiveAnalysis>;
   clients: Collection<SeoClient>;
   auditEvents: Collection<SeoAuditEvent>;
 }> {
@@ -41,13 +49,14 @@ export async function getSeoCollections(): Promise<{
     integrations: db.collection<SeoIntegration>("seo_integrations"),
     insights: db.collection<SeoInsight>("seo_insights"),
     metricSnapshots: db.collection<SeoMetricSnapshot>("seo_metric_snapshots"),
+    competitiveAnalyses: db.collection<SeoCompetitiveAnalysis>("seo_competitive_analyses"),
     clients: db.collection<SeoClient>("seo_clients"),
     auditEvents: db.collection<SeoAuditEvent>("seo_audit_events"),
   };
 }
 
 export async function ensureSeoIndexes() {
-  const { clients, integrations, insights, metricSnapshots, auditEvents } = await getSeoCollections();
+  const { clients, integrations, insights, metricSnapshots, competitiveAnalyses, auditEvents } = await getSeoCollections();
 
   await Promise.all([
     clients.createIndex({ id: 1 }, { unique: true, name: "seo_clients_id_unique" }),
@@ -63,6 +72,10 @@ export async function ensureSeoIndexes() {
     metricSnapshots.createIndex(
       { user_id: 1, metric_name: 1, captured_at: -1 },
       { name: "seo_metric_snapshots_client_metric_captured" }
+    ),
+    competitiveAnalyses.createIndex(
+      { user_id: 1, created_at: -1 },
+      { name: "seo_competitive_analyses_client_created" }
     ),
     auditEvents.createIndex({ user_id: 1, created_at: -1 }, { name: "seo_audit_events_client_created" }),
     auditEvents.createIndex({ action: 1, created_at: -1 }, { name: "seo_audit_events_action_created" }),

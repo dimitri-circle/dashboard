@@ -68,6 +68,33 @@ export type SeoMetricSnapshot = {
   created_at: string;
 };
 
+export type SeoCompetitiveAnalysis = {
+  _id?: ObjectId;
+  id: string;
+  user_id: string;
+  client_name: string;
+  website_url: string | null;
+  industry: string;
+  market: string | null;
+  target_audience: string | null;
+  competitors: Array<{ name: string; url: string | null }>;
+  target_keywords: string[];
+  summary: string;
+  positioning: string;
+  competitor_themes: string[];
+  content_gaps: string[];
+  keyword_opportunities: string[];
+  recommendations: Array<{
+    title: string;
+    rationale: string;
+    priority: SeoPriority;
+  }>;
+  assumptions: string[];
+  confidence_score: number;
+  source_payload_json: Record<string, unknown>;
+  created_at: string;
+};
+
 export type SeoAuditEvent = {
   _id?: ObjectId;
   id: string;

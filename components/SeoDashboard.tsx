@@ -39,6 +39,26 @@ type Insight = {
   created_at: string;
 };
 
+type CompetitiveAnalysis = {
+  id: string;
+  client_name: string;
+  website_url: string | null;
+  industry: string;
+  market: string | null;
+  target_audience: string | null;
+  competitors: Array<{ name: string; url: string | null }>;
+  target_keywords: string[];
+  summary: string;
+  positioning: string;
+  competitor_themes: string[];
+  content_gaps: string[];
+  keyword_opportunities: string[];
+  recommendations: Array<{ title: string; rationale: string; priority: "low" | "medium" | "high" }>;
+  assumptions: string[];
+  confidence_score: number;
+  created_at: string;
+};
+
 const providerLabels: Record<Provider, string> = {
   ga4: "GA4",
   gtm: "GTM",
@@ -46,15 +66,6 @@ const providerLabels: Record<Provider, string> = {
   openai: "OpenAI",
   mcp: "MCP",
 };
-
-const metricPlaceholders = [
-  ["Organic sessions", "No GA4 sync"],
-  ["Impressions", "No GSC connector"],
-  ["CTR", "No search data"],
-  ["Conversions", "No key events"],
-  ["Behavior events", "No Hotjar sync"],
-  ["Connector status", "Waiting for tests"],
-];
 
 const DEFAULT_CLIENT_ID = "demo-client";
 const CLIENT_STORAGE_KEY = "seo-intelligence-client-id";
@@ -72,7 +83,7 @@ const tourSteps: Step[] = [
     target: "[data-tour='client-sidebar']",
     title: "Choose the right client",
     content:
-      "The sidebar is the tenant boundary. Pick a workspace before adding keys so each client keeps separate integrations, metrics, and insights.",
+      "The sidebar is the tenant boundary. Pick a workspace before adding keys so each client keeps separate integrations, analyses, and insights.",
     placement: "right",
   },
   {
@@ -84,9 +95,9 @@ const tourSteps: Step[] = [
   },
   {
     target: "[data-tour='integration-hub']",
-    title: "Connect only what you need",
+    title: "Connect the essentials",
     content:
-      "This hub stores connector metadata and encrypted secrets. Start with OpenAI plus one analytics source, then expand.",
+      "Start with OpenAI and one analytics source. Connector metadata is saved here and secrets are encrypted on the server.",
     placement: "top",
   },
   {
@@ -98,7 +109,7 @@ const tourSteps: Step[] = [
   },
   {
     target: "[data-tour='ga4-property']",
-    title: "Add GA4 metadata",
+    title: "Add analytics context",
     content:
       "Save the GA4 property id here. When Google OAuth is added, this same provider card will support real runReport sync.",
     placement: "top",
@@ -111,24 +122,17 @@ const tourSteps: Step[] = [
     placement: "top",
   },
   {
-    target: "[data-tour='mcp-card']",
-    title: "Use remote MCP safely",
+    target: "[data-tour='competitive-analysis']",
+    title: "Run competitive analysis",
     content:
-      "MCP connectors are remote HTTP configurations only. The app never starts local processes or executes untrusted tools.",
-    placement: "top",
-  },
-  {
-    target: "[data-tour='metrics-overview']",
-    title: "Confirm data coverage",
-    content:
-      "Metrics stay honest. Until sync jobs pull real data, these cards show setup gaps instead of fake analytics.",
+      "Enter the client, industry, known competitors, and target topics. The analysis uses your stored OpenAI key and avoids live claims it cannot verify.",
     placement: "left",
   },
   {
-    target: "[data-tour='generate-insights']",
-    title: "Generate the client report",
+    target: "[data-tour='generate-competitive-analysis']",
+    title: "Create the market read",
     content:
-      "After OpenAI is connected, this button creates insight cards from the active client’s connector status and metric snapshots.",
+      "This button generates a structured competitive brief with content gaps, keyword opportunities, recommendations, and assumptions.",
     placement: "left",
   },
   {
@@ -198,9 +202,11 @@ export function SeoDashboard() {
   const [clients, setClients] = useState<Client[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [insights, setInsights] = useState<Insight[]>([]);
+  const [competitiveAnalyses, setCompetitiveAnalyses] = useState<CompetitiveAnalysis[]>([]);
   const [notice, setNotice] = useState<{ type: "info" | "success" | "error"; message: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [tourRunning, setTourRunning] = useState(false);
 
   const activeClient = clients.find((client) => client.id === clientId);
@@ -220,14 +226,16 @@ export function SeoDashboard() {
 
   async function loadDashboard(activeClientId = clientId) {
     try {
-      const [clientBody, integrationBody, insightBody] = await Promise.all([
+      const [clientBody, integrationBody, insightBody, competitiveBody] = await Promise.all([
         api<{ clients: Client[] }>(activeClientId, "/api/seo/clients"),
         api<{ integrations: Integration[] }>(activeClientId, "/api/seo/integrations"),
         api<{ insights: Insight[] }>(activeClientId, "/api/seo/insights"),
+        api<{ analyses: CompetitiveAnalysis[] }>(activeClientId, "/api/seo/competitive-analysis"),
       ]);
       setClients(clientBody.clients);
       setIntegrations(integrationBody.integrations);
       setInsights(insightBody.insights);
+      setCompetitiveAnalyses(competitiveBody.analyses);
       if (!integrationBody.integrations.some((item) => item.provider === "openai")) {
         setNotice({ type: "info", message: "Connect a ChatGPT/OpenAI token to unlock AI-generated insights." });
       }
@@ -261,6 +269,7 @@ export function SeoDashboard() {
     setClientId(nextClientId);
     setIntegrations([]);
     setInsights([]);
+    setCompetitiveAnalyses([]);
     setNotice({ type: "info", message: `Viewing client workspace: ${nextClientId}` });
     loadDashboard(nextClientId);
   }
@@ -346,6 +355,39 @@ export function SeoDashboard() {
     }
   }
 
+  async function generateCompetitiveAnalysis(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const payload = {
+      clientName: String(formData.get("clientName") || "").trim(),
+      websiteUrl: String(formData.get("websiteUrl") || "").trim(),
+      industry: String(formData.get("industry") || "").trim(),
+      market: String(formData.get("market") || "").trim(),
+      targetAudience: String(formData.get("targetAudience") || "").trim(),
+      competitors: String(formData.get("competitors") || "").trim(),
+      targetKeywords: String(formData.get("targetKeywords") || "").trim(),
+      notes: String(formData.get("notes") || "").trim(),
+    };
+
+    try {
+      setAnalyzing(true);
+      const body = await api<{ analysis: CompetitiveAnalysis }>(clientId, "/api/seo/competitive-analysis", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setCompetitiveAnalyses((current) => [body.analysis, ...current]);
+      setNotice({ type: "success", message: "Competitive analysis generated." });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        message: error instanceof Error ? error.message : "Unable to generate competitive analysis.",
+      });
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
   function handleTourCallback(data: EventData) {
     if (data.status === STATUS.FINISHED || data.status === STATUS.SKIPPED) {
       setTourRunning(false);
@@ -421,7 +463,9 @@ export function SeoDashboard() {
           <div>
             <p className="eyebrow">MVP Dashboard</p>
             <h2 id="dashboard-title">SEO Intelligence</h2>
-            <p className="active-client">Active client: {activeClient?.name || clientId}</p>
+            <p className="active-client">
+              {activeClient?.name || clientId} keeps its own integrations, encrypted keys, analyses, and insights.
+            </p>
           </div>
           <div className="dashboard-tools">
             <button className="button" type="button" onClick={() => setTourRunning(true)}>
@@ -460,8 +504,8 @@ export function SeoDashboard() {
         <div className="dashboard-grid">
           <section className="panel" data-tour="integration-hub" aria-labelledby="integrations-title">
             <div className="section-heading">
-              <h3 id="integrations-title">Integrations Hub</h3>
-              <p>Secrets are encrypted server-side and never returned to this browser.</p>
+              <h3 id="integrations-title">Connect Tools</h3>
+              <p>Save only the setup data needed for this client. Secrets are encrypted and never returned.</p>
             </div>
 
             <div className="integration-grid" aria-busy={loading}>
@@ -522,20 +566,53 @@ export function SeoDashboard() {
             </div>
           </section>
 
-          <aside className="panel" data-tour="metrics-overview" aria-labelledby="metrics-title">
+          <section className="panel" data-tour="competitive-analysis" aria-labelledby="competitive-title">
             <div className="section-heading">
-              <h3 id="metrics-title">Metrics Overview</h3>
-              <p>Live values appear after connector syncs are configured.</p>
+              <h3 id="competitive-title">Competitive Analysis</h3>
+              <p>Use OpenAI to turn known client, industry, competitor, and keyword context into a focused brief.</p>
             </div>
-            <div className="metrics">
-              {metricPlaceholders.map(([label, value]) => (
-                <article className="metric" key={label}>
-                  <span>{label}</span>
-                  <strong>{value}</strong>
-                </article>
-              ))}
+
+            <form className="competitive-form" onSubmit={generateCompetitiveAnalysis}>
+              <Field name="clientName" label="Client name" placeholder={activeClient?.name || "Acme Health"} required />
+              <Field name="websiteUrl" label="Website URL" placeholder="https://example.com" type="url" />
+              <Field name="industry" label="Industry" placeholder="Healthcare SaaS" required />
+              <Field name="market" label="Market" placeholder="US mid-market" />
+              <label>
+                Target audience
+                <textarea name="targetAudience" placeholder="Who the client needs to win with" rows={3} />
+              </label>
+              <label>
+                Known competitors
+                <textarea name="competitors" placeholder="One per line, optional URL after the name" rows={4} />
+              </label>
+              <label>
+                Target keywords
+                <textarea name="targetKeywords" placeholder="One keyword or topic per line" rows={4} />
+              </label>
+              <label>
+                Notes
+                <textarea name="notes" placeholder="Positioning, offers, constraints, or market context" rows={4} />
+              </label>
+              <button
+                className="button button-primary"
+                data-tour="generate-competitive-analysis"
+                type="submit"
+                disabled={analyzing}
+              >
+                {analyzing ? "Analyzing..." : "Generate Competitive Analysis"}
+              </button>
+            </form>
+
+            <div className="analysis-results" aria-live="polite">
+              {competitiveAnalyses.length ? (
+                competitiveAnalyses.map((analysis) => <CompetitiveAnalysisCard analysis={analysis} key={analysis.id} />)
+              ) : (
+                <div className="empty-state">
+                  Add the client name and industry, then generate a market read after OpenAI is connected.
+                </div>
+              )}
             </div>
-          </aside>
+          </section>
         </div>
 
         <section className="panel" data-tour="insight-feed" aria-labelledby="insights-title">
@@ -581,6 +658,76 @@ export function SeoDashboard() {
         </section>
       </div>
     </section>
+  );
+}
+
+function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }) {
+  return (
+    <article className="analysis-card">
+      <div className="card-top">
+        <div>
+          <h4>{analysis.client_name}</h4>
+          <p>
+            {analysis.industry}
+            {analysis.market ? ` - ${analysis.market}` : ""}
+          </p>
+        </div>
+        <span>{analysis.confidence_score}% confidence</span>
+      </div>
+
+      <p>{analysis.summary}</p>
+      <dl>
+        <div>
+          <dt>Positioning</dt>
+          <dd>{analysis.positioning}</dd>
+        </div>
+      </dl>
+
+      <div className="analysis-lists">
+        <TextList title="Competitor themes" items={analysis.competitor_themes} />
+        <TextList title="Content gaps" items={analysis.content_gaps} />
+        <TextList title="Keyword opportunities" items={analysis.keyword_opportunities} />
+        <TextList title="Assumptions" items={analysis.assumptions} />
+      </div>
+
+      <div className="recommendations">
+        <h5>Recommended next actions</h5>
+        {analysis.recommendations.map((recommendation) => (
+          <div className="recommendation" key={`${analysis.id}-${recommendation.title}`}>
+            <div className="card-top">
+              <strong>{recommendation.title}</strong>
+              <span className="priority" data-priority={recommendation.priority}>
+                {recommendation.priority}
+              </span>
+            </div>
+            <p>{recommendation.rationale}</p>
+          </div>
+        ))}
+      </div>
+
+      <footer>
+        <span>{analysis.competitors.length} competitors supplied</span>
+        <span>{analysis.target_keywords.length} keywords supplied</span>
+        <time dateTime={analysis.created_at}>{new Date(analysis.created_at).toLocaleString()}</time>
+      </footer>
+    </article>
+  );
+}
+
+function TextList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div>
+      <h5>{title}</h5>
+      {items.length ? (
+        <ul>
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p>No items returned.</p>
+      )}
+    </div>
   );
 }
 

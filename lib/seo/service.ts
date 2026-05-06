@@ -3,6 +3,7 @@ import { decryptSecret, encryptSecret } from "./crypto";
 import { ensureSeoIndexes, getSeoCollections } from "./db";
 import type {
   SeoClient,
+  SeoCompetitiveAnalysis,
   SafeSeoIntegration,
   SeoInsight,
   SeoIntegration,
@@ -28,6 +29,17 @@ type SecretMap = Record<string, string>;
 type ClientPayload = {
   id?: string;
   name?: string;
+  notes?: string;
+};
+
+type CompetitiveAnalysisPayload = {
+  clientName?: string;
+  websiteUrl?: string;
+  industry?: string;
+  market?: string;
+  targetAudience?: string;
+  competitors?: string;
+  targetKeywords?: string;
   notes?: string;
 };
 
@@ -177,6 +189,17 @@ async function fetchJson(url: string, options: RequestInit = {}) {
 function parseSecretMap(integration: SeoIntegration): SecretMap {
   const raw = decryptSecret(integration.encrypted_secret);
   return raw ? (JSON.parse(raw) as SecretMap) : {};
+}
+
+function getOpenAiApiKey(integration: SeoIntegration) {
+  const secrets = parseSecretMap(integration);
+  const apiKey = secrets.apiKey || secrets.token;
+
+  if (!apiKey) {
+    throw new Error("Stored OpenAI token is unavailable.");
+  }
+
+  return apiKey;
 }
 
 async function recordAuditEvent({ scope, action, entityType, entityId = null, metadata = {} }: AuditPayload) {
@@ -483,6 +506,154 @@ export function buildInsightPrompt(payload: Record<string, unknown>) {
   ];
 }
 
+function parseLines(rawValue: unknown) {
+  return asString(rawValue)
+    .split(/\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+function parseCompetitors(rawValue: unknown) {
+  return parseLines(rawValue).map((item) => {
+    const match = item.match(/^(.*?)\s+(https?:\/\/\S+)$/i);
+    if (match) {
+      return { name: match[1].trim(), url: match[2].trim() };
+    }
+
+    if (/^https?:\/\//i.test(item)) {
+      return { name: item.replace(/^https?:\/\//i, "").replace(/\/$/, ""), url: item };
+    }
+
+    return { name: item, url: null };
+  });
+}
+
+function validateCompetitiveAnalysisPayload(payload: CompetitiveAnalysisPayload) {
+  const clientName = asString(payload.clientName).slice(0, 140);
+  const industry = asString(payload.industry).slice(0, 140);
+  const websiteUrl = asString(payload.websiteUrl);
+  const market = asString(payload.market).slice(0, 140);
+  const targetAudience = asString(payload.targetAudience).slice(0, 240);
+  const competitors = parseCompetitors(payload.competitors);
+  const targetKeywords = parseLines(payload.targetKeywords);
+  const notes = asString(payload.notes).slice(0, 1000);
+
+  if (!clientName) {
+    throw new Error("Client name is required for competitive analysis.");
+  }
+
+  if (!industry) {
+    throw new Error("Industry is required for competitive analysis.");
+  }
+
+  if (websiteUrl) {
+    validateHttpUrl(websiteUrl, "websiteUrl");
+  }
+
+  return {
+    clientName,
+    industry,
+    websiteUrl: websiteUrl || null,
+    market: market || null,
+    targetAudience: targetAudience || null,
+    competitors,
+    targetKeywords,
+    notes,
+  };
+}
+
+function buildCompetitiveAnalysisPrompt(payload: Record<string, unknown>) {
+  return [
+    {
+      role: "system",
+      content:
+        "You are a competitive SEO and positioning analyst. Return only valid JSON. Do not claim live rankings, current SERP positions, traffic estimates, or facts not present in the provided data.",
+    },
+    {
+      role: "user",
+      content: `Given this client and market data:\n${JSON.stringify(payload)}\n\nGenerate one competitive analysis JSON object with this exact shape:\n{\n  "summary": "Concise competitive landscape summary",\n  "positioning": "How the client should be positioned against alternatives",\n  "competitor_themes": ["Theme observed or inferred from provided competitor names/data"],\n  "content_gaps": ["Content gap or missing asset"],\n  "keyword_opportunities": ["Keyword or topic cluster opportunity"],\n  "recommendations": [\n    {\n      "title": "Specific action",\n      "rationale": "Why this matters",\n      "priority": "low | medium | high"\n    }\n  ],\n  "assumptions": ["Assumption or missing-data caveat"],\n  "confidence_score": 0-100\n}\n\nRules:\n- Use only provided data and stored connector status.\n- Do not invent live competitor rankings or market share.\n- If evidence is weak, add caveats to assumptions and lower confidence.\n- Prefer specific SEO, content, and positioning actions.\n- Return valid JSON only.`,
+    },
+  ];
+}
+
+function normalizeStringArray(value: unknown, fieldName: string, maxItems = 8) {
+  if (!Array.isArray(value)) {
+    throw new Error(`Competitive analysis field ${fieldName} must be an array.`);
+  }
+
+  return value
+    .map((item) => asString(item).slice(0, 320))
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
+function normalizeRecommendations(value: unknown) {
+  if (!Array.isArray(value)) {
+    throw new Error("Competitive analysis recommendations must be an array.");
+  }
+
+  const recommendations = value.slice(0, 8).map((item, index) => {
+    const row = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+    const title = asString(row.title);
+    const rationale = asString(row.rationale);
+    const priority = parsePriority(row.priority);
+
+    if (!title || !rationale || !priority) {
+      throw new Error(`Competitive recommendation at index ${index} is missing required fields.`);
+    }
+
+    return {
+      title: title.slice(0, 180),
+      rationale: rationale.slice(0, 600),
+      priority,
+    };
+  });
+
+  if (!recommendations.length) {
+    throw new Error("Competitive analysis must include at least one recommendation.");
+  }
+
+  return recommendations;
+}
+
+export function normalizeCompetitiveAnalysis(
+  rawAnalysis: unknown,
+  payload: ReturnType<typeof validateCompetitiveAnalysisPayload>,
+  scope: SeoTenantScope
+): SeoCompetitiveAnalysis {
+  const row = rawAnalysis && typeof rawAnalysis === "object" ? (rawAnalysis as Record<string, unknown>) : {};
+  const summary = asString(row.summary);
+  const positioning = asString(row.positioning);
+  const confidenceScore = parseConfidenceScore(row.confidence_score);
+
+  if (!summary || !positioning || confidenceScore === null) {
+    throw new Error("Competitive analysis is missing summary, positioning, or confidence_score.");
+  }
+
+  return {
+    id: randomUUID(),
+    user_id: scope.userId,
+    client_name: payload.clientName,
+    website_url: payload.websiteUrl,
+    industry: payload.industry,
+    market: payload.market,
+    target_audience: payload.targetAudience,
+    competitors: payload.competitors,
+    target_keywords: payload.targetKeywords,
+    summary: summary.slice(0, 1400),
+    positioning: positioning.slice(0, 1400),
+    competitor_themes: normalizeStringArray(row.competitor_themes, "competitor_themes"),
+    content_gaps: normalizeStringArray(row.content_gaps, "content_gaps"),
+    keyword_opportunities: normalizeStringArray(row.keyword_opportunities, "keyword_opportunities"),
+    recommendations: normalizeRecommendations(row.recommendations),
+    assumptions: normalizeStringArray(row.assumptions, "assumptions", 10),
+    confidence_score: confidenceScore,
+    source_payload_json: payload,
+    created_at: nowIso(),
+  };
+}
+
 function parsePriority(value: unknown): SeoPriority | null {
   return value === "low" || value === "medium" || value === "high" ? value : null;
 }
@@ -548,6 +719,12 @@ export async function listMetricSnapshots(scope: SeoTenantScope) {
   return rows.map(({ _id: _mongoId, ...row }) => row);
 }
 
+export async function listCompetitiveAnalyses(scope: SeoTenantScope) {
+  const { competitiveAnalyses } = await getSeoCollections();
+  const rows = await competitiveAnalyses.find({ user_id: scope.userId }).sort({ created_at: -1 }).limit(25).toArray();
+  return rows.map(({ _id: _mongoId, ...row }) => row);
+}
+
 export async function generateInsights(scope: SeoTenantScope) {
   const { integrations, insights, metricSnapshots } = await getSeoCollections();
   const openAi = await integrations.findOne({ user_id: scope.userId, provider: "openai", encrypted_secret: { $ne: null } });
@@ -556,12 +733,7 @@ export async function generateInsights(scope: SeoTenantScope) {
     throw new Error("Connect a ChatGPT/OpenAI token before generating AI insights.");
   }
 
-  const secrets = parseSecretMap(openAi);
-  const apiKey = secrets.apiKey || secrets.token;
-
-  if (!apiKey) {
-    throw new Error("Stored OpenAI token is unavailable.");
-  }
+  const apiKey = getOpenAiApiKey(openAi);
 
   const [integrationRows, metricRows] = await Promise.all([
     integrations.find({ user_id: scope.userId }).sort({ created_at: 1 }).toArray(),
@@ -626,6 +798,69 @@ export async function generateInsights(scope: SeoTenantScope) {
   }
 
   return generated;
+}
+
+export async function generateCompetitiveAnalysis(scope: SeoTenantScope, rawPayload: CompetitiveAnalysisPayload) {
+  const { integrations, competitiveAnalyses } = await getSeoCollections();
+  const openAi = await integrations.findOne({ user_id: scope.userId, provider: "openai", encrypted_secret: { $ne: null } });
+
+  if (!openAi) {
+    throw new Error("Connect a ChatGPT/OpenAI token before generating competitive analysis.");
+  }
+
+  const payload = validateCompetitiveAnalysisPayload(rawPayload);
+  const integrationRows = await integrations.find({ user_id: scope.userId }).sort({ created_at: 1 }).toArray();
+  const analysisInput = {
+    ...payload,
+    connectorStatus: integrationRows.map((item) => ({
+      provider: item.provider,
+      status: item.status,
+      config: item.config_json,
+      last_error: item.last_error,
+    })),
+  };
+
+  const result = await fetchJson("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${getOpenAiApiKey(openAi)}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_SEO_MODEL || "gpt-4o-mini",
+      temperature: 0.25,
+      messages: buildCompetitiveAnalysisPrompt(analysisInput),
+    }),
+  });
+
+  if (!result.ok) {
+    throw new Error(`OpenAI competitive analysis failed with HTTP ${result.status}.`);
+  }
+
+  const body = result.body as { choices?: Array<{ message?: { content?: string } }> };
+  const content = body.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error("OpenAI returned an empty competitive analysis response.");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new Error("OpenAI returned non-JSON competitive analysis content.");
+  }
+
+  const analysis = normalizeCompetitiveAnalysis(parsed, payload, scope);
+  await competitiveAnalyses.insertOne(analysis);
+  await recordAuditEvent({
+    scope,
+    action: "competitive_analysis.generated",
+    entityType: "insight",
+    entityId: analysis.id,
+    metadata: { industry: analysis.industry, competitor_count: analysis.competitors.length },
+  });
+
+  return analysis;
 }
 
 export async function syncGa4Metrics(_scope: SeoTenantScope): Promise<SeoMetricSnapshot[]> {

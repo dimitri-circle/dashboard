@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decryptSecret, encryptSecret } from "../lib/seo/crypto";
 import { rateLimit, resetRateLimitsForTests } from "../lib/seo/rate-limit";
-import { normalizeInsights, safeIntegration, validateHttpUrl } from "../lib/seo/service";
+import { normalizeCompetitiveAnalysis, normalizeInsights, safeIntegration, validateHttpUrl } from "../lib/seo/service";
 import { normalizeClientId } from "../lib/seo/tenant";
 
 process.env.SEO_SECRET_ENCRYPTION_KEY =
@@ -58,6 +58,43 @@ test("insight normalization validates JSON array shape", () => {
 
   assert.equal(insight.priority, "high");
   assert.equal(insight.confidence_score, 92);
+});
+
+test("competitive analysis normalization validates required JSON shape", () => {
+  const payload = {
+    clientName: "Acme Health",
+    websiteUrl: "https://example.com",
+    industry: "Healthcare SaaS",
+    market: "US",
+    targetAudience: "Clinic operators",
+    competitors: [{ name: "OtherCo", url: null }],
+    targetKeywords: ["patient engagement software"],
+    notes: "",
+  };
+
+  assert.throws(
+    () => normalizeCompetitiveAnalysis({ summary: "Missing fields" }, payload, { userId: "acme-health" }),
+    /missing summary/
+  );
+
+  const analysis = normalizeCompetitiveAnalysis(
+    {
+      summary: "Competitors appear to cluster around operational efficiency.",
+      positioning: "Lead with measurable workflow gains and implementation clarity.",
+      competitor_themes: ["Workflow automation"],
+      content_gaps: ["Comparison pages"],
+      keyword_opportunities: ["patient engagement platform"],
+      recommendations: [{ title: "Publish a comparison hub", rationale: "It gives buyers an evaluation path.", priority: "high" }],
+      assumptions: ["No live ranking data was provided."],
+      confidence_score: 71,
+    },
+    payload,
+    { userId: "acme-health" }
+  );
+
+  assert.equal(analysis.user_id, "acme-health");
+  assert.equal(analysis.recommendations[0].priority, "high");
+  assert.equal(analysis.confidence_score, 71);
 });
 
 test("MCP connector rejects non-http URLs", () => {

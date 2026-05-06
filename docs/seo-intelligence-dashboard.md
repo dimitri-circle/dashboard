@@ -2,7 +2,7 @@
 
 ## Overview
 
-This repository is now a Vercel-ready Next.js App Router application backed by MongoDB. The app exposes `/api/seo/*` route handlers for integration metadata, encrypted secrets, connector tests, metric snapshots, and AI-generated insights.
+This repository is now a Vercel-ready Next.js App Router application backed by MongoDB. The app exposes `/api/seo/*` route handlers for integration metadata, encrypted secrets, connector tests, metric snapshots, AI-generated insights, and competitive analysis briefs.
 
 ## Setup
 
@@ -72,6 +72,23 @@ For temporary controlled deployments, set `SEO_ALLOWED_CLIENT_IDS` to a comma-se
 
 The dashboard includes a built-in product tour powered by React Joyride. It highlights the client sidebar, add-client form, generate button, connection status row, key integration fields, and insight feed. The implementation uses configured steps and a dark overlay so users can learn the workflow in place.
 
+## Competitive Analysis
+
+The dashboard includes a simple competitive analysis form. A user supplies:
+
+- client name
+- website URL
+- industry
+- market
+- target audience
+- known competitors
+- target keywords
+- optional notes
+
+The backend uses the active client workspace's encrypted OpenAI token to generate a structured competitive brief. Results are stored in `seo_competitive_analyses` and scoped to the same client id as integrations and insights.
+
+The prompt is intentionally conservative. It can reason from the client-provided industry, competitors, keywords, notes, and connector status, but it must not claim live rankings, traffic estimates, market share, or current SERP positions unless those facts are present in connected data.
+
 ## Supported Integrations
 
 - GA4: stores `propertyId` and auth metadata. Live Data API sync is stubbed until Google OAuth credentials are configured.
@@ -87,6 +104,7 @@ The dashboard includes a built-in product tour powered by React Joyride. It high
 - Secrets are not logged by the server or rendered back into the frontend.
 - Expensive/mutating API routes have lightweight per-process rate limits.
 - Integration saves, tests, deletes, client creation, and insight generation write audit events to `seo_audit_events`.
+- Competitive analysis generation writes an audit event and stores the prompt input context, but never stores or returns the raw OpenAI token.
 - MCP support is remote HTTP configuration only. The app does not execute local shell commands, spawn MCP servers, or support stdio MCP.
 
 ## Scheduled Jobs
@@ -105,6 +123,7 @@ The current job bootstraps storage and returns a clear message because GA4/GTM O
 - GA4/GTM OAuth flows are not implemented.
 - Hotjar official API support depends on future project credentials or connector availability.
 - Insight quality depends on connected data. The prompt tells the model not to invent missing analytics.
+- Competitive analysis is not a live web research crawler in the MVP. It works from user-provided market context and stored connector status.
 
 ## Future Roadmap
 
@@ -115,4 +134,5 @@ The current job bootstraps storage and returns a clear message because GA4/GTM O
 - Keyword-level opportunity scoring
 - Core Web Vitals import
 - SERP tracking
+- Live competitor crawling with reviewed source attribution
 - Automated task creation
