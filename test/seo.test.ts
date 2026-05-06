@@ -1,0 +1,79 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { decryptSecret, encryptSecret } from "../lib/seo/crypto";
+import { rateLimit, resetRateLimitsForTests } from "../lib/seo/rate-limit";
+import { normalizeInsights, safeIntegration, validateHttpUrl } from "../lib/seo/service";
+import { normalizeClientId } from "../lib/seo/tenant";
+
+process.env.SEO_SECRET_ENCRYPTION_KEY =
+  process.env.SEO_SECRET_ENCRYPTION_KEY || "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+test("encryption utility does not return plaintext", () => {
+  const encrypted = encryptSecret("sk-secret-token");
+
+  assert.notEqual(JSON.stringify(encrypted), "sk-secret-token");
+  assert.equal(decryptSecret(encrypted), "sk-secret-token");
+});
+
+test("safe integration strips encrypted secrets", () => {
+  const safe = safeIntegration({
+    id: "int_1",
+    user_id: "local-user",
+    provider: "openai",
+    display_name: "OpenAI",
+    status: "disconnected",
+    config_json: {},
+    encrypted_secret: {
+      v: 1,
+      alg: "aes-256-gcm",
+      iv: "hidden",
+      tag: "hidden",
+      ciphertext: "hidden",
+    },
+    last_tested_at: null,
+    last_error: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+
+  assert.equal(safe.has_secret, true);
+  assert.equal(Object.hasOwn(safe, "encrypted_secret"), false);
+});
+
+test("insight normalization validates JSON array shape", () => {
+  assert.throws(() => normalizeInsights({ title: "not an array" }), /JSON array/);
+  assert.throws(() => normalizeInsights([{ title: "Missing required fields" }]), /missing required fields/);
+
+  const [insight] = normalizeInsights([
+    {
+      title: "Missing GA4",
+      description: "GA4 is not connected.",
+      impact: "Traffic data is unavailable.",
+      recommendation: "Connect GA4.",
+      priority: "high",
+      confidence_score: 92,
+      source_provider: "ga4",
+    },
+  ]);
+
+  assert.equal(insight.priority, "high");
+  assert.equal(insight.confidence_score, 92);
+});
+
+test("MCP connector rejects non-http URLs", () => {
+  assert.throws(() => validateHttpUrl("stdio://local-tool"), /http or https/);
+  assert.equal(validateHttpUrl("https://mcp.example.com").protocol, "https:");
+});
+
+test("tenant client ids are validated", () => {
+  assert.equal(normalizeClientId("acme-client_1"), "acme-client_1");
+  assert.equal(normalizeClientId(""), "demo-client");
+  assert.throws(() => normalizeClientId("../other-client"), /Client id/);
+});
+
+test("rate limiter blocks after configured limit", () => {
+  resetRateLimitsForTests();
+  rateLimit("test-key", 2, 60_000);
+  rateLimit("test-key", 2, 60_000);
+  assert.throws(() => rateLimit("test-key", 2, 60_000), /Rate limit exceeded/);
+});

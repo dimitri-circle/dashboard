@@ -1,0 +1,29 @@
+{
+  "name": "main-page-animation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Next.js and MongoDB SEO Intelligence Dashboard MVP.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "mongodb": "^7.2.0",
+    "next": "^16.2.4",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "react-joyride": "^3.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}
