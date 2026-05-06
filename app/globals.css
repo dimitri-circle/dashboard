@@ -33,9 +33,9 @@ select {
 }
 
 .app-shell {
-  width: min(1480px, calc(100vw - 24px));
+  width: min(1560px, calc(100vw - 24px));
   margin: 0 auto;
-  padding: 34px 0 72px;
+  padding: 18px 0 48px;
 }
 
 .hero {
@@ -84,6 +84,12 @@ select {
 .analysis-card footer,
 .insight-card p,
 .insight-card dd,
+.sidebar-brand p,
+.nav-item span,
+.graph-card p,
+.client-card p,
+.client-card span,
+.active-client-panel span,
 .status-card span,
 .metric span {
   color: var(--muted);
@@ -121,12 +127,13 @@ select {
 
 .dashboard-shell {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
   gap: 18px;
   align-items: start;
-  margin-top: 24px;
+  margin-top: 0;
 }
 
+.app-sidebar,
 .client-sidebar {
   position: sticky;
   top: 16px;
@@ -137,6 +144,88 @@ select {
   padding: 16px;
   background: rgba(255, 255, 255, 0.72);
   box-shadow: 0 16px 36px rgba(31, 20, 10, 0.06);
+}
+
+.app-sidebar {
+  align-content: start;
+  min-height: calc(100vh - 36px);
+}
+
+.sidebar-brand,
+.side-nav,
+.sidebar-clients {
+  display: grid;
+  gap: 10px;
+}
+
+.sidebar-brand h1,
+.sidebar-brand p {
+  margin: 0;
+}
+
+.sidebar-brand h1 {
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.side-nav,
+.sidebar-clients {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.nav-item,
+.client-card {
+  width: 100%;
+  border: 1px solid rgba(17, 18, 20, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.64);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.nav-item {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.nav-item[data-active="true"],
+.client-card[data-active="true"] {
+  border-color: rgba(17, 18, 20, 0.42);
+  background: rgba(17, 18, 20, 0.92);
+  color: #ffffff;
+}
+
+.nav-item span,
+.client-card p,
+.client-card span {
+  color: currentColor;
+  font-size: 0.82rem;
+  opacity: 0.68;
+}
+
+.sidebar-section-title,
+.mini-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.text-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 850;
+  cursor: pointer;
 }
 
 .client-sidebar h2,
@@ -320,6 +409,8 @@ select {
 .status-card,
 .panel,
 .card,
+.graph-card,
+.client-card,
 .insight-card,
 .metric {
   border: 1px solid var(--line);
@@ -348,6 +439,96 @@ select {
   grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.85fr);
   gap: 18px;
   align-items: start;
+}
+
+.overview {
+  display: grid;
+  gap: 18px;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.graph-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  min-height: 164px;
+  padding: 16px;
+}
+
+.graph-card strong {
+  display: block;
+  margin-top: 8px;
+  font-size: clamp(2rem, 3vw, 3.2rem);
+  line-height: 0.9;
+}
+
+.graph-card p {
+  grid-column: 1 / -1;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.bar-chart {
+  display: flex;
+  align-items: end;
+  gap: 5px;
+  width: 54px;
+  height: 86px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(17, 18, 20, 0.06);
+}
+
+.bar-chart span {
+  width: 10px;
+  border-radius: 999px 999px 2px 2px;
+  background: #111214;
+}
+
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.mini-summary {
+  margin-top: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.client-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.client-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.client-card p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.active-client-panel {
+  display: grid;
+  gap: 4px;
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(17, 18, 20, 0.04);
 }
 
 .panel {
@@ -702,19 +883,78 @@ select {
   color: var(--muted);
 }
 
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-card {
+  display: grid;
+  gap: 18px;
+  width: min(440px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 24px 50px rgba(31, 20, 10, 0.08);
+}
+
+.login-card h1,
+.login-card p {
+  margin: 0;
+}
+
+.login-card h1 {
+  margin-top: 8px;
+  font-size: clamp(2.5rem, 8vw, 4rem);
+  line-height: 0.95;
+}
+
+.login-card p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.login-form {
+  display: grid;
+  gap: 12px;
+}
+
+.login-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 750;
+  color: rgba(17, 18, 20, 0.74);
+}
+
+.login-form input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(17, 18, 20, 0.16);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--ink);
+}
+
 @media (max-width: 880px) {
   .app-shell {
     padding-top: 22px;
     padding-bottom: 44px;
   }
 
-  .hero,
-  .dashboard-shell,
-  .dashboard-grid,
-  .status-row,
-  .integration-grid,
-  .two-col,
-  .insights {
+	  .hero,
+	  .dashboard-shell,
+	  .dashboard-grid,
+	  .overview-grid,
+	  .client-grid,
+	  .status-row,
+	  .integration-grid,
+	  .two-col,
+	  .insights {
     grid-template-columns: 1fr;
   }
 
@@ -757,12 +997,20 @@ select {
     width: 100%;
   }
 
-  .dashboard-tools,
-  .client-sidebar {
-    width: 100%;
-  }
+	  .dashboard-tools,
+	  .quick-actions,
+	  .app-sidebar,
+	  .client-sidebar {
+	    width: 100%;
+	  }
 
-  .client-sidebar {
-    position: static;
-  }
+	  .quick-actions {
+	    grid-template-columns: 1fr;
+	  }
+
+	  .app-sidebar,
+	  .client-sidebar {
+	    position: static;
+	    min-height: auto;
+	  }
 }

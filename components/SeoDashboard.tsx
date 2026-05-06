@@ -5,6 +5,7 @@ import { Joyride, STATUS, type EventData, type Step, type TooltipRenderProps } f
 
 type Provider = "ga4" | "gtm" | "hotjar" | "openai" | "mcp";
 type Status = "disconnected" | "connected" | "error";
+type View = "overview" | "clients" | "integrations" | "analysis" | "insights";
 
 type Client = {
   id: string;
@@ -67,80 +68,60 @@ const providerLabels: Record<Provider, string> = {
   mcp: "MCP",
 };
 
+const navItems: Array<{ id: View; label: string; description: string }> = [
+  { id: "overview", label: "Overview", description: "Health and report coverage" },
+  { id: "clients", label: "Clients", description: "Pick or add workspaces" },
+  { id: "integrations", label: "Tool Setup", description: "Connect keys and metadata" },
+  { id: "analysis", label: "Competitive", description: "Generate market briefs" },
+  { id: "insights", label: "Insights", description: "Review AI recommendations" },
+];
+
 const DEFAULT_CLIENT_ID = "demo-client";
 const CLIENT_STORAGE_KEY = "seo-intelligence-client-id";
 
 const tourSteps: Step[] = [
   {
-    target: "[data-tour='hero']",
-    title: "Start with the intelligence layer",
-    content:
-      "This page is built around one workflow: choose a client, connect trusted data, then generate a focused SEO intelligence report.",
+    target: "[data-tour='app-overview']",
+    title: "Start with the overview",
+    content: "The home view is now a compact operating dashboard with coverage, reports, and setup status.",
     placement: "bottom",
     skipBeacon: true,
   },
   {
-    target: "[data-tour='client-sidebar']",
-    title: "Choose the right client",
-    content:
-      "The sidebar is the tenant boundary. Pick a workspace before adding keys so each client keeps separate integrations, analyses, and insights.",
+    target: "[data-tour='side-nav']",
+    title: "Use the sidebar to move",
+    content: "Switch between overview, clients, tool setup, competitive analysis, and insights without losing context.",
     placement: "right",
   },
   {
-    target: "[data-tour='add-client-form']",
-    title: "Create a new workspace",
-    content:
-      "Use the short form to add a client. The client id becomes the stable scope sent to every SEO API request.",
+    target: "[data-tour='client-switcher']",
+    title: "Choose the active client",
+    content: "The selected client scopes integrations, encrypted keys, analyses, and reports.",
     placement: "right",
   },
   {
-    target: "[data-tour='integration-hub']",
-    title: "Connect the essentials",
-    content:
-      "Start with OpenAI and one analytics source. Connector metadata is saved here and secrets are encrypted on the server.",
+    target: "[data-tour='overview-graphs']",
+    title: "Scan readiness first",
+    content: "These chart cards show whether the workspace has enough setup to create useful reports.",
     placement: "top",
   },
   {
-    target: "[data-tour='status-row']",
-    title: "Watch connection health",
-    content:
-      "These cards show whether GA4, GTM, Hotjar, OpenAI, and MCP are disconnected, connected, or failing validation.",
-    placement: "bottom",
+    target: "[data-tour='nav-integrations']",
+    title: "Connect tools when needed",
+    content: "Go here to save OpenAI, GA4, GTM, Hotjar, and remote MCP configuration for the active client.",
+    placement: "right",
   },
   {
-    target: "[data-tour='ga4-property']",
-    title: "Add analytics context",
-    content:
-      "Save the GA4 property id here. When Google OAuth is added, this same provider card will support real runReport sync.",
-    placement: "top",
-  },
-  {
-    target: "[data-tour='openai-key']",
-    title: "Unlock AI insights",
-    content:
-      "Add the client’s OpenAI token here. It is encrypted on the server before MongoDB storage and never rendered back.",
-    placement: "top",
-  },
-  {
-    target: "[data-tour='competitive-analysis']",
+    target: "[data-tour='nav-analysis']",
     title: "Run competitive analysis",
-    content:
-      "Enter the client, industry, known competitors, and target topics. The analysis uses your stored OpenAI key and avoids live claims it cannot verify.",
-    placement: "left",
+    content: "Use this view to generate client-specific competitive briefs from the stored OpenAI token.",
+    placement: "right",
   },
   {
-    target: "[data-tour='generate-competitive-analysis']",
-    title: "Create the market read",
-    content:
-      "This button generates a structured competitive brief with content gaps, keyword opportunities, recommendations, and assumptions.",
-    placement: "left",
-  },
-  {
-    target: "[data-tour='insight-feed']",
-    title: "Turn findings into actions",
-    content:
-      "The feed shows priority, confidence, source, impact, and a concrete recommendation so the next action is clear.",
-    placement: "top",
+    target: "[data-tour='nav-insights']",
+    title: "Review recommendations",
+    content: "Generated findings live in the insights view with priority, confidence, impact, and next action.",
+    placement: "right",
   },
 ];
 
@@ -198,6 +179,7 @@ function formPayload(form: HTMLFormElement, provider: Provider) {
 }
 
 export function SeoDashboard() {
+  const [view, setView] = useState<View>("overview");
   const [clientId, setClientId] = useState(DEFAULT_CLIENT_ID);
   const [clients, setClients] = useState<Client[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
@@ -210,13 +192,15 @@ export function SeoDashboard() {
   const [tourRunning, setTourRunning] = useState(false);
 
   const activeClient = clients.find((client) => client.id === clientId);
-
   const latestByProvider = useMemo(() => {
     return integrations.reduce<Partial<Record<Provider, Integration>>>((acc, integration) => {
       acc[integration.provider] = integration;
       return acc;
     }, {});
   }, [integrations]);
+  const connectedCount = Object.values(latestByProvider).filter((integration) => integration?.status === "connected").length;
+  const savedToolCount = Object.values(latestByProvider).filter(Boolean).length;
+  const readiness = Math.round(((latestByProvider.openai ? 1 : 0) + Math.min(savedToolCount, 4) / 4) * 50);
 
   async function loadClients(activeClientId = clientId) {
     const body = await api<{ clients: Client[] }>(activeClientId, "/api/seo/clients");
@@ -237,7 +221,7 @@ export function SeoDashboard() {
       setInsights(insightBody.insights);
       setCompetitiveAnalyses(competitiveBody.analyses);
       if (!integrationBody.integrations.some((item) => item.provider === "openai")) {
-        setNotice({ type: "info", message: "Connect a ChatGPT/OpenAI token to unlock AI-generated insights." });
+        setNotice({ type: "info", message: "Connect a ChatGPT/OpenAI token to unlock AI-generated analysis." });
       }
     } catch (error) {
       setNotice({
@@ -290,6 +274,7 @@ export function SeoDashboard() {
       form.reset();
       await loadClients(clientId);
       switchClient(body.client.id);
+      setView("clients");
       setNotice({ type: "success", message: `${body.client.name} client workspace created.` });
     } catch (error) {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to add client." });
@@ -400,7 +385,6 @@ export function SeoDashboard() {
         onEvent={handleTourCallback}
         continuous
         options={{
-          buttons: ["back", "skip", "primary"],
           overlayColor: "rgba(10, 10, 12, 0.68)",
           primaryColor: "#111214",
           scrollOffset: 80,
@@ -416,44 +400,58 @@ export function SeoDashboard() {
         tooltipComponent={CinematicTourTooltip}
       />
 
-      <aside className="client-sidebar" data-tour="client-sidebar" aria-label="Client workspaces">
-        <div>
-          <p className="eyebrow">Clients</p>
-          <h2>Workspaces</h2>
-          <p>Pick a client before connecting tools. Each workspace keeps separate encrypted keys.</p>
+      <aside className="app-sidebar" aria-label="Dashboard navigation">
+        <div className="sidebar-brand">
+          <p className="eyebrow">SEO Intelligence</p>
+          <h1>Dashboard</h1>
+          <p>{loading ? "Loading workspace..." : `${clients.length} client workspace${clients.length === 1 ? "" : "s"}`}</p>
         </div>
 
-        <div className="client-list">
-          {clients.map((client) => (
+        <nav className="side-nav" data-tour="side-nav" aria-label="Primary">
+          {navItems.map((item) => (
             <button
-              className="client-item"
-              data-active={client.id === clientId}
-              key={client.id}
+              className="nav-item"
+              data-active={view === item.id}
+              data-tour={item.id === "integrations" ? "nav-integrations" : item.id === "analysis" ? "nav-analysis" : item.id === "insights" ? "nav-insights" : undefined}
+              key={item.id}
               type="button"
-              onClick={() => switchClient(client.id)}
+              onClick={() => setView(item.id)}
             >
-              <strong>{client.name}</strong>
-              <span>{client.id}</span>
+              <strong>{item.label}</strong>
+              <span>{item.description}</span>
             </button>
           ))}
+        </nav>
+
+        <div className="sidebar-clients" data-tour="client-switcher">
+          <div className="sidebar-section-title">
+            <span>Active Client</span>
+            <button className="text-button" type="button" onClick={() => setView("clients")}>
+              Manage
+            </button>
+          </div>
+          <div className="client-list">
+            {clients.map((client) => (
+              <button
+                className="client-item"
+                data-active={client.id === clientId}
+                key={client.id}
+                type="button"
+                onClick={() => {
+                  switchClient(client.id);
+                  setView("clients");
+                }}
+              >
+                <strong>{client.name}</strong>
+                <span>{client.id}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
-        <form className="add-client-form" data-tour="add-client-form" onSubmit={addClient}>
-          <h3>Add client</h3>
-          <label>
-            Client name
-            <input name="name" placeholder="Acme Health" required />
-          </label>
-          <label>
-            Client id
-            <input name="id" placeholder="acme-health" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{1,62}[a-zA-Z0-9]" />
-          </label>
-          <label>
-            Notes
-            <textarea name="notes" placeholder="Optional context" rows={3} />
-          </label>
-          <button className="button button-primary" type="submit">
-            Add client
+        <form action="/api/auth/logout" method="post">
+          <button className="button" type="submit">
+            Sign out
           </button>
         </form>
       </aside>
@@ -461,25 +459,19 @@ export function SeoDashboard() {
       <div className="dashboard" aria-live="polite">
         <div className="dashboard-header">
           <div>
-            <p className="eyebrow">MVP Dashboard</p>
-            <h2 id="dashboard-title">SEO Intelligence</h2>
-            <p className="active-client">
-              {activeClient?.name || clientId} keeps its own integrations, encrypted keys, analyses, and insights.
-            </p>
+            <p className="eyebrow">{activeClient?.name || clientId}</p>
+            <h2 id="dashboard-title">{viewTitle(view)}</h2>
+            <p className="active-client">{viewDescription(view, activeClient?.name || clientId)}</p>
           </div>
           <div className="dashboard-tools">
             <button className="button" type="button" onClick={() => setTourRunning(true)}>
               Start Tutorial
             </button>
-            <button
-              className="button button-primary"
-              data-tour="generate-insights"
-              type="button"
-              disabled={generating}
-              onClick={generateInsights}
-            >
-              {generating ? "Generating..." : "Generate Insights"}
-            </button>
+            {view !== "overview" ? (
+              <button className="button" type="button" onClick={() => setView("overview")}>
+                Back to Overview
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -489,173 +481,430 @@ export function SeoDashboard() {
           </div>
         ) : null}
 
-        <div className="status-row" data-tour="status-row" aria-label="Connection status">
-          {(Object.keys(providerLabels) as Provider[]).map((provider) => {
-            const integration = latestByProvider[provider];
-            return (
-              <article className="status-card" data-status={integration?.status || "disconnected"} key={provider}>
-                <span>{providerLabels[provider]}</span>
-                <strong>{statusLabel(integration?.status)}</strong>
-              </article>
-            );
-          })}
-        </div>
+        {view === "overview" ? (
+          <OverviewView
+            connectedCount={connectedCount}
+            savedToolCount={savedToolCount}
+            clients={clients}
+            competitiveAnalyses={competitiveAnalyses}
+            insights={insights}
+            latestByProvider={latestByProvider}
+            readiness={readiness}
+            setView={setView}
+          />
+        ) : null}
 
-        <div className="dashboard-grid">
-          <section className="panel" data-tour="integration-hub" aria-labelledby="integrations-title">
-            <div className="section-heading">
-              <h3 id="integrations-title">Connect Tools</h3>
-              <p>Save only the setup data needed for this client. Secrets are encrypted and never returned.</p>
-            </div>
+        {view === "clients" ? (
+          <ClientsView activeClient={activeClient} clientId={clientId} clients={clients} onAddClient={addClient} onSwitchClient={switchClient} />
+        ) : null}
 
-            <div className="integration-grid" aria-busy={loading}>
-              <ProviderForm provider="ga4" title="Google Analytics 4" onSubmit={saveIntegration} onTest={testProvider}>
-                <Field
-                  name="propertyId"
-                  label="Property ID"
-                  placeholder="properties/123456789"
-                  required
-                  tourId="ga4-property"
-                />
-                <Field name="authMethod" label="Auth method" placeholder="OAuth placeholder" />
-              </ProviderForm>
+        {view === "integrations" ? (
+          <IntegrationsView latestByProvider={latestByProvider} loading={loading} onSaveIntegration={saveIntegration} onTestProvider={testProvider} />
+        ) : null}
 
-              <ProviderForm provider="gtm" title="Google Tag Manager" onSubmit={saveIntegration} onTest={testProvider}>
-                <Field name="accountId" label="Account ID" placeholder="1234567" required />
-                <Field name="containerId" label="Container ID" placeholder="GTM-XXXXXXX" required />
-              </ProviderForm>
+        {view === "analysis" ? (
+          <CompetitiveView
+            activeClient={activeClient}
+            analyzing={analyzing}
+            competitiveAnalyses={competitiveAnalyses}
+            onGenerateCompetitiveAnalysis={generateCompetitiveAnalysis}
+          />
+        ) : null}
 
-              <ProviderForm provider="hotjar" title="Hotjar" onSubmit={saveIntegration} onTest={testProvider}>
-                <Field name="siteId" label="Site ID" placeholder="1234567" />
-                <Field name="apiKey" label="API key or connector token" placeholder="Stored encrypted" type="password" />
-                <Field name="baseUrl" label="Connector URL" placeholder="https://connector.example.com" type="url" />
-              </ProviderForm>
+        {view === "insights" ? (
+          <InsightsView
+            generating={generating}
+            insights={insights}
+            latestByProvider={latestByProvider}
+            onGenerateInsights={generateInsights}
+          />
+        ) : null}
+      </div>
+    </section>
+  );
+}
 
-              <ProviderForm provider="openai" title="ChatGPT / OpenAI Token" onSubmit={saveIntegration} onTest={testProvider}>
-                <Field name="apiKey" label="API key" placeholder="sk-..." type="password" required tourId="openai-key" />
-              </ProviderForm>
+function viewTitle(view: View) {
+  if (view === "clients") return "Clients";
+  if (view === "integrations") return "Tool Setup";
+  if (view === "analysis") return "Competitive Analysis";
+  if (view === "insights") return "Insights";
+  return "Overview";
+}
 
-              <ProviderForm
-                provider="mcp"
-                title="MCP Connectors"
-                wide
-                tourId="mcp-card"
-                onSubmit={saveIntegration}
-                onTest={testProvider}
-                actionLabel="Add remote connector"
-              >
-                <div className="two-col">
-                  <Field name="name" label="Name" placeholder="Remote connector" required />
-                  <Field name="type" label="Type" placeholder="analytics | crawler | crm" />
-                  <Field name="baseUrl" label="Base URL" placeholder="https://mcp.example.com" type="url" required />
-                  <label>
-                    Auth type
-                    <select name="authType" defaultValue="none">
-                      <option value="none">none</option>
-                      <option value="bearer">bearer</option>
-                      <option value="oauth">oauth</option>
-                    </select>
-                  </label>
-                  <Field name="token" label="Token / client metadata" placeholder="Stored encrypted when present" type="password" />
-                  <label className="check">
-                    <input name="enabled" type="checkbox" defaultChecked />
-                    Enabled
-                  </label>
-                </div>
-              </ProviderForm>
-            </div>
-          </section>
+function viewDescription(view: View, clientName: string) {
+  if (view === "clients") return "Pick a workspace or add a new client.";
+  if (view === "integrations") return `${clientName} tool credentials and connector metadata live here.`;
+  if (view === "analysis") return `Generate competitive briefs for ${clientName}.`;
+  if (view === "insights") return `Review AI recommendations for ${clientName}.`;
+  return "Graph-style readiness, coverage, and output summary.";
+}
 
-          <section className="panel" data-tour="competitive-analysis" aria-labelledby="competitive-title">
-            <div className="section-heading">
-              <h3 id="competitive-title">Competitive Analysis</h3>
-              <p>Use OpenAI to turn known client, industry, competitor, and keyword context into a focused brief.</p>
-            </div>
+function OverviewView({
+  clients,
+  connectedCount,
+  competitiveAnalyses,
+  insights,
+  latestByProvider,
+  readiness,
+  savedToolCount,
+  setView,
+}: {
+  clients: Client[];
+  connectedCount: number;
+  competitiveAnalyses: CompetitiveAnalysis[];
+  insights: Insight[];
+  latestByProvider: Partial<Record<Provider, Integration>>;
+  readiness: number;
+  savedToolCount: number;
+  setView: (view: View) => void;
+}) {
+  return (
+    <div className="overview" data-tour="app-overview">
+      <section className="overview-grid" data-tour="overview-graphs" aria-label="Overview charts">
+        <GraphCard label="Setup readiness" value={`${readiness}%`} helper="OpenAI plus connector coverage" percent={readiness} />
+        <GraphCard label="Connected tools" value={`${connectedCount}/5`} helper={`${savedToolCount} saved connectors`} percent={connectedCount * 20} />
+        <GraphCard label="Competitive briefs" value={String(competitiveAnalyses.length)} helper="Generated for active client" percent={Math.min(100, competitiveAnalyses.length * 25)} />
+        <GraphCard label="Insight cards" value={String(insights.length)} helper="Stored recommendations" percent={Math.min(100, insights.length * 15)} />
+      </section>
 
-            <form className="competitive-form" onSubmit={generateCompetitiveAnalysis}>
-              <Field name="clientName" label="Client name" placeholder={activeClient?.name || "Acme Health"} required />
-              <Field name="websiteUrl" label="Website URL" placeholder="https://example.com" type="url" />
-              <Field name="industry" label="Industry" placeholder="Healthcare SaaS" required />
-              <Field name="market" label="Market" placeholder="US mid-market" />
-              <label>
-                Target audience
-                <textarea name="targetAudience" placeholder="Who the client needs to win with" rows={3} />
-              </label>
-              <label>
-                Known competitors
-                <textarea name="competitors" placeholder="One per line, optional URL after the name" rows={4} />
-              </label>
-              <label>
-                Target keywords
-                <textarea name="targetKeywords" placeholder="One keyword or topic per line" rows={4} />
-              </label>
-              <label>
-                Notes
-                <textarea name="notes" placeholder="Positioning, offers, constraints, or market context" rows={4} />
-              </label>
-              <button
-                className="button button-primary"
-                data-tour="generate-competitive-analysis"
-                type="submit"
-                disabled={analyzing}
-              >
-                {analyzing ? "Analyzing..." : "Generate Competitive Analysis"}
-              </button>
-            </form>
-
-            <div className="analysis-results" aria-live="polite">
-              {competitiveAnalyses.length ? (
-                competitiveAnalyses.map((analysis) => <CompetitiveAnalysisCard analysis={analysis} key={analysis.id} />)
-              ) : (
-                <div className="empty-state">
-                  Add the client name and industry, then generate a market read after OpenAI is connected.
-                </div>
-              )}
-            </div>
-          </section>
-        </div>
-
-        <section className="panel" data-tour="insight-feed" aria-labelledby="insights-title">
+      <section className="dashboard-grid">
+        <div className="panel">
           <div className="section-heading">
-            <h3 id="insights-title">Insight Feed</h3>
-            {!insights.length ? (
-              <p>
-                {latestByProvider.openai
-                  ? "Connect GA4 and Hotjar, then generate your first SEO intelligence report."
-                  : "Connect GA4, Hotjar, and OpenAI to generate your first SEO intelligence report."}
-              </p>
-            ) : null}
+            <h3>Connection Health</h3>
+            <p>Use this to decide what to set up next.</p>
           </div>
+          <div className="status-row compact" aria-label="Connection status">
+            {(Object.keys(providerLabels) as Provider[]).map((provider) => {
+              const integration = latestByProvider[provider];
+              return (
+                <article className="status-card" data-status={integration?.status || "disconnected"} key={provider}>
+                  <span>{providerLabels[provider]}</span>
+                  <strong>{statusLabel(integration?.status)}</strong>
+                </article>
+              );
+            })}
+          </div>
+        </div>
 
-          <div className="insights">
-            {insights.map((insight) => (
-              <article className="insight-card" key={insight.id}>
-                <div className="card-top">
-                  <h4>{insight.title}</h4>
-                  <span className="priority" data-priority={insight.priority}>
-                    {insight.priority}
-                  </span>
-                </div>
-                <p>{insight.description}</p>
-                <dl>
-                  <div>
-                    <dt>Impact</dt>
-                    <dd>{insight.impact}</dd>
-                  </div>
-                  <div>
-                    <dt>Recommendation</dt>
-                    <dd>{insight.recommendation}</dd>
-                  </div>
-                </dl>
-                <footer>
-                  <span>{insight.source_provider}</span>
-                  <span>{insight.confidence_score}% confidence</span>
-                  <time dateTime={insight.created_at}>{new Date(insight.created_at).toLocaleString()}</time>
-                </footer>
-              </article>
-            ))}
+        <div className="panel">
+          <div className="section-heading">
+            <h3>Next Actions</h3>
+            <p>Move from setup into client data.</p>
           </div>
-        </section>
+          <div className="quick-actions">
+            <button className="button button-primary" type="button" onClick={() => setView("clients")}>
+              Manage Clients
+            </button>
+            <button className="button" type="button" onClick={() => setView("integrations")}>
+              Connect Tools
+            </button>
+            <button className="button" type="button" onClick={() => setView("analysis")}>
+              Run Competitive Analysis
+            </button>
+            <button className="button" type="button" onClick={() => setView("insights")}>
+              Review Insights
+            </button>
+          </div>
+          <div className="mini-summary">
+            <span>{clients.length} clients</span>
+            <span>{savedToolCount} tools saved</span>
+            <span>{insights.length + competitiveAnalyses.length} reports</span>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function GraphCard({ helper, label, percent, value }: { helper: string; label: string; percent: number; value: string }) {
+  return (
+    <article className="graph-card">
+      <div>
+        <span>{label}</span>
+        <strong>{value}</strong>
+      </div>
+      <div className="bar-chart" aria-hidden="true">
+        <span style={{ height: `${Math.max(8, Math.min(100, percent))}%` }} />
+        <span style={{ height: `${Math.max(8, Math.min(100, percent * 0.72 + 10))}%` }} />
+        <span style={{ height: `${Math.max(8, Math.min(100, percent * 0.52 + 18))}%` }} />
+      </div>
+      <p>{helper}</p>
+    </article>
+  );
+}
+
+function ClientsView({
+  activeClient,
+  clientId,
+  clients,
+  onAddClient,
+  onSwitchClient,
+}: {
+  activeClient?: Client;
+  clientId: string;
+  clients: Client[];
+  onAddClient: (event: FormEvent<HTMLFormElement>) => void;
+  onSwitchClient: (clientId: string) => void;
+}) {
+  return (
+    <div className="dashboard-grid">
+      <section className="panel">
+        <div className="section-heading">
+          <h3>Client Workspaces</h3>
+          <p>Each client keeps separate integrations, encrypted keys, analyses, and insights.</p>
+        </div>
+        <div className="client-grid">
+          {clients.map((client) => (
+            <button
+              className="client-card"
+              data-active={client.id === clientId}
+              key={client.id}
+              type="button"
+              onClick={() => onSwitchClient(client.id)}
+            >
+              <strong>{client.name}</strong>
+              <span>{client.id}</span>
+              <p>{client.notes || "No notes yet."}</p>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel" data-tour="add-client-form">
+        <div className="section-heading">
+          <h3>Add Client</h3>
+          <p>Keep the id simple, like vast or acme-health.</p>
+        </div>
+        <form className="add-client-form" onSubmit={onAddClient}>
+          <label>
+            Client name
+            <input name="name" placeholder="Vast" required />
+          </label>
+          <label>
+            Client id
+            <input name="id" placeholder="vast" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{1,62}[a-zA-Z0-9]" />
+          </label>
+          <label>
+            Notes
+            <textarea name="notes" placeholder="Optional context" rows={4} />
+          </label>
+          <button className="button button-primary" type="submit">
+            Add client
+          </button>
+        </form>
+        <div className="active-client-panel">
+          <span>Current workspace</span>
+          <strong>{activeClient?.name || clientId}</strong>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function IntegrationsView({
+  latestByProvider,
+  loading,
+  onSaveIntegration,
+  onTestProvider,
+}: {
+  latestByProvider: Partial<Record<Provider, Integration>>;
+  loading: boolean;
+  onSaveIntegration: (event: FormEvent<HTMLFormElement>) => void;
+  onTestProvider: (provider: Provider) => void;
+}) {
+  return (
+    <section className="panel" data-tour="integration-hub" aria-labelledby="integrations-title">
+      <div className="section-heading">
+        <h3 id="integrations-title">Connect Tools</h3>
+        <p>Save setup data for the active client. Secrets are encrypted and never returned.</p>
+      </div>
+
+      <div className="status-row" data-tour="status-row" aria-label="Connection status">
+        {(Object.keys(providerLabels) as Provider[]).map((provider) => {
+          const integration = latestByProvider[provider];
+          return (
+            <article className="status-card" data-status={integration?.status || "disconnected"} key={provider}>
+              <span>{providerLabels[provider]}</span>
+              <strong>{statusLabel(integration?.status)}</strong>
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="integration-grid" aria-busy={loading}>
+        <ProviderForm provider="ga4" title="Google Analytics 4" onSubmit={onSaveIntegration} onTest={onTestProvider}>
+          <Field name="propertyId" label="Property ID" placeholder="properties/123456789" required tourId="ga4-property" />
+          <Field name="authMethod" label="Auth method" placeholder="OAuth placeholder" />
+        </ProviderForm>
+
+        <ProviderForm provider="gtm" title="Google Tag Manager" onSubmit={onSaveIntegration} onTest={onTestProvider}>
+          <Field name="accountId" label="Account ID" placeholder="1234567" required />
+          <Field name="containerId" label="Container ID" placeholder="GTM-XXXXXXX" required />
+        </ProviderForm>
+
+        <ProviderForm provider="hotjar" title="Hotjar" onSubmit={onSaveIntegration} onTest={onTestProvider}>
+          <Field name="siteId" label="Site ID" placeholder="1234567" />
+          <Field name="apiKey" label="API key or connector token" placeholder="Stored encrypted" type="password" />
+          <Field name="baseUrl" label="Connector URL" placeholder="https://connector.example.com" type="url" />
+        </ProviderForm>
+
+        <ProviderForm provider="openai" title="ChatGPT / OpenAI Token" onSubmit={onSaveIntegration} onTest={onTestProvider}>
+          <Field name="apiKey" label="API key" placeholder="sk-..." type="password" required tourId="openai-key" />
+        </ProviderForm>
+
+        <ProviderForm
+          provider="mcp"
+          title="MCP Connectors"
+          wide
+          tourId="mcp-card"
+          onSubmit={onSaveIntegration}
+          onTest={onTestProvider}
+          actionLabel="Add remote connector"
+        >
+          <div className="two-col">
+            <Field name="name" label="Name" placeholder="Remote connector" required />
+            <Field name="type" label="Type" placeholder="analytics | crawler | crm" />
+            <Field name="baseUrl" label="Base URL" placeholder="https://mcp.example.com" type="url" required />
+            <label>
+              Auth type
+              <select name="authType" defaultValue="none">
+                <option value="none">none</option>
+                <option value="bearer">bearer</option>
+                <option value="oauth">oauth</option>
+              </select>
+            </label>
+            <Field name="token" label="Token / client metadata" placeholder="Stored encrypted when present" type="password" />
+            <label className="check">
+              <input name="enabled" type="checkbox" defaultChecked />
+              Enabled
+            </label>
+          </div>
+        </ProviderForm>
+      </div>
+    </section>
+  );
+}
+
+function CompetitiveView({
+  activeClient,
+  analyzing,
+  competitiveAnalyses,
+  onGenerateCompetitiveAnalysis,
+}: {
+  activeClient?: Client;
+  analyzing: boolean;
+  competitiveAnalyses: CompetitiveAnalysis[];
+  onGenerateCompetitiveAnalysis: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <div className="dashboard-grid">
+      <section className="panel" data-tour="competitive-analysis" aria-labelledby="competitive-title">
+        <div className="section-heading">
+          <h3 id="competitive-title">Competitive Analysis</h3>
+          <p>Use OpenAI to turn known client, industry, competitor, and keyword context into a focused brief.</p>
+        </div>
+
+        <form className="competitive-form" onSubmit={onGenerateCompetitiveAnalysis}>
+          <Field name="clientName" label="Client name" placeholder={activeClient?.name || "Acme Health"} required />
+          <Field name="websiteUrl" label="Website URL" placeholder="https://example.com" type="url" />
+          <Field name="industry" label="Industry" placeholder="Healthcare SaaS" required />
+          <Field name="market" label="Market" placeholder="US mid-market" />
+          <label>
+            Target audience
+            <textarea name="targetAudience" placeholder="Who the client needs to win with" rows={3} />
+          </label>
+          <label>
+            Known competitors
+            <textarea name="competitors" placeholder="One per line, optional URL after the name" rows={4} />
+          </label>
+          <label>
+            Target keywords
+            <textarea name="targetKeywords" placeholder="One keyword or topic per line" rows={4} />
+          </label>
+          <label>
+            Notes
+            <textarea name="notes" placeholder="Positioning, offers, constraints, or market context" rows={4} />
+          </label>
+          <button className="button button-primary" data-tour="generate-competitive-analysis" type="submit" disabled={analyzing}>
+            {analyzing ? "Analyzing..." : "Generate Competitive Analysis"}
+          </button>
+        </form>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <h3>Briefs</h3>
+          <p>Stored competitive reports for the active client.</p>
+        </div>
+        <div className="analysis-results" aria-live="polite">
+          {competitiveAnalyses.length ? (
+            competitiveAnalyses.map((analysis) => <CompetitiveAnalysisCard analysis={analysis} key={analysis.id} />)
+          ) : (
+            <div className="empty-state">Connect OpenAI, add market context, then generate the first competitive brief.</div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function InsightsView({
+  generating,
+  insights,
+  latestByProvider,
+  onGenerateInsights,
+}: {
+  generating: boolean;
+  insights: Insight[];
+  latestByProvider: Partial<Record<Provider, Integration>>;
+  onGenerateInsights: () => void;
+}) {
+  return (
+    <section className="panel" data-tour="insight-feed" aria-labelledby="insights-title">
+      <div className="section-heading">
+        <div>
+          <h3 id="insights-title">Insight Feed</h3>
+          {!insights.length ? (
+            <p>
+              {latestByProvider.openai
+                ? "Connect GA4 and Hotjar, then generate your first SEO intelligence report."
+                : "Connect GA4, Hotjar, and OpenAI to generate your first SEO intelligence report."}
+            </p>
+          ) : null}
+        </div>
+        <button className="button button-primary" type="button" disabled={generating} onClick={onGenerateInsights}>
+          {generating ? "Generating..." : "Generate Insights"}
+        </button>
+      </div>
+
+      <div className="insights">
+        {insights.map((insight) => (
+          <article className="insight-card" key={insight.id}>
+            <div className="card-top">
+              <h4>{insight.title}</h4>
+              <span className="priority" data-priority={insight.priority}>
+                {insight.priority}
+              </span>
+            </div>
+            <p>{insight.description}</p>
+            <dl>
+              <div>
+                <dt>Impact</dt>
+                <dd>{insight.impact}</dd>
+              </div>
+              <div>
+                <dt>Recommendation</dt>
+                <dd>{insight.recommendation}</dd>
+              </div>
+            </dl>
+            <footer>
+              <span>{insight.source_provider}</span>
+              <span>{insight.confidence_score}% confidence</span>
+              <time dateTime={insight.created_at}>{new Date(insight.created_at).toLocaleString()}</time>
+            </footer>
+          </article>
+        ))}
       </div>
     </section>
   );
