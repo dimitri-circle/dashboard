@@ -30,6 +30,16 @@
         width: 100%;
       }
 
+      :host([background]) {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        width: 100vw;
+        height: 100vh;
+        pointer-events: none;
+        overflow: hidden;
+      }
+
       .frame {
         position: relative;
         min-height: var(--dot-ribbon-min-height);
@@ -46,6 +56,37 @@
         transform-origin: 42% 54%;
         will-change: transform, filter;
         isolation: isolate;
+      }
+
+      :host([background]) .frame {
+        width: 100%;
+        height: 100%;
+        min-height: 100vh;
+        aspect-ratio: auto;
+        border: 0;
+        border-radius: 0;
+        background:
+          radial-gradient(circle at 18% 18%, rgba(255, 255, 255, 0.9), transparent 28%),
+          radial-gradient(circle at 86% 12%, rgba(24, 54, 118, 0.08), transparent 30%),
+          radial-gradient(circle at 78% 78%, rgba(12, 145, 154, 0.07), transparent 30%),
+          linear-gradient(180deg, rgba(252, 250, 247, 0.96), rgba(236, 228, 216, 0.92));
+        box-shadow: none;
+      }
+
+      :host([background]) .frame::before {
+        left: -72px;
+        bottom: 8vh;
+        width: 220px;
+        height: 220px;
+        opacity: 0.42;
+      }
+
+      :host([background]) .frame::after {
+        top: -56px;
+        right: -42px;
+        width: 260px;
+        height: 260px;
+        opacity: 0.36;
       }
 
       .frame::before,
@@ -82,6 +123,10 @@
         touch-action: none;
       }
 
+      :host([background]) canvas {
+        cursor: default;
+      }
+
       .hint {
         position: absolute;
         right: 18px;
@@ -100,6 +145,10 @@
       }
 
       .hint:empty {
+        display: none;
+      }
+
+      :host([background]) .hint {
         display: none;
       }
 
