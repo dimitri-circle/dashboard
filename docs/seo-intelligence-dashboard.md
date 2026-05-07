@@ -59,7 +59,7 @@ curl http://localhost:3000/api/seo/health
 
 ## Client Workspaces
 
-The dashboard now opens to an overview screen with graph-style readiness cards. A persistent sidebar switches between Overview, Clients, Tool Setup, Competitive Analysis, and Insights. Users can pick an existing client or add a new client in the Clients view. The selected client id is sent to every SEO API request as `x-seo-client-id`, and MongoDB reads/writes are filtered by that value. This means each client workspace has separate:
+The dashboard now opens to an overview screen with graph-style readiness cards. A persistent sidebar switches between Overview, Clients, Tool Setup, Competitive Analysis, and Insights. Tool Setup is split into focused setup pages for GA4, GTM, Hotjar, ChatGPT / OpenAI, and MCP so users can configure one connector at a time. Users can pick an existing client or add a new client in the Clients view. The selected client id is sent to every SEO API request as `x-seo-client-id`, and MongoDB reads/writes are filtered by that value. This means each client workspace has separate:
 
 - integration metadata
 - encrypted API keys
@@ -73,7 +73,7 @@ For temporary controlled deployments, set `SEO_ALLOWED_CLIENT_IDS` to a comma-se
 
 ## Guided Tutorial
 
-The dashboard includes a built-in product tour powered by React Joyride. It highlights the client sidebar, add-client form, generate button, connection status row, key integration fields, and insight feed. The implementation uses configured steps and a dark overlay so users can learn the workflow in place.
+The dashboard includes a built-in product tour powered by React Joyride. It highlights the overview, sidebar, client switcher, focused Tool Setup entry point, tool page picker, competitive analysis, and insight feed. The implementation uses configured steps and a dark overlay so users can learn the workflow in place. The tutorial copy now explains that connector setup is separated by tool instead of showing every setup form on one screen.
 
 ## Competitive Analysis
 

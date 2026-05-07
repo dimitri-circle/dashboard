@@ -174,6 +174,11 @@ select {
   padding-top: 14px;
 }
 
+.nav-group {
+  display: grid;
+  gap: 8px;
+}
+
 .nav-item,
 .client-card {
   width: 100%;
@@ -204,6 +209,31 @@ select {
   color: currentColor;
   font-size: 0.82rem;
   opacity: 0.68;
+}
+
+.provider-subnav {
+  display: grid;
+  gap: 6px;
+  padding-left: 12px;
+}
+
+.provider-subnav-item {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.54);
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 850;
+  text-align: left;
+  cursor: pointer;
+}
+
+.provider-subnav-item[data-active="true"] {
+  border-color: rgba(17, 18, 20, 0.32);
+  background: rgba(17, 18, 20, 0.08);
 }
 
 .sidebar-section-title,
@@ -424,6 +454,8 @@ select {
   gap: 6px;
   min-height: 78px;
   padding: 14px;
+  color: var(--ink);
+  text-align: left;
 }
 
 .status-card[data-status="connected"] {
@@ -432,6 +464,21 @@ select {
 
 .status-card[data-status="error"] {
   border-color: rgba(159, 31, 23, 0.3);
+}
+
+.status-card-button {
+  width: 100%;
+  cursor: pointer;
+}
+
+.status-card-button[data-active="true"] {
+  border-color: rgba(17, 18, 20, 0.46);
+  background: rgba(17, 18, 20, 0.92);
+  color: #ffffff;
+}
+
+.status-card-button[data-active="true"] span {
+  color: currentColor;
 }
 
 .dashboard-grid {
@@ -540,6 +587,51 @@ select {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-top: 16px;
+}
+
+.tool-page-picker {
+  margin-top: 16px;
+}
+
+.tool-page-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.42fr) minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 16px;
+  align-items: start;
+}
+
+.tool-page-summary {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(17, 18, 20, 0.04);
+}
+
+.tool-page-summary > span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.tool-page-summary > p,
+.tool-page-error {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.tool-page-error {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  color: var(--bad);
+}
+
+.tool-page-form {
+  min-width: 0;
 }
 
 .card {
@@ -946,15 +1038,16 @@ select {
     padding-bottom: 44px;
   }
 
-	  .hero,
-	  .dashboard-shell,
-	  .dashboard-grid,
-	  .overview-grid,
-	  .client-grid,
-	  .status-row,
-	  .integration-grid,
-	  .two-col,
-	  .insights {
+  .hero,
+  .dashboard-shell,
+  .dashboard-grid,
+  .overview-grid,
+  .client-grid,
+  .status-row,
+  .integration-grid,
+  .tool-page-layout,
+  .two-col,
+  .insights {
     grid-template-columns: 1fr;
   }
 
@@ -997,20 +1090,20 @@ select {
     width: 100%;
   }
 
-	  .dashboard-tools,
-	  .quick-actions,
-	  .app-sidebar,
-	  .client-sidebar {
-	    width: 100%;
-	  }
+  .dashboard-tools,
+  .quick-actions,
+  .app-sidebar,
+  .client-sidebar {
+    width: 100%;
+  }
 
-	  .quick-actions {
-	    grid-template-columns: 1fr;
-	  }
+  .quick-actions {
+    grid-template-columns: 1fr;
+  }
 
-	  .app-sidebar,
-	  .client-sidebar {
-	    position: static;
-	    min-height: auto;
-	  }
+  .app-sidebar,
+  .client-sidebar {
+    position: static;
+    min-height: auto;
+  }
 }

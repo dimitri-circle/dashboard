@@ -68,6 +68,31 @@ const providerLabels: Record<Provider, string> = {
   mcp: "MCP",
 };
 
+const providerDetails: Record<Provider, { title: string; description: string }> = {
+  ga4: {
+    title: "Google Analytics 4",
+    description: "Connect the GA4 property used for traffic and conversion reporting.",
+  },
+  gtm: {
+    title: "Google Tag Manager",
+    description: "Save the GTM account and container ids for tag coverage checks.",
+  },
+  hotjar: {
+    title: "Hotjar",
+    description: "Save the Hotjar site id, connector token, or connector health URL.",
+  },
+  openai: {
+    title: "ChatGPT / OpenAI Token",
+    description: "Add the encrypted token used for competitive briefs and insight generation.",
+  },
+  mcp: {
+    title: "MCP Connectors",
+    description: "Register a remote connector endpoint and its client metadata.",
+  },
+};
+
+const providerOrder = Object.keys(providerLabels) as Provider[];
+
 const navItems: Array<{ id: View; label: string; description: string }> = [
   { id: "overview", label: "Overview", description: "Health and report coverage" },
   { id: "clients", label: "Clients", description: "Pick or add workspaces" },
@@ -107,9 +132,15 @@ const tourSteps: Step[] = [
   },
   {
     target: "[data-tour='nav-integrations']",
-    title: "Connect tools when needed",
-    content: "Go here to save OpenAI, GA4, GTM, Hotjar, and remote MCP configuration for the active client.",
+    title: "Open focused setup pages",
+    content: "Tool Setup now breaks GA4, GTM, Hotjar, OpenAI, and MCP into separate pages so users can connect one tool at a time.",
     placement: "right",
+  },
+  {
+    target: "[data-tour='tool-provider-nav']",
+    title: "Choose one setup flow",
+    content: "Use these tool buttons to move between focused setup pages while keeping the active client and connection status visible.",
+    placement: "bottom",
   },
   {
     target: "[data-tour='nav-analysis']",
@@ -190,6 +221,7 @@ export function SeoDashboard() {
   const [generating, setGenerating] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [tourRunning, setTourRunning] = useState(false);
+  const [activeProvider, setActiveProvider] = useState<Provider>("ga4");
 
   const activeClient = clients.find((client) => client.id === clientId);
   const latestByProvider = useMemo(() => {
@@ -409,17 +441,36 @@ export function SeoDashboard() {
 
         <nav className="side-nav" data-tour="side-nav" aria-label="Primary">
           {navItems.map((item) => (
-            <button
-              className="nav-item"
-              data-active={view === item.id}
-              data-tour={item.id === "integrations" ? "nav-integrations" : item.id === "analysis" ? "nav-analysis" : item.id === "insights" ? "nav-insights" : undefined}
-              key={item.id}
-              type="button"
-              onClick={() => setView(item.id)}
-            >
-              <strong>{item.label}</strong>
-              <span>{item.description}</span>
-            </button>
+            <div className="nav-group" key={item.id}>
+              <button
+                className="nav-item"
+                data-active={view === item.id}
+                data-tour={item.id === "integrations" ? "nav-integrations" : item.id === "analysis" ? "nav-analysis" : item.id === "insights" ? "nav-insights" : undefined}
+                type="button"
+                onClick={() => setView(item.id)}
+              >
+                <strong>{item.label}</strong>
+                <span>{item.description}</span>
+              </button>
+              {item.id === "integrations" ? (
+                <div className="provider-subnav" data-tour="tool-provider-nav" aria-label="Tool setup pages">
+                  {providerOrder.map((provider) => (
+                    <button
+                      className="provider-subnav-item"
+                      data-active={activeProvider === provider}
+                      key={provider}
+                      type="button"
+                      onClick={() => {
+                        setActiveProvider(provider);
+                        setView("integrations");
+                      }}
+                    >
+                      {providerLabels[provider]}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           ))}
         </nav>
 
@@ -460,8 +511,8 @@ export function SeoDashboard() {
         <div className="dashboard-header">
           <div>
             <p className="eyebrow">{activeClient?.name || clientId}</p>
-            <h2 id="dashboard-title">{viewTitle(view)}</h2>
-            <p className="active-client">{viewDescription(view, activeClient?.name || clientId)}</p>
+            <h2 id="dashboard-title">{viewTitle(view, activeProvider)}</h2>
+            <p className="active-client">{viewDescription(view, activeClient?.name || clientId, activeProvider)}</p>
           </div>
           <div className="dashboard-tools">
             <button className="button" type="button" onClick={() => setTourRunning(true)}>
@@ -499,7 +550,14 @@ export function SeoDashboard() {
         ) : null}
 
         {view === "integrations" ? (
-          <IntegrationsView latestByProvider={latestByProvider} loading={loading} onSaveIntegration={saveIntegration} onTestProvider={testProvider} />
+          <IntegrationsView
+            activeProvider={activeProvider}
+            latestByProvider={latestByProvider}
+            loading={loading}
+            onSaveIntegration={saveIntegration}
+            onSelectProvider={setActiveProvider}
+            onTestProvider={testProvider}
+          />
         ) : null}
 
         {view === "analysis" ? (
@@ -524,17 +582,17 @@ export function SeoDashboard() {
   );
 }
 
-function viewTitle(view: View) {
+function viewTitle(view: View, provider: Provider) {
   if (view === "clients") return "Clients";
-  if (view === "integrations") return "Tool Setup";
+  if (view === "integrations") return providerDetails[provider].title;
   if (view === "analysis") return "Competitive Analysis";
   if (view === "insights") return "Insights";
   return "Overview";
 }
 
-function viewDescription(view: View, clientName: string) {
+function viewDescription(view: View, clientName: string, provider: Provider) {
   if (view === "clients") return "Pick a workspace or add a new client.";
-  if (view === "integrations") return `${clientName} tool credentials and connector metadata live here.`;
+  if (view === "integrations") return `${clientName}: ${providerDetails[provider].description}`;
   if (view === "analysis") return `Generate competitive briefs for ${clientName}.`;
   if (view === "insights") return `Review AI recommendations for ${clientName}.`;
   return "Graph-style readiness, coverage, and output summary.";
@@ -703,84 +761,125 @@ function ClientsView({
 }
 
 function IntegrationsView({
+  activeProvider,
   latestByProvider,
   loading,
   onSaveIntegration,
+  onSelectProvider,
   onTestProvider,
 }: {
+  activeProvider: Provider;
   latestByProvider: Partial<Record<Provider, Integration>>;
   loading: boolean;
   onSaveIntegration: (event: FormEvent<HTMLFormElement>) => void;
+  onSelectProvider: (provider: Provider) => void;
   onTestProvider: (provider: Provider) => void;
 }) {
+  const activeIntegration = latestByProvider[activeProvider];
+
   return (
     <section className="panel" data-tour="integration-hub" aria-labelledby="integrations-title">
       <div className="section-heading">
-        <h3 id="integrations-title">Connect Tools</h3>
-        <p>Save setup data for the active client. Secrets are encrypted and never returned.</p>
+        <h3 id="integrations-title">Tool Setup Pages</h3>
+        <p>Choose one tool, save its setup data, then test it. Secrets are encrypted and never returned.</p>
       </div>
 
-      <div className="status-row" data-tour="status-row" aria-label="Connection status">
-        {(Object.keys(providerLabels) as Provider[]).map((provider) => {
+      <div className="status-row tool-page-picker" data-tour="status-row" aria-label="Connection status">
+        {providerOrder.map((provider) => {
           const integration = latestByProvider[provider];
           return (
-            <article className="status-card" data-status={integration?.status || "disconnected"} key={provider}>
+            <button
+              className="status-card status-card-button"
+              data-active={activeProvider === provider}
+              data-status={integration?.status || "disconnected"}
+              key={provider}
+              type="button"
+              onClick={() => onSelectProvider(provider)}
+            >
               <span>{providerLabels[provider]}</span>
               <strong>{statusLabel(integration?.status)}</strong>
-            </article>
+            </button>
           );
         })}
       </div>
 
-      <div className="integration-grid" aria-busy={loading}>
-        <ProviderForm provider="ga4" title="Google Analytics 4" onSubmit={onSaveIntegration} onTest={onTestProvider}>
-          <Field name="propertyId" label="Property ID" placeholder="properties/123456789" required tourId="ga4-property" />
-          <Field name="authMethod" label="Auth method" placeholder="OAuth placeholder" />
-        </ProviderForm>
-
-        <ProviderForm provider="gtm" title="Google Tag Manager" onSubmit={onSaveIntegration} onTest={onTestProvider}>
-          <Field name="accountId" label="Account ID" placeholder="1234567" required />
-          <Field name="containerId" label="Container ID" placeholder="GTM-XXXXXXX" required />
-        </ProviderForm>
-
-        <ProviderForm provider="hotjar" title="Hotjar" onSubmit={onSaveIntegration} onTest={onTestProvider}>
-          <Field name="siteId" label="Site ID" placeholder="1234567" />
-          <Field name="apiKey" label="API key or connector token" placeholder="Stored encrypted" type="password" />
-          <Field name="baseUrl" label="Connector URL" placeholder="https://connector.example.com" type="url" />
-        </ProviderForm>
-
-        <ProviderForm provider="openai" title="ChatGPT / OpenAI Token" onSubmit={onSaveIntegration} onTest={onTestProvider}>
-          <Field name="apiKey" label="API key" placeholder="sk-..." type="password" required tourId="openai-key" />
-        </ProviderForm>
-
-        <ProviderForm
-          provider="mcp"
-          title="MCP Connectors"
-          wide
-          tourId="mcp-card"
-          onSubmit={onSaveIntegration}
-          onTest={onTestProvider}
-          actionLabel="Add remote connector"
-        >
-          <div className="two-col">
-            <Field name="name" label="Name" placeholder="Remote connector" required />
-            <Field name="type" label="Type" placeholder="analytics | crawler | crm" />
-            <Field name="baseUrl" label="Base URL" placeholder="https://mcp.example.com" type="url" required />
-            <label>
-              Auth type
-              <select name="authType" defaultValue="none">
-                <option value="none">none</option>
-                <option value="bearer">bearer</option>
-                <option value="oauth">oauth</option>
-              </select>
-            </label>
-            <Field name="token" label="Token / client metadata" placeholder="Stored encrypted when present" type="password" />
-            <label className="check">
-              <input name="enabled" type="checkbox" defaultChecked />
-              Enabled
-            </label>
+      <div className="tool-page-layout" aria-busy={loading}>
+        <aside className="tool-page-summary" aria-label="Selected tool status">
+          <span>Current setup page</span>
+          <strong>{providerDetails[activeProvider].title}</strong>
+          <p>{providerDetails[activeProvider].description}</p>
+          <div className="metric">
+            <span>Status</span>
+            <strong>{statusLabel(activeIntegration?.status)}</strong>
           </div>
-        </ProviderForm>
+          {activeIntegration?.last_tested_at ? (
+            <div className="metric">
+              <span>Last tested</span>
+              <strong>{new Date(activeIntegration.last_tested_at).toLocaleString()}</strong>
+            </div>
+          ) : null}
+          {activeIntegration?.last_error ? <p className="tool-page-error">{activeIntegration.last_error}</p> : null}
+        </aside>
+
+        <div className="tool-page-form" data-tour="active-tool-form">
+          {activeProvider === "ga4" ? (
+            <ProviderForm provider="ga4" title="Google Analytics 4" onSubmit={onSaveIntegration} onTest={onTestProvider}>
+              <Field name="propertyId" label="Property ID" placeholder="properties/123456789" required tourId="ga4-property" />
+              <Field name="authMethod" label="Auth method" placeholder="OAuth placeholder" />
+            </ProviderForm>
+          ) : null}
+
+          {activeProvider === "gtm" ? (
+            <ProviderForm provider="gtm" title="Google Tag Manager" onSubmit={onSaveIntegration} onTest={onTestProvider}>
+              <Field name="accountId" label="Account ID" placeholder="1234567" required />
+              <Field name="containerId" label="Container ID" placeholder="GTM-XXXXXXX" required />
+            </ProviderForm>
+          ) : null}
+
+          {activeProvider === "hotjar" ? (
+            <ProviderForm provider="hotjar" title="Hotjar" onSubmit={onSaveIntegration} onTest={onTestProvider}>
+              <Field name="siteId" label="Site ID" placeholder="1234567" />
+              <Field name="apiKey" label="API key or connector token" placeholder="Stored encrypted" type="password" />
+              <Field name="baseUrl" label="Connector URL" placeholder="https://connector.example.com" type="url" />
+            </ProviderForm>
+          ) : null}
+
+          {activeProvider === "openai" ? (
+            <ProviderForm provider="openai" title="ChatGPT / OpenAI Token" onSubmit={onSaveIntegration} onTest={onTestProvider}>
+              <Field name="apiKey" label="API key" placeholder="sk-..." type="password" required tourId="openai-key" />
+            </ProviderForm>
+          ) : null}
+
+          {activeProvider === "mcp" ? (
+            <ProviderForm
+              provider="mcp"
+              title="MCP Connectors"
+              tourId="mcp-card"
+              onSubmit={onSaveIntegration}
+              onTest={onTestProvider}
+              actionLabel="Add remote connector"
+            >
+              <div className="two-col">
+                <Field name="name" label="Name" placeholder="Remote connector" required />
+                <Field name="type" label="Type" placeholder="analytics | crawler | crm" />
+                <Field name="baseUrl" label="Base URL" placeholder="https://mcp.example.com" type="url" required />
+                <label>
+                  Auth type
+                  <select name="authType" defaultValue="none">
+                    <option value="none">none</option>
+                    <option value="bearer">bearer</option>
+                    <option value="oauth">oauth</option>
+                  </select>
+                </label>
+                <Field name="token" label="Token / client metadata" placeholder="Stored encrypted when present" type="password" />
+                <label className="check">
+                  <input name="enabled" type="checkbox" defaultChecked />
+                  Enabled
+                </label>
+              </div>
+            </ProviderForm>
+          ) : null}
+        </div>
       </div>
     </section>
   );
