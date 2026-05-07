@@ -544,6 +544,88 @@ select {
   margin-top: 16px;
 }
 
+.metric-panel {
+  margin-top: 16px;
+}
+
+.split-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.metric-dashboard {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.metric-card {
+  display: grid;
+  gap: 14px;
+  min-height: 190px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.metric-card .card-top {
+  align-items: flex-start;
+}
+
+.metric-card span,
+.metric-card small {
+  color: var(--muted);
+}
+
+.metric-card strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.metric-bars {
+  display: grid;
+  grid-template-columns: repeat(28, minmax(2px, 1fr));
+  align-items: end;
+  gap: 3px;
+  height: 88px;
+  padding-top: 6px;
+}
+
+.metric-bars span {
+  min-height: 6px;
+  border-radius: 999px 999px 2px 2px;
+  background: #111214;
+}
+
+.top-pages-list {
+  display: grid;
+  gap: 8px;
+}
+
+.top-pages-list div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.top-pages-list span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top-pages-list strong {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
 .mini-summary {
   margin-top: 16px;
   align-items: flex-start;
@@ -1045,6 +1127,7 @@ select {
   .client-grid,
   .status-row,
   .integration-grid,
+  .metric-dashboard,
   .tool-page-layout,
   .two-col,
   .insights {
@@ -1072,6 +1155,7 @@ select {
 
   .dashboard-header,
   .section-heading,
+  .split-heading,
   .card-top {
     align-items: flex-start;
     flex-direction: column;

@@ -41,6 +41,29 @@ test("safe integration strips encrypted secrets", () => {
   assert.equal(Object.hasOwn(safe, "encrypted_secret"), false);
 });
 
+test("safe integration redacts secret-like config fields", () => {
+  const safe = safeIntegration({
+    id: "int_2",
+    user_id: "local-user",
+    provider: "openai",
+    display_name: "OpenAI",
+    status: "disconnected",
+    config_json: {
+      displayName: "OpenAI",
+      api_key: "sk-leaked-token",
+      nested: { client_secret: "nested-secret", publicId: "visible" },
+    },
+    encrypted_secret: null,
+    last_tested_at: null,
+    last_error: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+
+  assert.equal(safe.config_json.api_key, "[redacted]");
+  assert.deepEqual(safe.config_json.nested, { client_secret: "[redacted]", publicId: "visible" });
+});
+
 test("insight normalization validates JSON array shape", () => {
   assert.throws(() => normalizeInsights({ title: "not an array" }), /JSON array/);
   assert.throws(() => normalizeInsights([{ title: "Missing required fields" }]), /missing required fields/);

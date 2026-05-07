@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to sync GA4 metrics." },
-      { status: 501 }
+      { status: 400 }
     );
   }
 }
