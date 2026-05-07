@@ -2,11 +2,13 @@
 
 :root {
   color-scheme: light;
-  --demo-paper: #f6f2ea;
-  --demo-paper-deep: #ece4d8;
+  --demo-paper: #f7f8f6;
+  --demo-surface: rgba(255, 255, 255, 0.72);
   --demo-ink: #111214;
   --demo-muted: rgba(17, 18, 20, 0.66);
-  --demo-line: rgba(17, 18, 20, 0.1);
+  --demo-line: rgba(17, 18, 20, 0.12);
+  --demo-blue: #183676;
+  --demo-teal: #0c919a;
 }
 
 * {
@@ -24,60 +26,102 @@ body {
 .demo-shell {
   position: relative;
   z-index: 1;
-  width: min(1640px, calc(100vw - 24px));
+  width: min(1280px, calc(100vw - 28px));
   margin: 0 auto;
-  padding: 56px 0 72px;
+  padding: 36px 0 52px;
 }
 
 .demo-copy {
   display: grid;
-  gap: 16px;
+  gap: 12px;
   justify-items: center;
   text-align: center;
-  padding: 0 20px;
+  padding: 0 16px;
 }
 
-.demo-eyebrow,
-.demo-snippet-label {
+.demo-eyebrow {
   margin: 0;
   font-size: 0.78rem;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--demo-muted);
 }
 
 .demo-copy h1 {
   margin: 0;
-  max-width: 16ch;
+  max-width: 18ch;
   font-family: "Cormorant Garamond", Georgia, serif;
-  font-size: clamp(2.8rem, 5.2vw, 5rem);
+  font-size: clamp(2.4rem, 5vw, 4.7rem);
   font-weight: 600;
-  line-height: 0.92;
-  letter-spacing: -0.03em;
+  line-height: 0.96;
 }
 
 .demo-lede {
   margin: 0;
-  max-width: 58rem;
+  max-width: 48rem;
   font-size: clamp(1rem, 1.2vw, 1.15rem);
-  line-height: 1.7;
+  line-height: 1.6;
   color: var(--demo-muted);
 }
 
 .demo-ribbon {
   display: block;
   width: 100%;
-  margin-top: 32px;
+  margin-top: 28px;
 }
 
-.demo-snippet {
-  width: min(980px, calc(100vw - 40px));
-  margin: 24px auto 0;
-  padding: 18px 20px;
+.demo-tutorial {
+  width: min(1080px, 100%);
+  margin: 22px auto 0;
+  padding: 18px;
   border: 1px solid var(--demo-line);
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.46);
-  backdrop-filter: blur(8px);
+  border-radius: 8px;
+  background: var(--demo-surface);
+  backdrop-filter: blur(12px);
+}
+
+.tutorial-summary {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
+  gap: 18px;
+  align-items: end;
+}
+
+.tutorial-summary h2 {
+  margin: 6px 0 0;
+  font-size: clamp(1.25rem, 2vw, 1.7rem);
+  line-height: 1.15;
+}
+
+.tutorial-summary p,
+.tutorial-grid p {
+  margin: 0;
+  color: var(--demo-muted);
+  line-height: 1.55;
+}
+
+.tutorial-summary code,
+.tutorial-grid code {
+  font-family: "SFMono-Regular", "SF Mono", Consolas, monospace;
+}
+
+.tutorial-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.tutorial-grid article {
+  min-width: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--demo-line);
+}
+
+.tutorial-grid h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  color: var(--demo-blue);
 }
 
 .page-content {
@@ -85,39 +129,44 @@ body {
   z-index: 1;
 }
 
-.demo-snippet pre {
+.tutorial-grid pre {
   margin: 12px 0 0;
+  padding: 12px;
   overflow-x: auto;
-  font-size: 0.92rem;
-  line-height: 1.65;
+  border: 1px solid rgba(12, 145, 154, 0.16);
+  border-radius: 8px;
+  background: rgba(247, 248, 246, 0.72);
+  font-size: 0.82rem;
+  line-height: 1.55;
   color: var(--demo-ink);
-}
-
-.demo-snippet code {
-  font-family: "SFMono-Regular", "SF Mono", Consolas, monospace;
 }
 
 @media (max-width: 720px) {
   .demo-shell {
-    padding-top: 32px;
-    padding-bottom: 44px;
+    width: min(100vw - 20px, 100%);
+    padding-top: 24px;
+    padding-bottom: 36px;
   }
 
   .demo-copy h1 {
-    max-width: 9ch;
-    font-size: clamp(2.8rem, 14vw, 4.7rem);
+    max-width: 12ch;
+    font-size: clamp(2.45rem, 13vw, 4.4rem);
   }
 
   .demo-ribbon {
-    margin-top: 22px;
+    margin-top: 20px;
   }
 
-  .demo-copy,
-  .demo-snippet {
-    width: min(100vw - 24px, 100%);
-    margin-left: auto;
-    margin-right: auto;
-    padding-left: 0;
-    padding-right: 0;
+  .demo-tutorial {
+    padding: 14px;
+  }
+
+  .tutorial-summary,
+  .tutorial-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tutorial-grid pre {
+    font-size: 0.78rem;
   }
 }
