@@ -42,6 +42,8 @@
 
       .frame {
         position: relative;
+        width: 100%;
+        max-width: 100%;
         min-height: var(--dot-ribbon-min-height);
         aspect-ratio: var(--dot-ribbon-aspect);
         border: 1px solid var(--dot-ribbon-border);

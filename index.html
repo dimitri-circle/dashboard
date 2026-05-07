@@ -15,49 +15,68 @@
       background
       aria-hidden="true"
       source="./dots-pattern.webp"
-      style="--dot-ribbon-aura-strength: 0.36; --dot-ribbon-min-height: 100vh;"
+      style="--dot-ribbon-aura-strength: 0.14; --dot-ribbon-min-height: 100vh; opacity: 0.24;"
     ></reactive-dot-ribbon>
 
     <main class="demo-shell">
-      <div class="demo-copy">
+      <header class="demo-copy">
         <p class="demo-eyebrow">Reactive Dot Ribbon</p>
-        <h1>Flowing behind every page.</h1>
+        <h1>One animated layer. Two clean uses.</h1>
         <p class="demo-lede">
-          The page-wide layer below is the same embeddable custom element in
-          background mode. Add it once to the shared layout so login and app
-          pages inherit the motion without blocking clicks.
+          Use the element as a fixed page background or as an inline interactive
+          ribbon. Background mode stays behind content and never captures clicks.
         </p>
-      </div>
+      </header>
 
       <reactive-dot-ribbon
         class="demo-ribbon"
         aria-label="Interactive halftone ribbon"
-        hint="Move through the dots"
+        hint="Move pointer through dots"
         source="./dots-pattern.webp"
         style="--dot-ribbon-aspect: 2048 / 1094; --dot-ribbon-min-height: 220px;"
       ></reactive-dot-ribbon>
 
-      <div class="demo-snippet">
-        <p class="demo-snippet-label">Embed it like this</p>
-        <pre><code>&lt;reactive-dot-ribbon
+      <section class="demo-tutorial" aria-labelledby="tutorial-heading">
+        <div class="tutorial-summary">
+          <div>
+            <p class="demo-eyebrow">Current tutorial</p>
+            <h2 id="tutorial-heading">Install once, choose the mode you need.</h2>
+          </div>
+          <p>
+            Load <code>script.js</code>, include <code>dots-pattern.webp</code>,
+            then place <code>&lt;reactive-dot-ribbon&gt;</code> where the motion belongs.
+          </p>
+        </div>
+
+        <div class="tutorial-grid">
+          <article>
+            <h3>Page background</h3>
+            <p>
+              Put this before the page content. It is fixed, non-interactive,
+              and hidden from assistive technology.
+            </p>
+            <pre><code>&lt;reactive-dot-ribbon
   background
   aria-hidden="true"
   source="./dots-pattern.webp"
-&gt;&lt;/reactive-dot-ribbon&gt;
+&gt;&lt;/reactive-dot-ribbon&gt;</code></pre>
+          </article>
 
-&lt;main class="page-content"&gt;
-  ...
-&lt;/main&gt;
-
-&lt;reactive-dot-ribbon
+          <article>
+            <h3>Inline ribbon</h3>
+            <p>
+              Use this when the ribbon is visible content. Keep the label and
+              optional hint aligned with the interaction.
+            </p>
+            <pre><code>&lt;reactive-dot-ribbon
   aria-label="Interactive halftone ribbon"
-  hint="Move through the dots"
+  hint="Move pointer through dots"
   source="./dots-pattern.webp"
   style="--dot-ribbon-aspect: 2048 / 1094;"
-&gt;&lt;/reactive-dot-ribbon&gt;
-
-&lt;script src="./script.js"&gt;&lt;/script&gt;</code></pre>
-      </div>
+&gt;&lt;/reactive-dot-ribbon&gt;</code></pre>
+          </article>
+        </div>
+      </section>
     </main>
 
     <script src="./script.js"></script>
