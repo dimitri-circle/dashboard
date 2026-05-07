@@ -1,6 +1,7 @@
 import { MongoClient, ServerApiVersion, type Collection, type Db } from "mongodb";
 import type {
   SeoAuditEvent,
+  SeoAppUser,
   SeoClient,
   SeoCompetitiveAnalysis,
   SeoInsight,
@@ -61,6 +62,7 @@ export async function getSeoCollections(): Promise<{
   competitiveAnalyses: Collection<SeoCompetitiveAnalysis>;
   clients: Collection<SeoClient>;
   auditEvents: Collection<SeoAuditEvent>;
+  appUsers: Collection<SeoAppUser>;
 }> {
   const db = await getSeoDb();
   return {
@@ -70,13 +72,16 @@ export async function getSeoCollections(): Promise<{
     competitiveAnalyses: db.collection<SeoCompetitiveAnalysis>("seo_competitive_analyses"),
     clients: db.collection<SeoClient>("seo_clients"),
     auditEvents: db.collection<SeoAuditEvent>("seo_audit_events"),
+    appUsers: db.collection<SeoAppUser>("seo_app_users"),
   };
 }
 
 export async function ensureSeoIndexes() {
-  const { clients, integrations, insights, metricSnapshots, competitiveAnalyses, auditEvents } = await getSeoCollections();
+  const { clients, integrations, insights, metricSnapshots, competitiveAnalyses, auditEvents, appUsers } =
+    await getSeoCollections();
 
   await Promise.all([
+    appUsers.createIndex({ email: 1 }, { unique: true, name: "seo_app_users_email_unique" }),
     clients.createIndex({ id: 1 }, { unique: true, name: "seo_clients_id_unique" }),
     clients.createIndex({ name: 1 }, { name: "seo_clients_name" }),
     integrations.createIndex({ user_id: 1, provider: 1 }, { name: "seo_integrations_client_provider" }),

@@ -34,7 +34,8 @@ For Vercel, add the same values under Project Settings → Environment Variables
 - `OPENAI_SEO_MODEL` (optional)
 - `SEO_ALLOWED_CLIENT_IDS` (optional comma-separated client allow-list)
 - `SEO_ADMIN_SECRET` (optional bearer token for `/api/seo/bootstrap`)
-- `SEO_APP_PASSWORD` (recommended passcode for dashboard access; falls back to `CRON_SECRET` if omitted)
+- `SEO_APP_EMAIL` (dashboard login email, defaults to `dimitri@circleclick.com`)
+- `SEO_APP_PASSWORD` (recommended dashboard login password; falls back to `CRON_SECRET` if omitted)
 - `SEO_APP_SESSION_TOKEN` (recommended random token stored in the login cookie; falls back to `CRON_SECRET` if omitted)
 
 After MongoDB env vars are set, initialize indexes:
@@ -66,7 +67,7 @@ The dashboard now opens to an overview screen with graph-style readiness cards. 
 - metric snapshots
 - generated insights
 
-The current MVP includes a simple passcode login backed by `SEO_APP_PASSWORD` and `SEO_APP_SESSION_TOKEN`, with `CRON_SECRET` as a temporary fallback so existing deployments do not lock themselves out. This protects the app shell and SEO API routes with an HTTP-only cookie. Before broader production use, replace this with account-level auth so users can only access client ids assigned to them.
+The current MVP includes a simple email/password login backed by MongoDB collection `seo_app_users`. Passwords are stored as salted hashes, not plaintext. The env vars `SEO_APP_EMAIL`, `SEO_APP_PASSWORD`, and `SEO_APP_SESSION_TOKEN` remain as a fallback so existing deployments do not lock themselves out. This protects the app shell and SEO API routes with an HTTP-only cookie. Before broader production use, replace this with account-level auth so users can only access client ids assigned to them.
 
 For temporary controlled deployments, set `SEO_ALLOWED_CLIENT_IDS` to a comma-separated list such as `acme,globex`. This does not replace real auth, but it prevents arbitrary workspace ids from being accepted.
 

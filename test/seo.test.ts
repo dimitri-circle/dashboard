@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { hashPassword, verifyPassword } from "../lib/seo/auth";
 import { decryptSecret, encryptSecret } from "../lib/seo/crypto";
 import { rateLimit, resetRateLimitsForTests } from "../lib/seo/rate-limit";
 import { normalizeCompetitiveAnalysis, normalizeInsights, safeIntegration, validateHttpUrl } from "../lib/seo/service";
@@ -113,4 +114,12 @@ test("rate limiter blocks after configured limit", () => {
   rateLimit("test-key", 2, 60_000);
   rateLimit("test-key", 2, 60_000);
   assert.throws(() => rateLimit("test-key", 2, 60_000), /Rate limit exceeded/);
+});
+
+test("app auth password hashing verifies without storing plaintext", () => {
+  const result = hashPassword("secret-password");
+
+  assert.notEqual(result.hash, "secret-password");
+  assert.equal(verifyPassword("secret-password", result.salt, result.hash), true);
+  assert.equal(verifyPassword("wrong-password", result.salt, result.hash), false);
 });

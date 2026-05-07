@@ -105,4 +105,14 @@ export type SeoAuditEvent = {
   metadata_json: Record<string, unknown>;
   created_at: string;
 };
+
+export type SeoAppUser = {
+  _id?: ObjectId;
+  id: string;
+  email: string;
+  password_hash: string;
+  password_salt: string;
+  created_at: string;
+  updated_at: string;
+};
 import type { ObjectId } from "mongodb";
