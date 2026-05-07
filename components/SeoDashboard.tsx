@@ -60,6 +60,17 @@ type CompetitiveAnalysis = {
   created_at: string;
 };
 
+type MetricSnapshot = {
+  id: string;
+  provider: Provider;
+  page_url: string | null;
+  metric_name: string;
+  metric_value: number;
+  dimensions_json: Record<string, unknown>;
+  captured_at: string;
+  created_at: string;
+};
+
 const providerLabels: Record<Provider, string> = {
   ga4: "GA4",
   gtm: "GTM",
@@ -215,9 +226,11 @@ export function SeoDashboard() {
   const [clients, setClients] = useState<Client[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [insights, setInsights] = useState<Insight[]>([]);
+  const [metricSnapshots, setMetricSnapshots] = useState<MetricSnapshot[]>([]);
   const [competitiveAnalyses, setCompetitiveAnalyses] = useState<CompetitiveAnalysis[]>([]);
   const [notice, setNotice] = useState<{ type: "info" | "success" | "error"; message: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncingGa4, setSyncingGa4] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [tourRunning, setTourRunning] = useState(false);
@@ -242,16 +255,18 @@ export function SeoDashboard() {
 
   async function loadDashboard(activeClientId = clientId) {
     try {
-      const [clientBody, integrationBody, insightBody, competitiveBody] = await Promise.all([
+      const [clientBody, integrationBody, insightBody, competitiveBody, metricBody] = await Promise.all([
         api<{ clients: Client[] }>(activeClientId, "/api/seo/clients"),
         api<{ integrations: Integration[] }>(activeClientId, "/api/seo/integrations"),
         api<{ insights: Insight[] }>(activeClientId, "/api/seo/insights"),
         api<{ analyses: CompetitiveAnalysis[] }>(activeClientId, "/api/seo/competitive-analysis"),
+        api<{ metricSnapshots: MetricSnapshot[] }>(activeClientId, "/api/seo/metrics"),
       ]);
       setClients(clientBody.clients);
       setIntegrations(integrationBody.integrations);
       setInsights(insightBody.insights);
       setCompetitiveAnalyses(competitiveBody.analyses);
+      setMetricSnapshots(metricBody.metricSnapshots);
       if (!integrationBody.integrations.some((item) => item.provider === "openai")) {
         setNotice({ type: "info", message: "Connect a ChatGPT/OpenAI token to unlock AI-generated analysis." });
       }
@@ -285,6 +300,7 @@ export function SeoDashboard() {
     setClientId(nextClientId);
     setIntegrations([]);
     setInsights([]);
+    setMetricSnapshots([]);
     setCompetitiveAnalyses([]);
     setNotice({ type: "info", message: `Viewing client workspace: ${nextClientId}` });
     loadDashboard(nextClientId);
@@ -328,7 +344,7 @@ export function SeoDashboard() {
         if (existingIndex < 0) return [...current, body.integration];
         return current.map((item) => (item.id === body.integration.id ? body.integration : item));
       });
-      form.querySelectorAll<HTMLInputElement>('input[type="password"]').forEach((input) => {
+      form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input[type="password"], textarea[name="serviceAccountJson"]').forEach((input) => {
         input.value = "";
       });
       setNotice({ type: "success", message: `${body.integration.display_name} saved.` });
@@ -369,6 +385,20 @@ export function SeoDashboard() {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to generate insights." });
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function syncGa4Metrics() {
+    try {
+      setSyncingGa4(true);
+      const body = await api<{ metricSnapshots: MetricSnapshot[] }>(clientId, "/api/seo/sync/ga4", { method: "POST" });
+      setMetricSnapshots(body.metricSnapshots);
+      await loadDashboard(clientId);
+      setNotice({ type: "success", message: `GA4 synced ${body.metricSnapshots.length} metric snapshots.` });
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to sync GA4 metrics." });
+    } finally {
+      setSyncingGa4(false);
     }
   }
 
@@ -540,8 +570,11 @@ export function SeoDashboard() {
             competitiveAnalyses={competitiveAnalyses}
             insights={insights}
             latestByProvider={latestByProvider}
+            metricSnapshots={metricSnapshots}
+            onSyncGa4={syncGa4Metrics}
             readiness={readiness}
             setView={setView}
+            syncingGa4={syncingGa4}
           />
         ) : null}
 
@@ -604,26 +637,34 @@ function OverviewView({
   competitiveAnalyses,
   insights,
   latestByProvider,
+  metricSnapshots,
+  onSyncGa4,
   readiness,
   savedToolCount,
   setView,
+  syncingGa4,
 }: {
   clients: Client[];
   connectedCount: number;
   competitiveAnalyses: CompetitiveAnalysis[];
   insights: Insight[];
   latestByProvider: Partial<Record<Provider, Integration>>;
+  metricSnapshots: MetricSnapshot[];
+  onSyncGa4: () => void;
   readiness: number;
   savedToolCount: number;
   setView: (view: View) => void;
+  syncingGa4: boolean;
 }) {
+  const ga4Summary = getGa4Summary(metricSnapshots);
+
   return (
     <div className="overview" data-tour="app-overview">
       <section className="overview-grid" data-tour="overview-graphs" aria-label="Overview charts">
         <GraphCard label="Setup readiness" value={`${readiness}%`} helper="OpenAI plus connector coverage" percent={readiness} />
         <GraphCard label="Connected tools" value={`${connectedCount}/5`} helper={`${savedToolCount} saved connectors`} percent={connectedCount * 20} />
-        <GraphCard label="Competitive briefs" value={String(competitiveAnalyses.length)} helper="Generated for active client" percent={Math.min(100, competitiveAnalyses.length * 25)} />
-        <GraphCard label="Insight cards" value={String(insights.length)} helper="Stored recommendations" percent={Math.min(100, insights.length * 15)} />
+        <GraphCard label="GA4 users" value={formatNumber(ga4Summary.activeUsers)} helper="Last 28 synced days" percent={ga4Summary.userPercent} />
+        <GraphCard label="Page views" value={formatNumber(ga4Summary.pageViews)} helper="Last 28 synced days" percent={ga4Summary.pageViewPercent} />
       </section>
 
       <section className="dashboard-grid">
@@ -671,7 +712,105 @@ function OverviewView({
           </div>
         </div>
       </section>
+
+      <section className="panel metric-panel" aria-labelledby="ga4-metrics-title">
+        <div className="section-heading split-heading">
+          <div>
+            <h3 id="ga4-metrics-title">GA4 Performance</h3>
+            <p>Stored snapshots from the Google Analytics Data API.</p>
+          </div>
+          <button className="button button-primary" type="button" disabled={syncingGa4} onClick={onSyncGa4}>
+            {syncingGa4 ? "Syncing..." : "Sync GA4"}
+          </button>
+        </div>
+
+        {metricSnapshots.some((item) => item.provider === "ga4") ? (
+          <div className="metric-dashboard">
+            <MetricTrendChart title="Active users" snapshots={metricSnapshots} metricName="active_users" />
+            <MetricTrendChart title="Sessions" snapshots={metricSnapshots} metricName="sessions" />
+            <MetricTrendChart title="Page views" snapshots={metricSnapshots} metricName="page_views" />
+            <TopPagesList snapshots={metricSnapshots} />
+          </div>
+        ) : (
+          <div className="empty-state">Connect GA4 with credentials, then sync metrics to populate these graphs.</div>
+        )}
+      </section>
     </div>
+  );
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
+}
+
+function getMetricRows(snapshots: MetricSnapshot[], metricName: string) {
+  return snapshots
+    .filter((item) => item.provider === "ga4" && item.metric_name === metricName)
+    .sort((a, b) => new Date(a.captured_at).getTime() - new Date(b.captured_at).getTime());
+}
+
+function getGa4Summary(snapshots: MetricSnapshot[]) {
+  const activeUsers = getMetricRows(snapshots, "active_users").reduce((sum, item) => sum + item.metric_value, 0);
+  const pageViews = getMetricRows(snapshots, "page_views").reduce((sum, item) => sum + item.metric_value, 0);
+  return {
+    activeUsers,
+    pageViews,
+    userPercent: Math.min(100, activeUsers / 10),
+    pageViewPercent: Math.min(100, pageViews / 20),
+  };
+}
+
+function MetricTrendChart({ metricName, snapshots, title }: { metricName: string; snapshots: MetricSnapshot[]; title: string }) {
+  const rows = getMetricRows(snapshots, metricName).slice(-28);
+  const max = Math.max(1, ...rows.map((item) => item.metric_value));
+  const total = rows.reduce((sum, item) => sum + item.metric_value, 0);
+
+  return (
+    <article className="metric-card">
+      <div className="card-top">
+        <div>
+          <span>{title}</span>
+          <strong>{formatNumber(total)}</strong>
+        </div>
+        <small>{rows.length} days</small>
+      </div>
+      <div className="metric-bars" aria-label={`${title} trend`}>
+        {rows.map((item) => (
+          <span
+            key={`${metricName}-${item.captured_at}`}
+            style={{ height: `${Math.max(6, Math.round((item.metric_value / max) * 100))}%` }}
+            title={`${new Date(item.captured_at).toLocaleDateString()}: ${formatNumber(item.metric_value)}`}
+          />
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function TopPagesList({ snapshots }: { snapshots: MetricSnapshot[] }) {
+  const rows = snapshots
+    .filter((item) => item.provider === "ga4" && item.metric_name === "top_page_views")
+    .sort((a, b) => b.metric_value - a.metric_value)
+    .slice(0, 6);
+
+  return (
+    <article className="metric-card top-pages-card">
+      <div className="card-top">
+        <div>
+          <span>Top pages</span>
+          <strong>{rows.length}</strong>
+        </div>
+        <small>by views</small>
+      </div>
+      <div className="top-pages-list">
+        {rows.map((item) => (
+          <div key={`${item.page_url}-${item.metric_value}`}>
+            <span>{item.page_url || "/"}</span>
+            <strong>{formatNumber(item.metric_value)}</strong>
+          </div>
+        ))}
+      </div>
+    </article>
   );
 }
 
@@ -825,7 +964,8 @@ function IntegrationsView({
           {activeProvider === "ga4" ? (
             <ProviderForm provider="ga4" title="Google Analytics 4" onSubmit={onSaveIntegration} onTest={onTestProvider}>
               <Field name="propertyId" label="Property ID" placeholder="properties/123456789" required tourId="ga4-property" />
-              <Field name="authMethod" label="Auth method" placeholder="OAuth placeholder" />
+              <Field name="serviceAccountJson" label="Service account JSON" placeholder='{"client_email":"...","private_key":"..."}' type="textarea" />
+              <Field name="accessToken" label="Temporary access token" placeholder="Stored encrypted" type="password" />
             </ProviderForm>
           ) : null}
 
@@ -1183,7 +1323,11 @@ function Field({
   return (
     <label data-tour={tourId}>
       {label}
-      <input name={name} placeholder={placeholder} type={type} required={required} autoComplete="off" />
+      {type === "textarea" ? (
+        <textarea name={name} placeholder={placeholder} required={required} rows={5} autoComplete="off" />
+      ) : (
+        <input name={name} placeholder={placeholder} type={type} required={required} autoComplete="off" />
+      )}
     </label>
   );
 }

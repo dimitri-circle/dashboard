@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import crypto, { randomUUID } from "node:crypto";
 import { decryptSecret, encryptSecret } from "./crypto";
 import { ensureSeoIndexes, getSeoCollections } from "./db";
 import type {
@@ -15,7 +15,22 @@ import { DEFAULT_CLIENT_ID, normalizeClientId, type SeoTenantScope } from "./ten
 
 const PROVIDERS = new Set<SeoProvider>(["ga4", "gtm", "hotjar", "openai", "mcp", "gsc", "semrush", "ahrefs"]);
 const SECRET_FIELDS = new Set(["apiKey", "token", "bearerToken", "clientSecret", "refreshToken", "accessToken"]);
+const NORMALIZED_SECRET_FIELDS = new Set([
+  "apikey",
+  "token",
+  "bearertoken",
+  "clientsecret",
+  "refreshtoken",
+  "accesstoken",
+  "serviceaccountjson",
+  "privatekey",
+  "secret",
+  "password",
+  "credential",
+  "credentials",
+]);
 const HTTP_TIMEOUT_MS = 7000;
+const MAX_AI_INPUT_STRING_LENGTH = 1200;
 
 type IntegrationPayload = {
   integrationId?: string;
@@ -25,6 +40,12 @@ type IntegrationPayload = {
 };
 
 type SecretMap = Record<string, string>;
+
+type Ga4ServiceAccount = {
+  client_email?: string;
+  private_key?: string;
+  token_uri?: string;
+};
 
 type ClientPayload = {
   id?: string;
@@ -51,6 +72,85 @@ type AuditPayload = {
   metadata?: Record<string, unknown>;
 };
 
+const insightResponseFormat = {
+  type: "json_schema",
+  json_schema: {
+    name: "seo_insight_response",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        insights: {
+          type: "array",
+          minItems: 1,
+          maxItems: 7,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              title: { type: "string" },
+              description: { type: "string" },
+              impact: { type: "string" },
+              recommendation: { type: "string" },
+              priority: { type: "string", enum: ["low", "medium", "high"] },
+              confidence_score: { type: "integer", minimum: 0, maximum: 100 },
+              source_provider: { type: "string", enum: ["ga4", "gtm", "hotjar", "mcp", "mixed"] },
+            },
+            required: ["title", "description", "impact", "recommendation", "priority", "confidence_score", "source_provider"],
+          },
+        },
+      },
+      required: ["insights"],
+    },
+  },
+};
+
+const competitiveAnalysisResponseFormat = {
+  type: "json_schema",
+  json_schema: {
+    name: "seo_competitive_analysis_response",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        summary: { type: "string" },
+        positioning: { type: "string" },
+        competitor_themes: { type: "array", items: { type: "string" } },
+        content_gaps: { type: "array", items: { type: "string" } },
+        keyword_opportunities: { type: "array", items: { type: "string" } },
+        recommendations: {
+          type: "array",
+          minItems: 1,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              title: { type: "string" },
+              rationale: { type: "string" },
+              priority: { type: "string", enum: ["low", "medium", "high"] },
+            },
+            required: ["title", "rationale", "priority"],
+          },
+        },
+        assumptions: { type: "array", items: { type: "string" } },
+        confidence_score: { type: "integer", minimum: 0, maximum: 100 },
+      },
+      required: [
+        "summary",
+        "positioning",
+        "competitor_themes",
+        "content_gaps",
+        "keyword_opportunities",
+        "recommendations",
+        "assumptions",
+        "confidence_score",
+      ],
+    },
+  },
+};
+
 export function nowIso() {
   return new Date().toISOString();
 }
@@ -65,6 +165,7 @@ export function safeIntegration(integration: SeoIntegration): SafeSeoIntegration
   const { _id: _mongoId, encrypted_secret: encryptedSecret, ...safe } = integration;
   return {
     ...safe,
+    config_json: redactForStorage(safe.config_json) as Record<string, unknown>,
     has_secret: Boolean(encryptedSecret),
   };
 }
@@ -83,12 +184,68 @@ function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeConfigKey(key: string) {
+  return key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function isSecretField(key: string) {
+  return SECRET_FIELDS.has(key) || NORMALIZED_SECRET_FIELDS.has(normalizeConfigKey(key));
+}
+
+function hasSecretValue(config: Record<string, unknown>) {
+  return Object.entries(config).some(([key, value]) => isSecretField(key) && Boolean(asString(value)));
+}
+
+function redactForStorage(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(redactForStorage);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [
+        key,
+        isSecretField(key) ? "[redacted]" : redactForStorage(nestedValue),
+      ])
+    );
+  }
+
+  return value;
+}
+
+function sanitizeForAiPayload(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.slice(0, MAX_AI_INPUT_STRING_LENGTH);
+  }
+
+  if (typeof value === "number" || typeof value === "boolean" || value === null) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 50).map(sanitizeForAiPayload);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .slice(0, 80)
+        .map(([key, nestedValue]) => [
+          key,
+          isSecretField(key) ? "[redacted]" : sanitizeForAiPayload(nestedValue),
+        ])
+    );
+  }
+
+  return null;
+}
+
 function stripSecrets(inputConfig: Record<string, unknown> = {}) {
   const config: Record<string, unknown> = {};
   const secrets: SecretMap = {};
 
   for (const [key, value] of Object.entries(inputConfig)) {
-    if (SECRET_FIELDS.has(key)) {
+    if (isSecretField(key)) {
       const secret = asString(value);
       if (secret) {
         secrets[key] = secret;
@@ -138,7 +295,7 @@ function validateIntegrationPayload(payload: IntegrationPayload) {
     throw new Error("Hotjar siteId or connector baseUrl is required.");
   }
 
-  if (provider === "openai" && !asString(config.apiKey) && !payload.integrationId) {
+  if (provider === "openai" && !hasSecretValue(config) && !payload.integrationId) {
     throw new Error("OpenAI apiKey is required.");
   }
 
@@ -186,9 +343,109 @@ async function fetchJson(url: string, options: RequestInit = {}) {
   }
 }
 
+function base64UrlEncode(value: string | Buffer) {
+  const input = typeof value === "string" ? Buffer.from(value) : value;
+  return input.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+function normalizeGa4PropertyId(rawPropertyId: unknown) {
+  const value = asString(rawPropertyId).replace(/^properties\//, "");
+
+  if (!/^\d+$/.test(value)) {
+    throw new Error("GA4 propertyId must be a numeric property id or properties/{id}.");
+  }
+
+  return value;
+}
+
+async function getGoogleServiceAccountAccessToken(serviceAccountJson: string) {
+  let serviceAccount: Ga4ServiceAccount;
+
+  try {
+    serviceAccount = JSON.parse(serviceAccountJson) as Ga4ServiceAccount;
+  } catch {
+    throw new Error("GA4 service account JSON could not be parsed.");
+  }
+
+  const clientEmail = asString(serviceAccount.client_email);
+  const privateKey = asString(serviceAccount.private_key).replace(/\\n/g, "\n");
+  const tokenUri = asString(serviceAccount.token_uri) || "https://oauth2.googleapis.com/token";
+
+  if (!clientEmail || !privateKey) {
+    throw new Error("GA4 service account JSON must include client_email and private_key.");
+  }
+
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const jwtHeader = base64UrlEncode(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const jwtPayload = base64UrlEncode(
+    JSON.stringify({
+      iss: clientEmail,
+      scope: "https://www.googleapis.com/auth/analytics.readonly",
+      aud: tokenUri,
+      exp: issuedAt + 3600,
+      iat: issuedAt,
+    })
+  );
+  const unsignedToken = `${jwtHeader}.${jwtPayload}`;
+  const signature = crypto.createSign("RSA-SHA256").update(unsignedToken).sign(privateKey);
+  const assertion = `${unsignedToken}.${base64UrlEncode(signature)}`;
+
+  const result = await fetchJson(tokenUri, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion,
+    }),
+  });
+
+  if (!result.ok) {
+    throw new Error(`GA4 service account token request failed with HTTP ${result.status}.`);
+  }
+
+  const body = result.body as { access_token?: string };
+  const accessToken = asString(body.access_token);
+  if (!accessToken) {
+    throw new Error("GA4 service account token response did not include an access token.");
+  }
+
+  return accessToken;
+}
+
+async function getGa4AccessToken(integration: SeoIntegration) {
+  const secrets = parseSecretMap(integration);
+
+  if (secrets.accessToken || secrets.bearerToken || secrets.token) {
+    return secrets.accessToken || secrets.bearerToken || secrets.token;
+  }
+
+  if (secrets.serviceAccountJson || secrets.credentials) {
+    return getGoogleServiceAccountAccessToken(secrets.serviceAccountJson || secrets.credentials);
+  }
+
+  throw new Error("GA4 credentials are required. Add an access token or service account JSON.");
+}
+
 function parseSecretMap(integration: SeoIntegration): SecretMap {
   const raw = decryptSecret(integration.encrypted_secret);
-  return raw ? (JSON.parse(raw) as SecretMap) : {};
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Invalid secret payload.");
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>)
+        .map(([key, value]) => [key, asString(value)])
+        .filter(([, value]) => Boolean(value))
+    );
+  } catch {
+    throw new Error("Stored integration secret payload could not be read.");
+  }
 }
 
 function getOpenAiApiKey(integration: SeoIntegration) {
@@ -373,12 +630,26 @@ async function testOpenAi(integration: SeoIntegration) {
 }
 
 async function testGa4(integration: SeoIntegration) {
-  const secrets = parseSecretMap(integration);
-  if (!secrets.accessToken && !secrets.refreshToken && !secrets.clientSecret) {
-    throw new Error("GA4 credentials not configured; saved property metadata only.");
+  const propertyId = normalizeGa4PropertyId(integration.config_json?.propertyId);
+  const accessToken = await getGa4AccessToken(integration);
+  const result = await fetchJson(`https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      dateRanges: [{ startDate: "7daysAgo", endDate: "today" }],
+      metrics: [{ name: "activeUsers" }],
+      limit: 1,
+    }),
+  });
+
+  if (!result.ok) {
+    throw new Error(`GA4 Data API test failed with HTTP ${result.status}.`);
   }
 
-  throw new Error("GA4 OAuth/Data API sync is not configured in this MVP.");
+  return { ok: true, detail: "GA4 Data API returned a report." };
 }
 
 async function testGtm(integration: SeoIntegration) {
@@ -501,7 +772,7 @@ export function buildInsightPrompt(payload: Record<string, unknown>) {
     },
     {
       role: "user",
-      content: `Given this data:\n${JSON.stringify(payload)}\n\nGenerate insights as an array of objects:\n[\n  {\n    "title": "Short specific finding",\n    "description": "What is happening",\n    "impact": "Why it matters",\n    "recommendation": "Specific next action",\n    "priority": "low | medium | high",\n    "confidence_score": 0-100,\n    "source_provider": "ga4 | gtm | hotjar | mcp | mixed"\n  }\n]\n\nRules:\n- Do not invent data.\n- If evidence is weak, lower confidence.\n- Prefer specific recommendations over generic SEO advice.\n- Correlate sources when possible.\n- Mention missing data as setup gaps.\n- Return valid JSON only.`,
+      content: `Given this data:\n${JSON.stringify(payload)}\n\nGenerate a JSON object with an "insights" array. Each insight must include title, description, impact, recommendation, priority, confidence_score, and source_provider.\n\nRules:\n- Do not invent data.\n- If evidence is weak, lower confidence.\n- Prefer specific recommendations over generic SEO advice.\n- Correlate sources when possible.\n- Mention missing data as setup gaps.\n- Return valid JSON only.`,
     },
   ];
 }
@@ -707,6 +978,18 @@ export function normalizeInsights(rawInsights: unknown, scope: SeoTenantScope = 
   return normalized;
 }
 
+function extractInsightRows(parsed: unknown) {
+  if (Array.isArray(parsed)) {
+    return parsed;
+  }
+
+  if (parsed && typeof parsed === "object" && Array.isArray((parsed as { insights?: unknown }).insights)) {
+    return (parsed as { insights: unknown[] }).insights;
+  }
+
+  return parsed;
+}
+
 export async function listInsights(scope: SeoTenantScope) {
   const { insights } = await getSeoCollections();
   const rows = await insights.find({ user_id: scope.userId }).sort({ created_at: -1 }).toArray();
@@ -727,144 +1010,354 @@ export async function listCompetitiveAnalyses(scope: SeoTenantScope) {
 
 export async function generateInsights(scope: SeoTenantScope) {
   const { integrations, insights, metricSnapshots } = await getSeoCollections();
-  const openAi = await integrations.findOne({ user_id: scope.userId, provider: "openai", encrypted_secret: { $ne: null } });
-
-  if (!openAi) {
-    throw new Error("Connect a ChatGPT/OpenAI token before generating AI insights.");
-  }
-
-  const apiKey = getOpenAiApiKey(openAi);
-
-  const [integrationRows, metricRows] = await Promise.all([
-    integrations.find({ user_id: scope.userId }).sort({ created_at: 1 }).toArray(),
-    metricSnapshots.find({ user_id: scope.userId }).sort({ captured_at: -1 }).limit(50).toArray(),
-  ]);
-  const payload = {
-    integrations: integrationRows.map((item) => ({
-      provider: item.provider,
-      display_name: item.display_name,
-      status: item.status,
-      config: item.config_json,
-      last_tested_at: item.last_tested_at,
-      last_error: item.last_error,
-    })),
-    metricSnapshots: metricRows.map(({ _id: _mongoId, ...row }) => row),
-  };
-
-  const result = await fetchJson("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: process.env.OPENAI_SEO_MODEL || "gpt-4o-mini",
-      temperature: 0.2,
-      messages: buildInsightPrompt(payload),
-    }),
-  });
-
-  if (!result.ok) {
-    throw new Error(`OpenAI insight generation failed with HTTP ${result.status}.`);
-  }
-
-  const body = result.body as { choices?: Array<{ message?: { content?: string } }> };
-  const content = body.choices?.[0]?.message?.content;
-  if (!content) {
-    throw new Error("OpenAI returned an empty insight response.");
-  }
-
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(content);
-  } catch {
-    throw new Error("OpenAI returned non-JSON insight content.");
-  }
+    const openAi = await integrations.findOne({ user_id: scope.userId, provider: "openai", encrypted_secret: { $ne: null } });
 
-  const generated = normalizeInsights(parsed, scope).map((insight) => ({
-    ...insight,
-    source_payload_json: payload,
-  }));
+    if (!openAi) {
+      throw new Error("Connect a ChatGPT/OpenAI token before generating AI insights.");
+    }
 
-  if (generated.length) {
-    await insights.insertMany(generated);
+    const apiKey = getOpenAiApiKey(openAi);
+
+    const [integrationRows, metricRows] = await Promise.all([
+      integrations.find({ user_id: scope.userId }).sort({ created_at: 1 }).toArray(),
+      metricSnapshots.find({ user_id: scope.userId }).sort({ captured_at: -1 }).limit(50).toArray(),
+    ]);
+    const payload = sanitizeForAiPayload({
+      integrations: integrationRows.map((item) => ({
+        provider: item.provider,
+        display_name: item.display_name,
+        status: item.status,
+        config: item.config_json,
+        last_tested_at: item.last_tested_at,
+        last_error: item.last_error,
+      })),
+      metricSnapshots: metricRows.map(({ _id: _mongoId, ...row }) => row),
+    }) as Record<string, unknown>;
+
+    const result = await fetchJson("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_SEO_MODEL || "gpt-4o-mini",
+        temperature: 0.2,
+        response_format: insightResponseFormat,
+        messages: buildInsightPrompt(payload),
+      }),
+    });
+
+    if (!result.ok) {
+      throw new Error(`OpenAI insight generation failed with HTTP ${result.status}.`);
+    }
+
+    const body = result.body as { choices?: Array<{ message?: { content?: string; refusal?: string } }> };
+    const refusal = body.choices?.[0]?.message?.refusal;
+    if (refusal) {
+      throw new Error("OpenAI refused to generate insights for the supplied payload.");
+    }
+
+    const content = body.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new Error("OpenAI returned an empty insight response.");
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      throw new Error("OpenAI returned non-JSON insight content.");
+    }
+
+    const generated = normalizeInsights(extractInsightRows(parsed), scope).map((insight) => ({
+      ...insight,
+      source_payload_json: payload,
+    }));
+
+    if (generated.length) {
+      await insights.insertMany(generated);
+      await recordAuditEvent({
+        scope,
+        action: "insights.generated",
+        entityType: "insight",
+        entityId: null,
+        metadata: { count: generated.length, model: process.env.OPENAI_SEO_MODEL || "gpt-4o-mini" },
+      });
+    }
+
+    return generated;
+  } catch (error) {
     await recordAuditEvent({
       scope,
-      action: "insights.generated",
+      action: "insights.generate_failed",
       entityType: "insight",
       entityId: null,
-      metadata: { count: generated.length, model: process.env.OPENAI_SEO_MODEL || "gpt-4o-mini" },
+      metadata: {
+        model: process.env.OPENAI_SEO_MODEL || "gpt-4o-mini",
+        error: error instanceof Error ? error.message : "Unknown insight generation error.",
+      },
     });
+    throw error;
   }
-
-  return generated;
 }
 
 export async function generateCompetitiveAnalysis(scope: SeoTenantScope, rawPayload: CompetitiveAnalysisPayload) {
   const { integrations, competitiveAnalyses } = await getSeoCollections();
-  const openAi = await integrations.findOne({ user_id: scope.userId, provider: "openai", encrypted_secret: { $ne: null } });
-
-  if (!openAi) {
-    throw new Error("Connect a ChatGPT/OpenAI token before generating competitive analysis.");
-  }
-
-  const payload = validateCompetitiveAnalysisPayload(rawPayload);
-  const integrationRows = await integrations.find({ user_id: scope.userId }).sort({ created_at: 1 }).toArray();
-  const analysisInput = {
-    ...payload,
-    connectorStatus: integrationRows.map((item) => ({
-      provider: item.provider,
-      status: item.status,
-      config: item.config_json,
-      last_error: item.last_error,
-    })),
-  };
-
-  const result = await fetchJson("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${getOpenAiApiKey(openAi)}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: process.env.OPENAI_SEO_MODEL || "gpt-4o-mini",
-      temperature: 0.25,
-      messages: buildCompetitiveAnalysisPrompt(analysisInput),
-    }),
-  });
-
-  if (!result.ok) {
-    throw new Error(`OpenAI competitive analysis failed with HTTP ${result.status}.`);
-  }
-
-  const body = result.body as { choices?: Array<{ message?: { content?: string } }> };
-  const content = body.choices?.[0]?.message?.content;
-  if (!content) {
-    throw new Error("OpenAI returned an empty competitive analysis response.");
-  }
-
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(content);
-  } catch {
-    throw new Error("OpenAI returned non-JSON competitive analysis content.");
+    const openAi = await integrations.findOne({ user_id: scope.userId, provider: "openai", encrypted_secret: { $ne: null } });
+
+    if (!openAi) {
+      throw new Error("Connect a ChatGPT/OpenAI token before generating competitive analysis.");
+    }
+
+    const payload = validateCompetitiveAnalysisPayload(rawPayload);
+    const integrationRows = await integrations.find({ user_id: scope.userId }).sort({ created_at: 1 }).toArray();
+    const analysisInput = sanitizeForAiPayload({
+      ...payload,
+      connectorStatus: integrationRows.map((item) => ({
+        provider: item.provider,
+        status: item.status,
+        config: item.config_json,
+        last_error: item.last_error,
+      })),
+    }) as Record<string, unknown>;
+
+    const result = await fetchJson("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${getOpenAiApiKey(openAi)}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_SEO_MODEL || "gpt-4o-mini",
+        temperature: 0.25,
+        response_format: competitiveAnalysisResponseFormat,
+        messages: buildCompetitiveAnalysisPrompt(analysisInput),
+      }),
+    });
+
+    if (!result.ok) {
+      throw new Error(`OpenAI competitive analysis failed with HTTP ${result.status}.`);
+    }
+
+    const body = result.body as { choices?: Array<{ message?: { content?: string; refusal?: string } }> };
+    const refusal = body.choices?.[0]?.message?.refusal;
+    if (refusal) {
+      throw new Error("OpenAI refused to generate competitive analysis for the supplied payload.");
+    }
+
+    const content = body.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new Error("OpenAI returned an empty competitive analysis response.");
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      throw new Error("OpenAI returned non-JSON competitive analysis content.");
+    }
+
+    const analysis = normalizeCompetitiveAnalysis(parsed, payload, scope);
+    analysis.source_payload_json = analysisInput;
+    await competitiveAnalyses.insertOne(analysis);
+    await recordAuditEvent({
+      scope,
+      action: "competitive_analysis.generated",
+      entityType: "insight",
+      entityId: analysis.id,
+      metadata: { industry: analysis.industry, competitor_count: analysis.competitors.length },
+    });
+
+    return analysis;
+  } catch (error) {
+    await recordAuditEvent({
+      scope,
+      action: "competitive_analysis.generate_failed",
+      entityType: "insight",
+      entityId: null,
+      metadata: {
+        model: process.env.OPENAI_SEO_MODEL || "gpt-4o-mini",
+        error: error instanceof Error ? error.message : "Unknown competitive analysis error.",
+      },
+    });
+    throw error;
   }
-
-  const analysis = normalizeCompetitiveAnalysis(parsed, payload, scope);
-  await competitiveAnalyses.insertOne(analysis);
-  await recordAuditEvent({
-    scope,
-    action: "competitive_analysis.generated",
-    entityType: "insight",
-    entityId: analysis.id,
-    metadata: { industry: analysis.industry, competitor_count: analysis.competitors.length },
-  });
-
-  return analysis;
 }
 
-export async function syncGa4Metrics(_scope: SeoTenantScope): Promise<SeoMetricSnapshot[]> {
-  throw new Error("GA4 credentials not configured; sync service is stubbed for this MVP.");
+function ga4DateToIso(rawDate: string) {
+  if (!/^\d{8}$/.test(rawDate)) {
+    return nowIso();
+  }
+
+  return `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}T00:00:00.000Z`;
+}
+
+function parseMetricValue(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function ga4RowsToSnapshots({
+  rows,
+  scope,
+  propertyId,
+  capturedAt,
+}: {
+  rows: Array<{ dimensionValues?: Array<{ value?: string }>; metricValues?: Array<{ value?: string }> }>;
+  scope: SeoTenantScope;
+  propertyId: string;
+  capturedAt: string;
+}): SeoMetricSnapshot[] {
+  const metricNames = ["active_users", "sessions", "page_views", "event_count"];
+
+  return rows.flatMap((row) => {
+    const ga4Date = asString(row.dimensionValues?.[0]?.value);
+    const rowCapturedAt = ga4DateToIso(ga4Date);
+
+    return metricNames.map((metricName, index) => ({
+      id: randomUUID(),
+      user_id: scope.userId,
+      provider: "ga4" as const,
+      page_url: null,
+      metric_name: metricName,
+      metric_value: parseMetricValue(row.metricValues?.[index]?.value),
+      dimensions_json: {
+        date: ga4Date,
+        property_id: propertyId,
+        sync_captured_at: capturedAt,
+      },
+      captured_at: rowCapturedAt,
+      created_at: capturedAt,
+    }));
+  });
+}
+
+function ga4PageRowsToSnapshots({
+  rows,
+  scope,
+  propertyId,
+  capturedAt,
+}: {
+  rows: Array<{ dimensionValues?: Array<{ value?: string }>; metricValues?: Array<{ value?: string }> }>;
+  scope: SeoTenantScope;
+  propertyId: string;
+  capturedAt: string;
+}): SeoMetricSnapshot[] {
+  return rows.map((row) => {
+    const pagePath = asString(row.dimensionValues?.[0]?.value) || "/";
+    return {
+      id: randomUUID(),
+      user_id: scope.userId,
+      provider: "ga4" as const,
+      page_url: pagePath,
+      metric_name: "top_page_views",
+      metric_value: parseMetricValue(row.metricValues?.[0]?.value),
+      dimensions_json: {
+        page_path: pagePath,
+        active_users: parseMetricValue(row.metricValues?.[1]?.value),
+        property_id: propertyId,
+        sync_captured_at: capturedAt,
+      },
+      captured_at: capturedAt,
+      created_at: capturedAt,
+    };
+  });
+}
+
+export async function syncGa4Metrics(scope: SeoTenantScope): Promise<SeoMetricSnapshot[]> {
+  const { integrations, metricSnapshots } = await getSeoCollections();
+  const integration = await integrations.findOne({ user_id: scope.userId, provider: "ga4" });
+
+  if (!integration) {
+    throw new Error("Connect GA4 before syncing metrics.");
+  }
+
+  const propertyId = normalizeGa4PropertyId(integration.config_json?.propertyId);
+  const accessToken = await getGa4AccessToken(integration);
+  const capturedAt = nowIso();
+  const baseUrl = `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`;
+  const commonHeaders = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  };
+
+  const [trendResult, pageResult] = await Promise.all([
+    fetchJson(baseUrl, {
+      method: "POST",
+      headers: commonHeaders,
+      body: JSON.stringify({
+        dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+        dimensions: [{ name: "date" }],
+        metrics: [{ name: "activeUsers" }, { name: "sessions" }, { name: "screenPageViews" }, { name: "eventCount" }],
+        orderBys: [{ dimension: { dimensionName: "date" } }],
+        limit: 32,
+      }),
+    }),
+    fetchJson(baseUrl, {
+      method: "POST",
+      headers: commonHeaders,
+      body: JSON.stringify({
+        dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+        dimensions: [{ name: "pagePath" }],
+        metrics: [{ name: "screenPageViews" }, { name: "activeUsers" }],
+        orderBys: [{ metric: { metricName: "screenPageViews" }, desc: true }],
+        limit: 8,
+      }),
+    }),
+  ]);
+
+  if (!trendResult.ok) {
+    throw new Error(`GA4 trend sync failed with HTTP ${trendResult.status}.`);
+  }
+
+  if (!pageResult.ok) {
+    throw new Error(`GA4 top-page sync failed with HTTP ${pageResult.status}.`);
+  }
+
+  const trendRows =
+    trendResult.body && typeof trendResult.body === "object" && Array.isArray((trendResult.body as { rows?: unknown }).rows)
+      ? ((trendResult.body as { rows: Array<{ dimensionValues?: Array<{ value?: string }>; metricValues?: Array<{ value?: string }> }> }).rows)
+      : [];
+  const pageRows =
+    pageResult.body && typeof pageResult.body === "object" && Array.isArray((pageResult.body as { rows?: unknown }).rows)
+      ? ((pageResult.body as { rows: Array<{ dimensionValues?: Array<{ value?: string }>; metricValues?: Array<{ value?: string }> }> }).rows)
+      : [];
+  const snapshots = [
+    ...ga4RowsToSnapshots({ rows: trendRows, scope, propertyId, capturedAt }),
+    ...ga4PageRowsToSnapshots({ rows: pageRows, scope, propertyId, capturedAt }),
+  ];
+
+  await metricSnapshots.deleteMany({
+    user_id: scope.userId,
+    provider: "ga4",
+    metric_name: { $in: ["active_users", "sessions", "page_views", "event_count", "top_page_views"] },
+  });
+
+  if (snapshots.length) {
+    await metricSnapshots.insertMany(snapshots);
+  }
+
+  await recordAuditEvent({
+    scope,
+    action: "ga4.metrics_synced",
+    entityType: "sync",
+    entityId: integration.id,
+    metadata: { property_id: propertyId, snapshot_count: snapshots.length },
+  });
+
+  const updated: SeoIntegration = {
+    ...integration,
+    status: "connected",
+    last_tested_at: capturedAt,
+    last_error: null,
+    updated_at: capturedAt,
+  };
+  await integrations.replaceOne({ id: integration.id, user_id: scope.userId }, updated);
+
+  return snapshots;
 }
 
 export async function runScheduledSeoSync() {

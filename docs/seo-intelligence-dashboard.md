@@ -94,7 +94,7 @@ The prompt is intentionally conservative. It can reason from the client-provided
 
 ## Supported Integrations
 
-- GA4: stores `propertyId` and auth metadata. Live Data API sync is stubbed until Google OAuth credentials are configured.
+- GA4: stores `propertyId` plus encrypted access-token or service-account JSON credentials. The sync endpoint calls the Google Analytics Data API, stores 28-day trend snapshots, and stores top-page page-view rows for dashboard graphs.
 - GTM: stores `accountId` and `containerId`. Live account/container validation is stubbed until Google OAuth credentials are configured.
 - Hotjar: stores `siteId`, API key, or a connector URL. If a connector URL is present, the MVP tests `/health`.
 - ChatGPT / OpenAI: stores an encrypted user-provided API token and uses it for insight generation.
@@ -118,12 +118,13 @@ The prompt is intentionally conservative. It can reason from the client-provided
 CRON_SECRET="your-random-secret"
 ```
 
-The current job bootstraps storage and returns a clear message because GA4/GTM OAuth sync still needs credentials.
+The current job bootstraps storage. Manual GA4 syncing is available from the overview once GA4 credentials are saved for the active client.
 
 ## MVP Limitations
 
 - No existing auth/session layer was present, so the MVP uses a client workspace header (`x-seo-client-id`) for tenant scoping. Production should bind this to authenticated account permissions.
-- GA4/GTM OAuth flows are not implemented.
+- GA4 OAuth flows are not implemented. Use a temporary access token or service-account JSON with read access to the GA4 property.
+- GTM OAuth flows are not implemented.
 - Hotjar official API support depends on future project credentials or connector availability.
 - Insight quality depends on connected data. The prompt tells the model not to invent missing analytics.
 - Competitive analysis is not a live web research crawler in the MVP. It works from user-provided market context and stored connector status.
