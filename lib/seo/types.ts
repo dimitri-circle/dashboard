@@ -68,6 +68,45 @@ export type SeoMetricSnapshot = {
   created_at: string;
 };
 
+export type SeoCompetitiveFeatureEvidence = {
+  feature: string;
+  label: string;
+  urls: string[];
+};
+
+export type SeoCompetitiveCrawlPage = {
+  url: string;
+  status: "success" | "skipped" | "timeout" | "invalid_url" | "fetch_error";
+  status_code: number | null;
+  title: string | null;
+  meta_description: string | null;
+  headings: string[];
+  nav_labels: string[];
+  cta_text: string[];
+  schema_types: string[];
+  page_categories: string[];
+  features: SeoCompetitiveFeatureEvidence[];
+  error: string | null;
+};
+
+export type SeoCompetitiveCrawlSite = {
+  site_role: "client" | "competitor";
+  name: string;
+  url: string | null;
+  status: "success" | "skipped" | "partial" | "failed";
+  feature_count: number;
+  pages: SeoCompetitiveCrawlPage[];
+  features: SeoCompetitiveFeatureEvidence[];
+  errors: string[];
+};
+
+export type SeoCompetitivePattern = {
+  feature: string;
+  label: string;
+  competitors: string[];
+  evidence_urls: string[];
+};
+
 export type SeoCompetitiveAnalysis = {
   _id?: ObjectId;
   id: string;
@@ -84,6 +123,12 @@ export type SeoCompetitiveAnalysis = {
   competitor_themes: string[];
   content_gaps: string[];
   keyword_opportunities: string[];
+  missing_from_client: SeoCompetitivePattern[];
+  competitor_only_patterns: SeoCompetitivePattern[];
+  shared_patterns: SeoCompetitivePattern[];
+  client_strengths: SeoCompetitivePattern[];
+  crawl_evidence: SeoCompetitiveCrawlSite[];
+  top_performers: Array<{ name: string; url: string | null; feature_count: number }>;
   recommendations: Array<{
     title: string;
     rationale: string;

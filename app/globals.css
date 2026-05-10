@@ -997,6 +997,44 @@ select {
   gap: 12px;
 }
 
+.evidence-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.evidence-strip span,
+.crawl-site .card-top span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.pattern-list,
+.crawl-evidence {
+  display: grid;
+  gap: 10px;
+}
+
+.pattern-row,
+.crawl-site {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.pattern-row span,
+.crawl-site p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
 .recommendation {
   display: grid;
   gap: 8px;

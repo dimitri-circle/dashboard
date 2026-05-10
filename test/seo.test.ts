@@ -3,7 +3,15 @@ import test from "node:test";
 import { hashPassword, verifyPassword } from "../lib/seo/auth";
 import { decryptSecret, encryptSecret } from "../lib/seo/crypto";
 import { rateLimit, resetRateLimitsForTests } from "../lib/seo/rate-limit";
-import { normalizeCompetitiveAnalysis, normalizeInsights, safeIntegration, validateHttpUrl } from "../lib/seo/service";
+import {
+  compareCompetitiveWebsites,
+  extractWebsiteFacts,
+  normalizeCompetitiveAnalysis,
+  normalizeInsights,
+  parseCompetitors,
+  safeIntegration,
+  validateHttpUrl,
+} from "../lib/seo/service";
 import { normalizeClientId } from "../lib/seo/tenant";
 
 process.env.SEO_SECRET_ENCRYPTION_KEY =
@@ -119,6 +127,73 @@ test("competitive analysis normalization validates required JSON shape", () => {
   assert.equal(analysis.user_id, "acme-health");
   assert.equal(analysis.recommendations[0].priority, "high");
   assert.equal(analysis.confidence_score, 71);
+});
+
+test("competitor parsing handles names, URLs, and blanks", () => {
+  assert.deepEqual(parseCompetitors("OtherCo https://other.example\n\nhttps://solo.example, Plain Co"), [
+    { name: "OtherCo", url: "https://other.example" },
+    { name: "solo.example", url: "https://solo.example" },
+    { name: "Plain Co", url: null },
+  ]);
+});
+
+test("website fact extraction detects visible features", () => {
+  const page = extractWebsiteFacts(
+    `<!doctype html>
+      <html>
+        <head>
+          <title>Acme Pricing</title>
+          <meta name="description" content="Book a demo for pricing and plans." />
+          <script type="application/ld+json">{"@type":"FAQPage"}</script>
+        </head>
+        <body>
+          <header><nav><a href="/pricing">Pricing</a><a href="/case-studies">Case Studies</a></nav></header>
+          <h1>Simple pricing plans</h1>
+          <h2>Customer stories</h2>
+          <a href="/demo">Book a demo</a>
+        </body>
+      </html>`,
+    "https://example.com/pricing"
+  );
+
+  const featureIds = page.features.map((feature) => feature.feature);
+  assert.equal(page.title, "Acme Pricing");
+  assert.ok(featureIds.includes("pricing_page"));
+  assert.ok(featureIds.includes("case_studies"));
+  assert.ok(featureIds.includes("demo_cta"));
+  assert.ok(featureIds.includes("structured_schema"));
+});
+
+test("competitive website comparison reports competitor-only gaps", () => {
+  const comparison = compareCompetitiveWebsites([
+    {
+      site_role: "client",
+      name: "Client",
+      url: "https://client.example",
+      status: "success",
+      feature_count: 1,
+      pages: [],
+      features: [{ feature: "blog_resources", label: "Blog or resource hub", urls: ["https://client.example/blog"] }],
+      errors: [],
+    },
+    {
+      site_role: "competitor",
+      name: "Competitor",
+      url: "https://competitor.example",
+      status: "success",
+      feature_count: 2,
+      pages: [],
+      features: [
+        { feature: "blog_resources", label: "Blog or resource hub", urls: ["https://competitor.example/blog"] },
+        { feature: "pricing_page", label: "Pricing page", urls: ["https://competitor.example/pricing"] },
+      ],
+      errors: [],
+    },
+  ]);
+
+  assert.equal(comparison.missing_from_client[0].feature, "pricing_page");
+  assert.equal(comparison.shared_patterns[0].feature, "blog_resources");
+  assert.equal(comparison.top_performers[0].name, "Competitor");
 });
 
 test("MCP connector rejects non-http URLs", () => {

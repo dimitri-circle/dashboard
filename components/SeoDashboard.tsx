@@ -54,6 +54,20 @@ type CompetitiveAnalysis = {
   competitor_themes: string[];
   content_gaps: string[];
   keyword_opportunities: string[];
+  missing_from_client?: Array<{ feature: string; label: string; competitors: string[]; evidence_urls: string[] }>;
+  competitor_only_patterns?: Array<{ feature: string; label: string; competitors: string[]; evidence_urls: string[] }>;
+  shared_patterns?: Array<{ feature: string; label: string; competitors: string[]; evidence_urls: string[] }>;
+  client_strengths?: Array<{ feature: string; label: string; competitors: string[]; evidence_urls: string[] }>;
+  top_performers?: Array<{ name: string; url: string | null; feature_count: number }>;
+  crawl_evidence?: Array<{
+    site_role: "client" | "competitor";
+    name: string;
+    url: string | null;
+    status: "success" | "skipped" | "partial" | "failed";
+    feature_count: number;
+    pages: Array<{ url: string; status: string; title: string | null; features: Array<{ feature: string; label: string; urls: string[] }> }>;
+    errors: string[];
+  }>;
   recommendations: Array<{ title: string; rationale: string; priority: "low" | "medium" | "high" }>;
   assumptions: string[];
   confidence_score: number;
@@ -156,7 +170,7 @@ const tourSteps: Step[] = [
   {
     target: "[data-tour='nav-analysis']",
     title: "Run competitive analysis",
-    content: "Use this view to generate client-specific competitive briefs from the stored OpenAI token.",
+    content: "Use this view to crawl client and competitor sites, then compare observed website patterns.",
     placement: "right",
   },
   {
@@ -1041,7 +1055,7 @@ function CompetitiveView({
       <section className="panel" data-tour="competitive-analysis" aria-labelledby="competitive-title">
         <div className="section-heading">
           <h3 id="competitive-title">Competitive Analysis</h3>
-          <p>Use OpenAI to turn known client, industry, competitor, and keyword context into a focused brief.</p>
+          <p>Crawl and compare websites first. OpenAI can summarize the evidence when a token is connected.</p>
         </div>
 
         <form className="competitive-form" onSubmit={onGenerateCompetitiveAnalysis}>
@@ -1055,7 +1069,7 @@ function CompetitiveView({
           </label>
           <label>
             Known competitors
-            <textarea name="competitors" placeholder="One per line, optional URL after the name" rows={4} />
+            <textarea name="competitors" placeholder="One per line, include URL when available" rows={4} />
           </label>
           <label>
             Target keywords
@@ -1066,7 +1080,7 @@ function CompetitiveView({
             <textarea name="notes" placeholder="Positioning, offers, constraints, or market context" rows={4} />
           </label>
           <button className="button button-primary" data-tour="generate-competitive-analysis" type="submit" disabled={analyzing}>
-            {analyzing ? "Analyzing..." : "Generate Competitive Analysis"}
+            {analyzing ? "Crawling..." : "Crawl and Compare Websites"}
           </button>
         </form>
       </section>
@@ -1080,7 +1094,7 @@ function CompetitiveView({
           {competitiveAnalyses.length ? (
             competitiveAnalyses.map((analysis) => <CompetitiveAnalysisCard analysis={analysis} key={analysis.id} />)
           ) : (
-            <div className="empty-state">Connect OpenAI, add market context, then generate the first competitive brief.</div>
+            <div className="empty-state">Add a client URL and competitor URLs to generate the first crawl-based comparison.</div>
           )}
         </div>
       </section>
@@ -1150,6 +1164,10 @@ function InsightsView({
 }
 
 function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }) {
+  const missingPatterns = analysis.missing_from_client || [];
+  const topPerformers = analysis.top_performers || [];
+  const crawlEvidence = analysis.crawl_evidence || [];
+
   return (
     <article className="analysis-card">
       <div className="card-top">
@@ -1164,6 +1182,15 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
       </div>
 
       <p>{analysis.summary}</p>
+      {topPerformers.length ? (
+        <div className="evidence-strip">
+          {topPerformers.map((performer) => (
+            <span key={`${analysis.id}-${performer.name}`}>
+              {performer.name}: {performer.feature_count} observed features
+            </span>
+          ))}
+        </div>
+      ) : null}
       <dl>
         <div>
           <dt>Positioning</dt>
@@ -1171,12 +1198,41 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
         </div>
       </dl>
 
+      {missingPatterns.length ? (
+        <div className="pattern-list">
+          <h5>Competitors have, client does not</h5>
+          {missingPatterns.slice(0, 5).map((pattern) => (
+            <div className="pattern-row" key={`${analysis.id}-${pattern.feature}`}>
+              <strong>{pattern.label}</strong>
+              <span>{pattern.competitors.join(", ")}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       <div className="analysis-lists">
         <TextList title="Competitor themes" items={analysis.competitor_themes} />
         <TextList title="Content gaps" items={analysis.content_gaps} />
         <TextList title="Keyword opportunities" items={analysis.keyword_opportunities} />
         <TextList title="Assumptions" items={analysis.assumptions} />
       </div>
+
+      {crawlEvidence.length ? (
+        <div className="crawl-evidence">
+          <h5>Crawl evidence</h5>
+          {crawlEvidence.map((site) => (
+            <div className="crawl-site" key={`${analysis.id}-${site.site_role}-${site.name}`}>
+              <div className="card-top">
+                <strong>{site.name}</strong>
+                <span>{site.status}</span>
+              </div>
+              <p>
+                {site.feature_count} features across {site.pages.filter((page) => page.status === "success").length} crawled pages
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="recommendations">
         <h5>Recommended next actions</h5>

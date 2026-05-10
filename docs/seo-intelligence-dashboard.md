@@ -20,6 +20,8 @@ Optional:
 
 ```bash
 export OPENAI_SEO_MODEL="gpt-4o-mini"
+export SEO_COMPETITOR_SEARCH_ENDPOINT=""
+export SEO_COMPETITOR_SEARCH_API_KEY=""
 export PORT=3000
 ```
 
@@ -32,6 +34,8 @@ For Vercel, add the same values under Project Settings → Environment Variables
 - `SEO_SECRET_ENCRYPTION_KEY`
 - `CRON_SECRET`
 - `OPENAI_SEO_MODEL` (optional)
+- `SEO_COMPETITOR_SEARCH_ENDPOINT` (optional competitor discovery provider)
+- `SEO_COMPETITOR_SEARCH_API_KEY` (optional competitor discovery provider token)
 - `SEO_ALLOWED_CLIENT_IDS` (optional comma-separated client allow-list)
 - `SEO_ADMIN_SECRET` (optional bearer token for `/api/seo/bootstrap`)
 - `SEO_APP_EMAIL` (dashboard login email, defaults to `dimitri@circleclick.com`)
@@ -88,16 +92,20 @@ The dashboard includes a simple competitive analysis form. A user supplies:
 - target keywords
 - optional notes
 
-The backend uses the active client workspace's encrypted OpenAI token to generate a structured competitive brief. Results are stored in `seo_competitive_analyses` and scoped to the same client id as integrations and insights.
+The backend first crawls the client website and competitor URLs without requiring OpenAI. It fetches the homepage plus obvious internal pages such as pricing, services, case studies, blog, FAQ, contact, demo, and comparison pages. It extracts visible titles, descriptions, headings, navigation labels, calls to action, schema types, and normalized website features.
 
-The prompt is intentionally conservative. It can reason from the client-provided industry, competitors, keywords, notes, and connector status, but it must not claim live rankings, traffic estimates, market share, or current SERP positions unless those facts are present in connected data.
+The deterministic comparison defines "top performers" as the crawled competitor sites with the strongest observed feature coverage in this run. It does not claim traffic, rankings, revenue, market share, or SERP position. The report stores missing client patterns, shared patterns, client strengths, top performers, and crawl evidence in `seo_competitive_analyses`.
+
+If `SEO_COMPETITOR_SEARCH_ENDPOINT` and `SEO_COMPETITOR_SEARCH_API_KEY` are configured, the backend may request extra competitor suggestions from that provider. Manual competitor URLs remain the reliable path and work without this provider.
+
+If the active client workspace has an encrypted OpenAI token, OpenAI can summarize the already-collected crawl evidence. If no token is connected, or if OpenAI fails, the deterministic crawl report still succeeds and is stored.
 
 ## Supported Integrations
 
 - GA4: stores `propertyId` plus encrypted access-token or service-account JSON credentials. The sync endpoint calls the Google Analytics Data API, stores 28-day trend snapshots, and stores top-page page-view rows for dashboard graphs.
 - GTM: stores `accountId` and `containerId`. Live account/container validation is stubbed until Google OAuth credentials are configured.
 - Hotjar: stores `siteId`, API key, or a connector URL. If a connector URL is present, the MVP tests `/health`.
-- ChatGPT / OpenAI: stores an encrypted user-provided API token and uses it for insight generation.
+- ChatGPT / OpenAI: stores an encrypted user-provided API token and uses it for insight generation plus optional competitive-report summaries.
 - MCP connectors: stores remote HTTP connector config only. The MVP tests `/.well-known/oauth-protected-resource`, `/health`, and `/metadata`.
 
 ## Security Model
@@ -107,7 +115,7 @@ The prompt is intentionally conservative. It can reason from the client-provided
 - Secrets are not logged by the server or rendered back into the frontend.
 - Expensive/mutating API routes have lightweight per-process rate limits.
 - Integration saves, tests, deletes, client creation, and insight generation write audit events to `seo_audit_events`.
-- Competitive analysis generation writes an audit event and stores the prompt input context, but never stores or returns the raw OpenAI token.
+- Competitive analysis generation writes an audit event and stores crawl evidence plus sanitized prompt input context, but never stores or returns the raw OpenAI token.
 - MCP support is remote HTTP configuration only. The app does not execute local shell commands, spawn MCP servers, or support stdio MCP.
 
 ## Scheduled Jobs
@@ -127,7 +135,7 @@ The current job bootstraps storage. Manual GA4 syncing is available from the ove
 - GTM OAuth flows are not implemented.
 - Hotjar official API support depends on future project credentials or connector availability.
 - Insight quality depends on connected data. The prompt tells the model not to invent missing analytics.
-- Competitive analysis is not a live web research crawler in the MVP. It works from user-provided market context and stored connector status.
+- Competitive crawling is intentionally shallow and evidence-first. It fetches HTML only, executes no scripts, caps pages and bytes, and may miss content rendered only on the client.
 
 ## Future Roadmap
 
@@ -138,5 +146,5 @@ The current job bootstraps storage. Manual GA4 syncing is available from the ove
 - Keyword-level opportunity scoring
 - Core Web Vitals import
 - SERP tracking
-- Live competitor crawling with reviewed source attribution
+- Deeper competitor crawling with reviewed source attribution
 - Automated task creation

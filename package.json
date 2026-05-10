@@ -13,6 +13,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "cheerio": "^1.2.0",
     "mongodb": "^7.2.0",
     "next": "^16.2.4",
     "react": "^19.2.5",

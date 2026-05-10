@@ -1,9 +1,14 @@
 import crypto, { randomUUID } from "node:crypto";
+import { load } from "cheerio";
 import { decryptSecret, encryptSecret } from "./crypto";
 import { ensureSeoIndexes, getSeoCollections } from "./db";
 import type {
   SeoClient,
   SeoCompetitiveAnalysis,
+  SeoCompetitiveCrawlPage,
+  SeoCompetitiveCrawlSite,
+  SeoCompetitiveFeatureEvidence,
+  SeoCompetitivePattern,
   SafeSeoIntegration,
   SeoInsight,
   SeoIntegration,
@@ -31,6 +36,10 @@ const NORMALIZED_SECRET_FIELDS = new Set([
 ]);
 const HTTP_TIMEOUT_MS = 7000;
 const MAX_AI_INPUT_STRING_LENGTH = 1200;
+const CRAWL_TIMEOUT_MS = 6000;
+const MAX_CRAWL_BYTES = 650_000;
+const MAX_CRAWL_PAGES_PER_SITE = 6;
+const MAX_COMPETITOR_SITES = 8;
 
 type IntegrationPayload = {
   integrationId?: string;
@@ -150,6 +159,46 @@ const competitiveAnalysisResponseFormat = {
     },
   },
 };
+
+const WEBSITE_FEATURES: Array<{
+  id: string;
+  label: string;
+  patterns: RegExp[];
+  pageCategories?: string[];
+}> = [
+  { id: "pricing_page", label: "Pricing page", patterns: [/\bpricing\b|\bplans?\b|\bpackages?\b/], pageCategories: ["pricing"] },
+  {
+    id: "case_studies",
+    label: "Case studies or customer stories",
+    patterns: [/\bcase stud(y|ies)\b|\bcustomer stor(y|ies)\b|\bsuccess stor(y|ies)\b/],
+    pageCategories: ["case_study"],
+  },
+  { id: "testimonials", label: "Testimonials or reviews", patterns: [/\btestimonial(s)?\b|\breviews?\b|\bwhat customers say\b/] },
+  { id: "comparison_pages", label: "Comparison pages", patterns: [/\bcompare\b|\bversus\b|\bvs\.?\b|\balternative(s)?\b/], pageCategories: ["comparison"] },
+  { id: "faq", label: "FAQ content", patterns: [/\bfaq\b|\bfrequently asked\b|\bquestions\b/], pageCategories: ["faq"] },
+  { id: "lead_magnet", label: "Lead magnet", patterns: [/\bguide\b|\bwhite ?paper\b|\bebook\b|\bchecklist\b|\bdownload\b/] },
+  { id: "demo_cta", label: "Demo or booking CTA", patterns: [/\bbook (a )?(demo|call)\b|\bschedule\b|\brequest a demo\b|\bget a demo\b/] },
+  { id: "calculator", label: "Calculator or estimator", patterns: [/\bcalculator\b|\bestimator\b|\broi\b|\bassessment\b/] },
+  { id: "service_pages", label: "Service pages", patterns: [/\bservices?\b|\bsolutions?\b|\bofferings?\b/], pageCategories: ["services"] },
+  { id: "industry_pages", label: "Industry pages", patterns: [/\bindustr(y|ies)\b|\bfor [a-z ]+\b/], pageCategories: ["industry"] },
+  { id: "location_pages", label: "Location pages", patterns: [/\blocations?\b|\bnear me\b|\bserving\b|\bservice area\b/], pageCategories: ["location"] },
+  { id: "blog_resources", label: "Blog or resource hub", patterns: [/\bblog\b|\bresources?\b|\binsights?\b|\blearn\b/], pageCategories: ["blog"] },
+  { id: "trust_badges", label: "Trust badges or proof", patterns: [/\bcertified\b|\btrusted\b|\bsecure\b|\bcompliant\b|\bsoc 2\b|\bhipaa\b|\baward(s)?\b/] },
+  { id: "structured_schema", label: "Structured data schema", patterns: [/\bschema\b|\bstructured data\b/] },
+  { id: "newsletter", label: "Newsletter signup", patterns: [/\bnewsletter\b|\bsubscribe\b|\bupdates\b/] },
+  { id: "contact_page", label: "Contact page", patterns: [/\bcontact\b|\btalk to\b|\bget in touch\b/], pageCategories: ["contact"] },
+];
+
+const KEY_PAGE_PATTERNS = [
+  /\bpricing\b|\bplans?\b|\bpackages?\b/,
+  /\bservices?\b|\bsolutions?\b|\bfeatures?\b/,
+  /\bcase-stud(y|ies)\b|\bcase stud(y|ies)\b|\bcustomers?\b/,
+  /\bblog\b|\bresources?\b|\binsights?\b/,
+  /\babout\b|\bcompany\b/,
+  /\bfaq\b|\bquestions\b/,
+  /\bcontact\b|\bdemo\b|\bbook\b|\bschedule\b/,
+  /\bcompare\b|\bvs\b|\balternatives?\b/,
+];
 
 export function nowIso() {
   return new Date().toISOString();
@@ -785,7 +834,7 @@ function parseLines(rawValue: unknown) {
     .slice(0, 20);
 }
 
-function parseCompetitors(rawValue: unknown) {
+export function parseCompetitors(rawValue: unknown) {
   return parseLines(rawValue).map((item) => {
     const match = item.match(/^(.*?)\s+(https?:\/\/\S+)$/i);
     if (match) {
@@ -800,13 +849,27 @@ function parseCompetitors(rawValue: unknown) {
   });
 }
 
+function dedupeCompetitors(competitors: Array<{ name: string; url: string | null }>) {
+  const seen = new Set<string>();
+  return competitors
+    .filter((competitor) => {
+      const key = (competitor.url || competitor.name).toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .slice(0, MAX_COMPETITOR_SITES);
+}
+
 function validateCompetitiveAnalysisPayload(payload: CompetitiveAnalysisPayload) {
   const clientName = asString(payload.clientName).slice(0, 140);
   const industry = asString(payload.industry).slice(0, 140);
   const websiteUrl = asString(payload.websiteUrl);
   const market = asString(payload.market).slice(0, 140);
   const targetAudience = asString(payload.targetAudience).slice(0, 240);
-  const competitors = parseCompetitors(payload.competitors);
+  const competitors = dedupeCompetitors(parseCompetitors(payload.competitors));
   const targetKeywords = parseLines(payload.targetKeywords);
   const notes = asString(payload.notes).slice(0, 1000);
 
@@ -822,6 +885,12 @@ function validateCompetitiveAnalysisPayload(payload: CompetitiveAnalysisPayload)
     validateHttpUrl(websiteUrl, "websiteUrl");
   }
 
+  competitors.forEach((competitor, index) => {
+    if (competitor.url) {
+      validateHttpUrl(competitor.url, `competitors[${index}].url`);
+    }
+  });
+
   return {
     clientName,
     industry,
@@ -832,6 +901,551 @@ function validateCompetitiveAnalysisPayload(payload: CompetitiveAnalysisPayload)
     targetKeywords,
     notes,
   };
+}
+
+function textFromParts(parts: string[]) {
+  return parts
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function cleanText(value: string) {
+  return value.replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+function normalizeCrawlUrl(rawUrl: string) {
+  const url = validateHttpUrl(rawUrl, "crawlUrl");
+  assertPublicCrawlTarget(url);
+  url.hash = "";
+  return url;
+}
+
+function assertPublicCrawlTarget(url: URL) {
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const privateIpv4 =
+    /^127\./.test(hostname) ||
+    /^10\./.test(hostname) ||
+    /^192\.168\./.test(hostname) ||
+    /^169\.254\./.test(hostname) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
+
+  if (hostname === "localhost" || hostname === "::1" || hostname === "0.0.0.0" || privateIpv4) {
+    throw new Error("crawlUrl must target a public website.");
+  }
+}
+
+function classifyPage(url: string, text: string) {
+  const input = `${url} ${text}`.toLowerCase();
+  const categories: string[] = [];
+  const checks: Array<[string, RegExp]> = [
+    ["pricing", /\bpricing\b|\bplans?\b|\bpackages?\b/],
+    ["services", /\bservices?\b|\bsolutions?\b|\bfeatures?\b/],
+    ["case_study", /\bcase-stud(y|ies)\b|\bcase stud(y|ies)\b|\bcustomer stor(y|ies)\b/],
+    ["blog", /\bblog\b|\bresources?\b|\binsights?\b|\blearn\b/],
+    ["about", /\babout\b|\bcompany\b|\bteam\b/],
+    ["faq", /\bfaq\b|\bfrequently asked\b|\bquestions\b/],
+    ["contact", /\bcontact\b|\bget in touch\b|\btalk to\b/],
+    ["comparison", /\bcompare\b|\bversus\b|\bvs\.?\b|\balternative(s)?\b/],
+    ["industry", /\bindustr(y|ies)\b|\bfor [a-z ]+\b/],
+    ["location", /\blocations?\b|\bnear me\b|\bservice area\b/],
+  ];
+
+  for (const [category, pattern] of checks) {
+    if (pattern.test(input)) {
+      categories.push(category);
+    }
+  }
+
+  return categories.slice(0, 8);
+}
+
+function featureEvidence(featureId: string, label: string, url: string): SeoCompetitiveFeatureEvidence {
+  return { feature: featureId, label, urls: [url] };
+}
+
+function detectWebsiteFeatures(page: {
+  url: string;
+  title: string | null;
+  metaDescription: string | null;
+  headings: string[];
+  navLabels: string[];
+  ctaText: string[];
+  schemaTypes: string[];
+  pageCategories: string[];
+}) {
+  const evidence = new Map<string, SeoCompetitiveFeatureEvidence>();
+  const text = textFromParts([
+    page.url,
+    page.title || "",
+    page.metaDescription || "",
+    ...page.headings,
+    ...page.navLabels,
+    ...page.ctaText,
+    ...page.schemaTypes,
+    ...page.pageCategories,
+  ]);
+
+  for (const feature of WEBSITE_FEATURES) {
+    const categoryMatch = feature.pageCategories?.some((category) => page.pageCategories.includes(category));
+    const textMatch = feature.patterns.some((pattern) => pattern.test(text));
+    if (categoryMatch || textMatch) {
+      evidence.set(feature.id, featureEvidence(feature.id, feature.label, page.url));
+    }
+  }
+
+  if (page.schemaTypes.length) {
+    evidence.set("structured_schema", featureEvidence("structured_schema", "Structured data schema", page.url));
+  }
+
+  return [...evidence.values()];
+}
+
+export function extractWebsiteFacts(html: string, pageUrl: string): SeoCompetitiveCrawlPage {
+  const $ = load(html);
+  const schemaTypes = $('script[type="application/ld+json"]')
+    .map((_, element) => {
+      try {
+        const parsed = JSON.parse($(element).text());
+        const rows = Array.isArray(parsed) ? parsed : [parsed];
+        return rows
+          .map((row) => (row && typeof row === "object" ? asString((row as Record<string, unknown>)["@type"]) : ""))
+          .filter(Boolean)
+          .join(",");
+      } catch {
+        return "";
+      }
+    })
+    .get()
+    .flatMap((value) => value.split(","))
+    .filter(Boolean)
+    .slice(0, 12);
+  $("script, style, noscript, svg").remove();
+
+  const title = cleanText($("title").first().text()) || null;
+  const metaDescription = cleanText($('meta[name="description"]').attr("content") || "") || null;
+  const headings = $("h1, h2, h3")
+    .map((_, element) => cleanText($(element).text()))
+    .get()
+    .filter(Boolean)
+    .slice(0, 24);
+  const navLabels = $("nav a, header a")
+    .map((_, element) => cleanText($(element).text()))
+    .get()
+    .filter(Boolean)
+    .slice(0, 30);
+  const ctaText = $('a, button, input[type="submit"]')
+    .map((_, element) => cleanText($(element).text() || $(element).attr("value") || ""))
+    .get()
+    .filter((value) => /\b(get|book|schedule|start|try|contact|demo|download|subscribe|quote|call)\b/i.test(value))
+    .slice(0, 18);
+  const visibleText = cleanText($("body").text()).slice(0, 1200);
+  const pageCategories = classifyPage(pageUrl, textFromParts([visibleText, ...headings, ...navLabels]));
+  const features = detectWebsiteFeatures({
+    url: pageUrl,
+    title,
+    metaDescription,
+    headings,
+    navLabels,
+    ctaText,
+    schemaTypes,
+    pageCategories,
+  });
+
+  return {
+    url: pageUrl,
+    status: "success",
+    status_code: 200,
+    title,
+    meta_description: metaDescription,
+    headings,
+    nav_labels: navLabels,
+    cta_text: ctaText,
+    schema_types: schemaTypes,
+    page_categories: pageCategories,
+    features,
+    error: null,
+  };
+}
+
+function collectInternalKeyLinks(html: string, baseUrl: URL) {
+  const $ = load(html);
+  const links = $("a[href]")
+    .map((_, element) => asString($(element).attr("href")))
+    .get()
+    .map((href) => {
+      try {
+        const url = new URL(href, baseUrl);
+        url.hash = "";
+        return url;
+      } catch {
+        return null;
+      }
+    })
+    .filter((url): url is URL => Boolean(url))
+    .filter((url) => url.origin === baseUrl.origin && (url.protocol === "http:" || url.protocol === "https:"))
+    .filter((url) => KEY_PAGE_PATTERNS.some((pattern) => pattern.test(`${url.pathname} ${url.search}`.toLowerCase())));
+
+  const seen = new Set<string>([baseUrl.toString()]);
+  return links
+    .filter((url) => {
+      const key = url.toString();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .slice(0, MAX_CRAWL_PAGES_PER_SITE - 1);
+}
+
+async function readLimitedText(response: Response) {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType && !contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
+    throw new Error(`Unsupported content type: ${contentType.slice(0, 80)}`);
+  }
+
+  if (!response.body) {
+    return await response.text();
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    received += value.byteLength;
+    if (received > MAX_CRAWL_BYTES) {
+      await reader.cancel();
+      throw new Error(`Page exceeded ${MAX_CRAWL_BYTES} byte crawl limit.`);
+    }
+    chunks.push(value);
+  }
+
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
+async function fetchHtmlPage(url: URL) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CRAWL_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: "text/html,application/xhtml+xml",
+        "User-Agent": "CircleClickSEOResearchBot/1.0 (+https://circleclick.com)",
+      },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    return {
+      html: await readLimitedText(response),
+      statusCode: response.status,
+      finalUrl: response.url,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("timeout");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function failedCrawlPage(url: string, status: SeoCompetitiveCrawlPage["status"], error: string): SeoCompetitiveCrawlPage {
+  return {
+    url,
+    status,
+    status_code: null,
+    title: null,
+    meta_description: null,
+    headings: [],
+    nav_labels: [],
+    cta_text: [],
+    schema_types: [],
+    page_categories: [],
+    features: [],
+    error: error.slice(0, 240),
+  };
+}
+
+function mergeFeatureEvidence(pages: SeoCompetitiveCrawlPage[]) {
+  const merged = new Map<string, SeoCompetitiveFeatureEvidence>();
+  for (const page of pages) {
+    for (const feature of page.features) {
+      const current = merged.get(feature.feature);
+      if (current) {
+        current.urls = [...new Set([...current.urls, ...feature.urls])].slice(0, 5);
+      } else {
+        merged.set(feature.feature, { ...feature, urls: feature.urls.slice(0, 5) });
+      }
+    }
+  }
+  return [...merged.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+async function crawlWebsite(site: { site_role: "client" | "competitor"; name: string; url: string | null }): Promise<SeoCompetitiveCrawlSite> {
+  if (!site.url) {
+    return {
+      site_role: site.site_role,
+      name: site.name,
+      url: null,
+      status: "skipped",
+      feature_count: 0,
+      pages: [failedCrawlPage("", "skipped", "No URL was supplied.")],
+      features: [],
+      errors: ["No URL was supplied."],
+    };
+  }
+
+  let baseUrl: URL;
+  try {
+    baseUrl = normalizeCrawlUrl(site.url);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid URL.";
+    return {
+      site_role: site.site_role,
+      name: site.name,
+      url: site.url,
+      status: "failed",
+      feature_count: 0,
+      pages: [failedCrawlPage(site.url, "invalid_url", message)],
+      features: [],
+      errors: [message],
+    };
+  }
+
+  const pages: SeoCompetitiveCrawlPage[] = [];
+  const errors: string[] = [];
+  let keyLinks: URL[] = [];
+
+  try {
+    const home = await fetchHtmlPage(baseUrl);
+    const homeFacts = extractWebsiteFacts(home.html, home.finalUrl || baseUrl.toString());
+    homeFacts.status_code = home.statusCode;
+    pages.push(homeFacts);
+    keyLinks = collectInternalKeyLinks(home.html, baseUrl);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to crawl homepage.";
+    const status = message === "timeout" ? "timeout" : "fetch_error";
+    pages.push(failedCrawlPage(baseUrl.toString(), status, message));
+    errors.push(message);
+  }
+
+  for (const url of keyLinks) {
+    try {
+      const page = await fetchHtmlPage(url);
+      const facts = extractWebsiteFacts(page.html, page.finalUrl || url.toString());
+      facts.status_code = page.statusCode;
+      pages.push(facts);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to crawl page.";
+      const status = message === "timeout" ? "timeout" : "fetch_error";
+      pages.push(failedCrawlPage(url.toString(), status, message));
+      errors.push(`${url.pathname}: ${message}`);
+    }
+  }
+
+  const features = mergeFeatureEvidence(pages);
+  const successCount = pages.filter((page) => page.status === "success").length;
+  const status = successCount === 0 ? "failed" : errors.length ? "partial" : "success";
+
+  return {
+    site_role: site.site_role,
+    name: site.name,
+    url: baseUrl.toString(),
+    status,
+    feature_count: features.length,
+    pages,
+    features,
+    errors: errors.slice(0, 8),
+  };
+}
+
+function patternFromFeature(feature: SeoCompetitiveFeatureEvidence, competitors: string[]): SeoCompetitivePattern {
+  return {
+    feature: feature.feature,
+    label: feature.label,
+    competitors,
+    evidence_urls: feature.urls.slice(0, 8),
+  };
+}
+
+function featuresById(site: SeoCompetitiveCrawlSite | undefined) {
+  return new Map((site?.features || []).map((feature) => [feature.feature, feature]));
+}
+
+export function compareCompetitiveWebsites(crawlEvidence: SeoCompetitiveCrawlSite[]) {
+  const client = crawlEvidence.find((site) => site.site_role === "client");
+  const competitors = crawlEvidence.filter((site) => site.site_role === "competitor" && site.status !== "skipped");
+  const clientFeatures = featuresById(client);
+  const competitorFeatureMap = new Map<string, { feature: SeoCompetitiveFeatureEvidence; sites: SeoCompetitiveCrawlSite[] }>();
+
+  for (const competitor of competitors) {
+    for (const feature of competitor.features) {
+      const current = competitorFeatureMap.get(feature.feature);
+      if (current) {
+        current.sites.push(competitor);
+        current.feature.urls = [...new Set([...current.feature.urls, ...feature.urls])].slice(0, 8);
+      } else {
+        competitorFeatureMap.set(feature.feature, { feature: { ...feature }, sites: [competitor] });
+      }
+    }
+  }
+
+  const competitorPatterns = [...competitorFeatureMap.values()].map((entry) =>
+    patternFromFeature(
+      entry.feature,
+      entry.sites.map((site) => site.name)
+    )
+  );
+  const missingFromClient = competitorPatterns
+    .filter((pattern) => !clientFeatures.has(pattern.feature))
+    .sort((a, b) => b.competitors.length - a.competitors.length || a.label.localeCompare(b.label));
+  const sharedPatterns = competitorPatterns.filter((pattern) => clientFeatures.has(pattern.feature));
+  const clientStrengths = [...clientFeatures.values()]
+    .filter((feature) => !competitorFeatureMap.has(feature.feature))
+    .map((feature) => patternFromFeature(feature, [client?.name || "Client"]));
+  const topPerformers = competitors
+    .slice()
+    .sort((a, b) => b.feature_count - a.feature_count)
+    .slice(0, 3)
+    .map((site) => ({ name: site.name, url: site.url, feature_count: site.feature_count }));
+
+  return {
+    missing_from_client: missingFromClient.slice(0, 10),
+    competitor_only_patterns: missingFromClient.slice(0, 10),
+    shared_patterns: sharedPatterns.slice(0, 10),
+    client_strengths: clientStrengths.slice(0, 10),
+    top_performers: topPerformers,
+  };
+}
+
+function deterministicCompetitiveAnalysis(
+  payload: ReturnType<typeof validateCompetitiveAnalysisPayload>,
+  crawlEvidence: SeoCompetitiveCrawlSite[]
+) {
+  const comparison = compareCompetitiveWebsites(crawlEvidence);
+  const clientSite = crawlEvidence.find((site) => site.site_role === "client");
+  const competitorsWithUrls = crawlEvidence.filter((site) => site.site_role === "competitor" && site.url);
+  const missingLabels = comparison.missing_from_client.map((pattern) => pattern.label);
+  const sharedLabels = comparison.shared_patterns.map((pattern) => pattern.label);
+  const assumptions = [
+    "Top performers are defined by observed feature coverage in this crawl, not by traffic, rankings, or revenue.",
+    "The crawler executes no scripts and only reviews fetched HTML from the homepage plus obvious key internal pages.",
+  ];
+
+  if (!payload.websiteUrl) {
+    assumptions.push("No client website URL was supplied, so the client feature baseline could not be crawled.");
+  }
+
+  if (!competitorsWithUrls.length) {
+    assumptions.push("No competitor URLs were available to crawl.");
+  }
+
+  crawlEvidence
+    .filter((site) => site.status === "failed" || site.status === "partial")
+    .forEach((site) => assumptions.push(`${site.name} crawl status was ${site.status}.`));
+
+  return {
+    summary: competitorsWithUrls.length
+      ? `Crawled ${competitorsWithUrls.length} competitor site${competitorsWithUrls.length === 1 ? "" : "s"} and compared observed website features against ${payload.clientName}.`
+      : `Built a crawl-first competitive baseline for ${payload.clientName}, but no competitor websites were available for comparison.`,
+    positioning: missingLabels.length
+      ? `${payload.clientName} should close the clearest website gaps around ${missingLabels.slice(0, 3).join(", ")}.`
+      : sharedLabels.length
+        ? `${payload.clientName} already shares the main observed website patterns from this competitor set.`
+        : "More crawlable competitor evidence is needed before making a strong positioning recommendation.",
+    competitor_themes: comparison.top_performers.length
+      ? comparison.top_performers.map((site) => `${site.name}: ${site.feature_count} observed website features`)
+      : ["No crawlable competitor feature themes were observed."],
+    content_gaps: missingLabels.length ? missingLabels : ["No competitor-only content gaps were observed in this crawl."],
+    keyword_opportunities: payload.targetKeywords.length
+      ? payload.targetKeywords
+      : comparison.missing_from_client.slice(0, 5).map((pattern) => pattern.label),
+    recommendations: comparison.missing_from_client.length
+      ? comparison.missing_from_client.slice(0, 5).map((pattern) => ({
+          title: `Add or improve ${pattern.label.toLowerCase()}`,
+          rationale: `${pattern.competitors.join(", ")} show this pattern, but it was not observed on ${payload.clientName}'s crawl.`,
+          priority: pattern.competitors.length >= 2 ? "high" : ("medium" as SeoPriority),
+        }))
+      : [
+          {
+            title: "Expand competitor evidence",
+            rationale: "The first crawl did not find clear competitor-only website patterns.",
+            priority: "medium" as SeoPriority,
+          },
+        ],
+    assumptions,
+    confidence_score: Math.min(
+      92,
+      Math.max(35, 45 + (clientSite?.feature_count || 0) * 3 + competitorsWithUrls.length * 5 - assumptions.length * 3)
+    ),
+    ...comparison,
+    crawl_evidence: crawlEvidence,
+  };
+}
+
+async function discoverCompetitors(payload: ReturnType<typeof validateCompetitiveAnalysisPayload>) {
+  const endpoint = asString(process.env.SEO_COMPETITOR_SEARCH_ENDPOINT);
+  const apiKey = asString(process.env.SEO_COMPETITOR_SEARCH_API_KEY);
+
+  if (!endpoint || !apiKey) {
+    return [];
+  }
+
+  try {
+    const result = await fetchJson(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        clientName: payload.clientName,
+        industry: payload.industry,
+        market: payload.market,
+        targetKeywords: payload.targetKeywords,
+      }),
+    });
+
+    if (!result.ok) {
+      return [];
+    }
+
+    const body = result.body as { competitors?: unknown };
+    if (Array.isArray(body.competitors)) {
+      return body.competitors
+        .map((item) => {
+          if (typeof item === "string") {
+            return parseCompetitors(item)[0];
+          }
+          const row = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+          const url = asString(row.url);
+          return {
+            name: asString(row.name) || (url ? url.replace(/^https?:\/\//i, "").replace(/\/$/, "") : ""),
+            url: url || null,
+          };
+        })
+        .filter((competitor) => competitor?.name && competitor.url);
+    }
+
+    return parseCompetitors(body.competitors).filter((competitor) => competitor.url);
+  } catch {
+    return [];
+  }
 }
 
 function buildCompetitiveAnalysisPrompt(payload: Record<string, unknown>) {
@@ -888,6 +1502,39 @@ function normalizeRecommendations(value: unknown) {
   return recommendations;
 }
 
+function normalizeCompetitivePatterns(value: unknown): SeoCompetitivePattern[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .slice(0, 12)
+    .map((item) => {
+      const row = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+      const feature = asString(row.feature).slice(0, 80);
+      const label = asString(row.label).slice(0, 160);
+      if (!feature || !label) {
+        return null;
+      }
+
+      return {
+        feature,
+        label,
+        competitors: Array.isArray(row.competitors)
+          ? row.competitors.map((competitor) => asString(competitor).slice(0, 120)).filter(Boolean).slice(0, 8)
+          : [],
+        evidence_urls: Array.isArray(row.evidence_urls)
+          ? row.evidence_urls.map((url) => asString(url).slice(0, 300)).filter(Boolean).slice(0, 8)
+          : [],
+      };
+    })
+    .filter((item): item is SeoCompetitivePattern => Boolean(item));
+}
+
+function normalizeCrawlEvidence(value: unknown): SeoCompetitiveCrawlSite[] {
+  return Array.isArray(value) ? (value.slice(0, MAX_COMPETITOR_SITES + 1) as SeoCompetitiveCrawlSite[]) : [];
+}
+
 export function normalizeCompetitiveAnalysis(
   rawAnalysis: unknown,
   payload: ReturnType<typeof validateCompetitiveAnalysisPayload>,
@@ -917,6 +1564,24 @@ export function normalizeCompetitiveAnalysis(
     competitor_themes: normalizeStringArray(row.competitor_themes, "competitor_themes"),
     content_gaps: normalizeStringArray(row.content_gaps, "content_gaps"),
     keyword_opportunities: normalizeStringArray(row.keyword_opportunities, "keyword_opportunities"),
+    missing_from_client: normalizeCompetitivePatterns(row.missing_from_client),
+    competitor_only_patterns: normalizeCompetitivePatterns(row.competitor_only_patterns),
+    shared_patterns: normalizeCompetitivePatterns(row.shared_patterns),
+    client_strengths: normalizeCompetitivePatterns(row.client_strengths),
+    crawl_evidence: normalizeCrawlEvidence(row.crawl_evidence),
+    top_performers: Array.isArray(row.top_performers)
+      ? row.top_performers
+          .slice(0, 3)
+          .map((item) => {
+            const performer = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+            return {
+              name: asString(performer.name).slice(0, 140),
+              url: asString(performer.url) || null,
+              feature_count: Math.max(0, Math.round(Number(performer.feature_count) || 0)),
+            };
+          })
+          .filter((item) => item.name)
+      : [],
     recommendations: normalizeRecommendations(row.recommendations),
     assumptions: normalizeStringArray(row.assumptions, "assumptions", 10),
     confidence_score: confidenceScore,
@@ -1106,16 +1771,22 @@ export async function generateInsights(scope: SeoTenantScope) {
 export async function generateCompetitiveAnalysis(scope: SeoTenantScope, rawPayload: CompetitiveAnalysisPayload) {
   const { integrations, competitiveAnalyses } = await getSeoCollections();
   try {
-    const openAi = await integrations.findOne({ user_id: scope.userId, provider: "openai", encrypted_secret: { $ne: null } });
-
-    if (!openAi) {
-      throw new Error("Connect a ChatGPT/OpenAI token before generating competitive analysis.");
-    }
-
     const payload = validateCompetitiveAnalysisPayload(rawPayload);
+    const discoveredCompetitors = await discoverCompetitors(payload);
+    const competitors = dedupeCompetitors([...payload.competitors, ...discoveredCompetitors]);
+    const crawlEvidence = await Promise.all([
+      crawlWebsite({ site_role: "client", name: payload.clientName, url: payload.websiteUrl }),
+      ...competitors.map((competitor) =>
+        crawlWebsite({ site_role: "competitor", name: competitor.name, url: competitor.url })
+      ),
+    ]);
+    const deterministic = deterministicCompetitiveAnalysis({ ...payload, competitors }, crawlEvidence);
+    const openAi = await integrations.findOne({ user_id: scope.userId, provider: "openai", encrypted_secret: { $ne: null } });
     const integrationRows = await integrations.find({ user_id: scope.userId }).sort({ created_at: 1 }).toArray();
     const analysisInput = sanitizeForAiPayload({
       ...payload,
+      competitors,
+      deterministicAnalysis: deterministic,
       connectorStatus: integrationRows.map((item) => ({
         provider: item.provider,
         status: item.status,
@@ -1124,43 +1795,60 @@ export async function generateCompetitiveAnalysis(scope: SeoTenantScope, rawPayl
       })),
     }) as Record<string, unknown>;
 
-    const result = await fetchJson("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${getOpenAiApiKey(openAi)}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: process.env.OPENAI_SEO_MODEL || "gpt-4o-mini",
-        temperature: 0.25,
-        response_format: competitiveAnalysisResponseFormat,
-        messages: buildCompetitiveAnalysisPrompt(analysisInput),
-      }),
-    });
+    let parsed: unknown = deterministic;
+    if (openAi) {
+      try {
+        const result = await fetchJson("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${getOpenAiApiKey(openAi)}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: process.env.OPENAI_SEO_MODEL || "gpt-4o-mini",
+            temperature: 0.25,
+            response_format: competitiveAnalysisResponseFormat,
+            messages: buildCompetitiveAnalysisPrompt(analysisInput),
+          }),
+        });
 
-    if (!result.ok) {
-      throw new Error(`OpenAI competitive analysis failed with HTTP ${result.status}.`);
+        if (!result.ok) {
+          throw new Error(`OpenAI competitive analysis failed with HTTP ${result.status}.`);
+        }
+
+        const body = result.body as { choices?: Array<{ message?: { content?: string; refusal?: string } }> };
+        const refusal = body.choices?.[0]?.message?.refusal;
+        if (refusal) {
+          throw new Error("OpenAI refused to generate competitive analysis for the supplied payload.");
+        }
+
+        const content = body.choices?.[0]?.message?.content;
+        if (!content) {
+          throw new Error("OpenAI returned an empty competitive analysis response.");
+        }
+
+        parsed = {
+          ...deterministic,
+          ...JSON.parse(content),
+          missing_from_client: deterministic.missing_from_client,
+          competitor_only_patterns: deterministic.competitor_only_patterns,
+          shared_patterns: deterministic.shared_patterns,
+          client_strengths: deterministic.client_strengths,
+          crawl_evidence: deterministic.crawl_evidence,
+          top_performers: deterministic.top_performers,
+        };
+      } catch (error) {
+        parsed = {
+          ...deterministic,
+          assumptions: [
+            ...deterministic.assumptions,
+            `Optional OpenAI summary was skipped: ${error instanceof Error ? error.message : "unknown error"}`,
+          ],
+        };
+      }
     }
 
-    const body = result.body as { choices?: Array<{ message?: { content?: string; refusal?: string } }> };
-    const refusal = body.choices?.[0]?.message?.refusal;
-    if (refusal) {
-      throw new Error("OpenAI refused to generate competitive analysis for the supplied payload.");
-    }
-
-    const content = body.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error("OpenAI returned an empty competitive analysis response.");
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(content);
-    } catch {
-      throw new Error("OpenAI returned non-JSON competitive analysis content.");
-    }
-
-    const analysis = normalizeCompetitiveAnalysis(parsed, payload, scope);
+    const analysis = normalizeCompetitiveAnalysis(parsed, { ...payload, competitors }, scope);
     analysis.source_payload_json = analysisInput;
     await competitiveAnalyses.insertOne(analysis);
     await recordAuditEvent({
@@ -1168,7 +1856,12 @@ export async function generateCompetitiveAnalysis(scope: SeoTenantScope, rawPayl
       action: "competitive_analysis.generated",
       entityType: "insight",
       entityId: analysis.id,
-      metadata: { industry: analysis.industry, competitor_count: analysis.competitors.length },
+      metadata: {
+        industry: analysis.industry,
+        competitor_count: analysis.competitors.length,
+        crawled_site_count: analysis.crawl_evidence.length,
+        openai_used: Boolean(openAi),
+      },
     });
 
     return analysis;
