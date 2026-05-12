@@ -1,75 +1,50 @@
-# Reactive Dot Ribbon
+# CircleClick Competitive Analysis
 
-Reactive dot-ribbon animation for the main page, including the embeddable
-custom element, demo page, and source pattern asset.
+Next.js prototype for a competitive analysis workspace. The current product
+goal is to help startups and agencies turn public competitor evidence into an
+editable, cited report draft.
 
 ## Files
 
-- `index.html` is the cleaned-up demo and tutorial page.
-- `styles.css` styles the demo page only.
-- `script.js` registers the `<reactive-dot-ribbon>` custom element.
-- `dots-pattern.webp` is the source image sampled into animated dots.
+- `src/app/page.tsx` renders the competitive analysis workspace.
+- `src/app/api/analyze/route.ts` runs the server-side analysis flow.
+- `src/lib/source-fetch.ts` fetches bounded public page text for each source.
+- `public/dot-ribbon.js` registers the visual background custom element.
+- `public/dots-pattern.webp` is the source image sampled into animated dots.
 
-## Page background usage
+## Local development
 
-Add the background element once in the shared app layout, before the page
-content. That makes it available on the login page and every other page that
-uses the layout.
+Create `.env.local` with a server-only OpenAI key:
 
-```html
-<reactive-dot-ribbon
-  background
-  aria-hidden="true"
-  source="/dots-pattern.webp"
-></reactive-dot-ribbon>
-
-<main class="page-content">
-  ...
-</main>
-
-<script src="/script.js"></script>
+```bash
+OPENAI_API_KEY=sk-...
 ```
 
-Keep foreground content above the fixed background layer:
+Then run:
 
-```css
-.page-content {
-  position: relative;
-  z-index: 1;
-}
+```bash
+npm install
+npm run dev
 ```
 
-The `background` mode is non-interactive, so it will not block login forms,
-buttons, or page links.
+Open `http://localhost:3000`.
 
-## Inline interactive usage
+## Current flow
 
-Use the same element without the `background` attribute when the ribbon is part
-of the page content.
+1. User enters a company, competitors, category, customer, and report goal.
+2. The API route fetches public text from each URL.
+3. OpenAI returns a structured comparison, opportunities, and report draft.
+4. The UI shows the answer, evidence status, and source links.
 
-```html
-<reactive-dot-ribbon
-  aria-label="Interactive halftone ribbon"
-  hint="Move pointer through dots"
-  source="/dots-pattern.webp"
-  style="--dot-ribbon-aspect: 2048 / 1094;"
-></reactive-dot-ribbon>
-```
+## Current limitations
 
-The inline version responds to pointer movement. The `hint` text is optional.
+- No user accounts.
+- No database or saved projects.
+- No PDF or document export.
+- No automated competitor discovery.
+- Source fetching is intentionally small and bounded for the first prototype.
 
-## Current attributes
+## Product rule
 
-- `source`: image path used to build the dot field. Defaults to
-  `./dots-pattern.webp`.
-- `hint`: short visible instruction for inline ribbons. Hidden when empty.
-- `background`: switches the element to fixed full-page background mode.
-
-## Useful CSS variables
-
-- `--dot-ribbon-aspect`: inline aspect ratio.
-- `--dot-ribbon-mobile-aspect`: optional mobile aspect ratio.
-- `--dot-ribbon-min-height`: minimum rendered height.
-- `--dot-ribbon-aura-strength`: glow intensity from `0` to `1`.
-- `--dot-ribbon-aura-blur`: glow blur radius.
-- `--dot-ribbon-aura-radius`: glow size around dots.
+Every major insight should stay traceable to source evidence. If evidence is
+missing, the output should say so instead of pretending certainty.
