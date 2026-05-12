@@ -81,24 +81,15 @@ The dashboard includes a built-in product tour powered by React Joyride. It high
 
 ## Competitive Analysis
 
-The dashboard includes a simple competitive analysis form. A user supplies:
+The dashboard includes a simple competitive analysis form. A user supplies only the company name.
 
-- client name
-- website URL
-- industry
-- market
-- target audience
-- known competitors
-- target keywords
-- optional notes
-
-The backend first crawls the client website and competitor URLs without requiring OpenAI. It fetches the homepage plus obvious internal pages such as pricing, services, case studies, blog, FAQ, contact, demo, and comparison pages. It extracts visible titles, descriptions, headings, navigation labels, calls to action, schema types, and normalized website features.
+When OpenAI is connected through the dashboard or `OPENAI_API_KEY`, the backend first auto-fills the research brief: likely website URL, industry, market, target audience, competitors, and search topics. It stores uncertainty as report assumptions. The crawler then verifies public pages where URLs are available. It fetches the homepage plus obvious internal pages such as pricing, services, case studies, blog, FAQ, contact, demo, and comparison pages. It extracts visible titles, descriptions, headings, navigation labels, calls to action, schema types, and normalized website features.
 
 The deterministic comparison defines "top performers" as the crawled competitor sites with the strongest observed feature coverage in this run. It does not claim traffic, rankings, revenue, market share, or SERP position. The report stores missing client patterns, shared patterns, client strengths, top performers, and crawl evidence in `seo_competitive_analyses`.
 
-If `SEO_COMPETITOR_SEARCH_ENDPOINT` and `SEO_COMPETITOR_SEARCH_API_KEY` are configured, the backend may request extra competitor suggestions from that provider. Manual competitor URLs remain the reliable path and work without this provider.
+If `SEO_COMPETITOR_SEARCH_ENDPOINT` and `SEO_COMPETITOR_SEARCH_API_KEY` are configured, the backend may request extra competitor suggestions from that provider. OpenAI-inferred URLs remain subject to crawl verification.
 
-If the active client workspace has an encrypted OpenAI token, OpenAI can summarize the already-collected crawl evidence. If no token is connected, or if OpenAI fails, the deterministic crawl report still succeeds and is stored.
+OpenAI also summarizes the already-collected crawl evidence. If no token is connected, or if OpenAI fails, the deterministic crawl report still succeeds and is stored with assumptions explaining what could not be auto-filled.
 
 ## Supported Integrations
 

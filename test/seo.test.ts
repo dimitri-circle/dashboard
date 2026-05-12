@@ -6,10 +6,12 @@ import { rateLimit, resetRateLimitsForTests } from "../lib/seo/rate-limit";
 import {
   compareCompetitiveWebsites,
   extractWebsiteFacts,
+  mergeCompetitiveBriefAutofill,
   normalizeCompetitiveAnalysis,
   normalizeInsights,
   parseCompetitors,
   safeIntegration,
+  validateCompetitiveAnalysisPayload,
   validateHttpUrl,
 } from "../lib/seo/service";
 import { normalizeClientId } from "../lib/seo/tenant";
@@ -102,6 +104,7 @@ test("competitive analysis normalization validates required JSON shape", () => {
     competitors: [{ name: "OtherCo", url: null }],
     targetKeywords: ["patient engagement software"],
     notes: "",
+    contextAssumptions: [],
   };
 
   assert.throws(
@@ -127,6 +130,42 @@ test("competitive analysis normalization validates required JSON shape", () => {
   assert.equal(analysis.user_id, "acme-health");
   assert.equal(analysis.recommendations[0].priority, "high");
   assert.equal(analysis.confidence_score, 71);
+});
+
+test("competitive payload accepts company name only", () => {
+  const payload = validateCompetitiveAnalysisPayload({ clientName: "Acme Health" });
+
+  assert.equal(payload.clientName, "Acme Health");
+  assert.equal(payload.industry, "Unspecified industry");
+  assert.equal(payload.websiteUrl, null);
+  assert.deepEqual(payload.competitors, []);
+  assert.ok(payload.contextAssumptions.includes("Industry was not supplied directly."));
+});
+
+test("competitive brief autofill preserves user values and adds inferred context", () => {
+  const payload = mergeCompetitiveBriefAutofill(
+    { clientName: "Acme Health", websiteUrl: "https://client.example" },
+    {
+      websiteUrl: "https://wrong.example",
+      industry: "Healthcare SaaS",
+      market: "US clinics",
+      targetAudience: "Practice operators",
+      competitors: [
+        { name: "OtherCo", url: "https://other.example/" },
+        { name: "Bad URL", url: "not-a-url" },
+      ],
+      targetKeywords: ["patient engagement software", "clinic automation"],
+      notes: "Likely sells workflow software.",
+      assumptions: ["Competitors are inferred from company category."],
+    }
+  );
+
+  assert.equal(payload.websiteUrl, "https://client.example");
+  assert.equal(payload.industry, "Healthcare SaaS");
+  assert.match(payload.competitors || "", /OtherCo https:\/\/other.example/);
+  assert.doesNotMatch(payload.competitors || "", /not-a-url/);
+  assert.match(payload.targetKeywords || "", /patient engagement software/);
+  assert.ok(payload.contextAssumptions?.some((assumption) => assumption.includes("auto-filled")));
 });
 
 test("competitor parsing handles names, URLs, and blanks", () => {

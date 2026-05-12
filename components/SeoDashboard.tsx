@@ -1063,8 +1063,8 @@ function CompetitiveView({
             <span className="eyebrow">Competitive workspace</span>
             <h3 id="competitive-title">Evidence-backed competitor reports</h3>
             <p>
-              Build a client-ready brief from crawlable website evidence. The system separates observed facts from
-              interpretation, then adds editable report sections when OpenAI is available.
+              Enter a company name. OpenAI fills the research brief, the crawler verifies public pages where it can,
+              and the report separates observed facts from assumptions.
             </p>
           </div>
         </div>
@@ -1089,33 +1089,14 @@ function CompetitiveView({
         <div className="section-heading">
           <div>
             <span className="eyebrow">Research brief</span>
-            <h3 id="competitive-brief-title">Define the comparison.</h3>
-            <p>Start with known competitors. Add URLs whenever possible so the report can cite evidence.</p>
+            <h3 id="competitive-brief-title">Start with the company.</h3>
+            <p>The system will infer the website, market, competitors, and search topics before collecting evidence.</p>
           </div>
         </div>
         <form className="competitive-form" onSubmit={onGenerateCompetitiveAnalysis}>
-          <Field name="clientName" label="Client name" placeholder={activeClient?.name || "Acme Health"} required />
-          <Field name="websiteUrl" label="Website URL" placeholder="https://example.com" type="url" />
-          <Field name="industry" label="Industry" placeholder="Healthcare SaaS" required />
-          <Field name="market" label="Market" placeholder="US mid-market" />
-          <label>
-            Target audience
-            <textarea name="targetAudience" placeholder="Who the client needs to win with" rows={3} />
-          </label>
-          <label>
-            Known competitors
-            <textarea name="competitors" placeholder="One per line, include URL when available" rows={4} />
-          </label>
-          <label>
-            Target keywords
-            <textarea name="targetKeywords" placeholder="One keyword or topic per line" rows={4} />
-          </label>
-          <label>
-            Notes
-            <textarea name="notes" placeholder="Positioning, offers, constraints, or market context" rows={4} />
-          </label>
+          <Field name="clientName" label="Company name" placeholder={activeClient?.name || "Acme Health"} required />
           <button className="button button-primary" data-tour="generate-competitive-analysis" type="submit" disabled={analyzing}>
-            {analyzing ? "Collecting evidence..." : "Generate evidence-backed report"}
+            {analyzing ? "Filling brief and collecting evidence..." : "Generate report"}
           </button>
         </form>
       </section>
@@ -1136,8 +1117,8 @@ function CompetitiveView({
               <span className="eyebrow">No report yet</span>
               <h4>Your first competitive brief will appear here.</h4>
               <p>
-                Add a client URL and 1-3 competitor URLs. The first useful output should show what was crawled,
-                what gaps were observed, and which claims are still uncertain.
+                Enter one company name. The first useful output should show what was crawled, what gaps were observed,
+                and which claims are still uncertain.
               </p>
             </div>
           )}
