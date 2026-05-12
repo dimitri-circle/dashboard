@@ -107,6 +107,12 @@ export type SeoCompetitivePattern = {
   evidence_urls: string[];
 };
 
+export type SeoCompetitiveReportSection = {
+  heading: string;
+  body: string;
+  source_urls: string[];
+};
+
 export type SeoCompetitiveAnalysis = {
   _id?: ObjectId;
   id: string;
@@ -129,6 +135,7 @@ export type SeoCompetitiveAnalysis = {
   client_strengths: SeoCompetitivePattern[];
   crawl_evidence: SeoCompetitiveCrawlSite[];
   top_performers: Array<{ name: string; url: string | null; feature_count: number }>;
+  report_draft: SeoCompetitiveReportSection[];
   recommendations: Array<{
     title: string;
     rationale: string;
