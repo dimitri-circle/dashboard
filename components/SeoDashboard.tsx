@@ -59,6 +59,7 @@ type CompetitiveAnalysis = {
   shared_patterns?: Array<{ feature: string; label: string; competitors: string[]; evidence_urls: string[] }>;
   client_strengths?: Array<{ feature: string; label: string; competitors: string[]; evidence_urls: string[] }>;
   top_performers?: Array<{ name: string; url: string | null; feature_count: number }>;
+  report_draft?: Array<{ heading: string; body: string; source_urls: string[] }>;
   crawl_evidence?: Array<{
     site_role: "client" | "competitor";
     name: string;
@@ -1167,6 +1168,7 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
   const missingPatterns = analysis.missing_from_client || [];
   const topPerformers = analysis.top_performers || [];
   const crawlEvidence = analysis.crawl_evidence || [];
+  const reportDraft = analysis.report_draft || [];
 
   return (
     <article className="analysis-card">
@@ -1205,6 +1207,20 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
             <div className="pattern-row" key={`${analysis.id}-${pattern.feature}`}>
               <strong>{pattern.label}</strong>
               <span>{pattern.competitors.join(", ")}</span>
+              <SourceLinks urls={pattern.evidence_urls} />
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {reportDraft.length ? (
+        <div className="report-draft">
+          <h5>Editable report draft</h5>
+          {reportDraft.map((section) => (
+            <div className="report-section" key={`${analysis.id}-${section.heading}`}>
+              <strong>{section.heading}</strong>
+              <p>{section.body}</p>
+              <SourceLinks urls={section.source_urls} />
             </div>
           ))}
         </div>
@@ -1229,6 +1245,7 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
               <p>
                 {site.feature_count} features across {site.pages.filter((page) => page.status === "success").length} crawled pages
               </p>
+              <SourceLinks urls={site.pages.map((page) => page.url)} />
             </div>
           ))}
         </div>
@@ -1255,6 +1272,25 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
         <time dateTime={analysis.created_at}>{new Date(analysis.created_at).toLocaleString()}</time>
       </footer>
     </article>
+  );
+}
+
+function SourceLinks({ urls }: { urls: string[] }) {
+  const uniqueUrls = Array.from(new Set(urls.filter(Boolean))).slice(0, 5);
+
+  if (!uniqueUrls.length) {
+    return <span className="source-links">No source links attached</span>;
+  }
+
+  return (
+    <span className="source-links">
+      Sources{" "}
+      {uniqueUrls.map((url, index) => (
+        <a href={url} target="_blank" rel="noreferrer" key={url}>
+          {index + 1}
+        </a>
+      ))}
+    </span>
   );
 }
 

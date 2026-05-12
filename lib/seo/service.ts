@@ -129,6 +129,21 @@ const competitiveAnalysisResponseFormat = {
         competitor_themes: { type: "array", items: { type: "string" } },
         content_gaps: { type: "array", items: { type: "string" } },
         keyword_opportunities: { type: "array", items: { type: "string" } },
+        report_draft: {
+          type: "array",
+          minItems: 1,
+          maxItems: 6,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              heading: { type: "string" },
+              body: { type: "string" },
+              source_urls: { type: "array", items: { type: "string" } },
+            },
+            required: ["heading", "body", "source_urls"],
+          },
+        },
         recommendations: {
           type: "array",
           minItems: 1,
@@ -152,6 +167,7 @@ const competitiveAnalysisResponseFormat = {
         "competitor_themes",
         "content_gaps",
         "keyword_opportunities",
+        "report_draft",
         "recommendations",
         "assumptions",
         "confidence_score",
@@ -506,6 +522,19 @@ function getOpenAiApiKey(integration: SeoIntegration) {
   }
 
   return apiKey;
+}
+
+function getConfiguredOpenAiApiKey(integration?: SeoIntegration | null) {
+  if (integration) {
+    return getOpenAiApiKey(integration);
+  }
+
+  const envKey = asString(process.env.OPENAI_API_KEY);
+  if (!envKey) {
+    throw new Error("OpenAI token is unavailable.");
+  }
+
+  return envKey;
 }
 
 async function recordAuditEvent({ scope, action, entityType, entityId = null, metadata = {} }: AuditPayload) {
@@ -1342,6 +1371,7 @@ function deterministicCompetitiveAnalysis(
   const competitorsWithUrls = crawlEvidence.filter((site) => site.site_role === "competitor" && site.url);
   const missingLabels = comparison.missing_from_client.map((pattern) => pattern.label);
   const sharedLabels = comparison.shared_patterns.map((pattern) => pattern.label);
+  const sourceUrls = crawlEvidence.flatMap((site) => site.pages.map((page) => page.url)).filter(Boolean).slice(0, 12);
   const assumptions = [
     "Top performers are defined by observed feature coverage in this crawl, not by traffic, rankings, or revenue.",
     "The crawler executes no scripts and only reviews fetched HTML from the homepage plus obvious key internal pages.",
@@ -1388,6 +1418,29 @@ function deterministicCompetitiveAnalysis(
             priority: "medium" as SeoPriority,
           },
         ],
+    report_draft: [
+      {
+        heading: "Executive summary",
+        body: competitorsWithUrls.length
+          ? `${payload.clientName} was compared against ${competitorsWithUrls.map((site) => site.name).join(", ")} using crawlable public website evidence.`
+          : `${payload.clientName} has a crawl-first competitive baseline, but competitor website evidence is still thin.`,
+        source_urls: sourceUrls,
+      },
+      {
+        heading: "Most visible gaps",
+        body: missingLabels.length
+          ? `The clearest observed gaps are ${missingLabels.slice(0, 5).join(", ")}. These are website patterns competitors show but the client crawl did not.`
+          : "The current crawl did not find a strong competitor-only website pattern. Add more competitor URLs or key pages before making a stronger claim.",
+        source_urls: comparison.missing_from_client.flatMap((pattern) => pattern.evidence_urls).slice(0, 12),
+      },
+      {
+        heading: "Recommended positioning move",
+        body: missingLabels.length
+          ? `Prioritize a credible story around ${missingLabels.slice(0, 3).join(", ")} only if the client can support those claims operationally.`
+          : "Use the current evidence as a baseline, then expand research before changing positioning.",
+        source_urls: sourceUrls,
+      },
+    ],
     assumptions,
     confidence_score: Math.min(
       92,
@@ -1457,7 +1510,7 @@ function buildCompetitiveAnalysisPrompt(payload: Record<string, unknown>) {
     },
     {
       role: "user",
-      content: `Given this client and market data:\n${JSON.stringify(payload)}\n\nGenerate one competitive analysis JSON object with this exact shape:\n{\n  "summary": "Concise competitive landscape summary",\n  "positioning": "How the client should be positioned against alternatives",\n  "competitor_themes": ["Theme observed or inferred from provided competitor names/data"],\n  "content_gaps": ["Content gap or missing asset"],\n  "keyword_opportunities": ["Keyword or topic cluster opportunity"],\n  "recommendations": [\n    {\n      "title": "Specific action",\n      "rationale": "Why this matters",\n      "priority": "low | medium | high"\n    }\n  ],\n  "assumptions": ["Assumption or missing-data caveat"],\n  "confidence_score": 0-100\n}\n\nRules:\n- Use only provided data and stored connector status.\n- Do not invent live competitor rankings or market share.\n- If evidence is weak, add caveats to assumptions and lower confidence.\n- Prefer specific SEO, content, and positioning actions.\n- Return valid JSON only.`,
+      content: `Given this client and market data:\n${JSON.stringify(payload)}\n\nGenerate one competitive analysis JSON object with this exact shape:\n{\n  "summary": "Concise competitive landscape summary",\n  "positioning": "How the client should be positioned against alternatives",\n  "competitor_themes": ["Theme observed or inferred from provided competitor names/data"],\n  "content_gaps": ["Content gap or missing asset"],\n  "keyword_opportunities": ["Keyword or topic cluster opportunity"],\n  "report_draft": [\n    {\n      "heading": "Client-ready section heading",\n      "body": "Evidence-backed report language the user can edit",\n      "source_urls": ["Only URLs present in the provided crawl evidence"]\n    }\n  ],\n  "recommendations": [\n    {\n      "title": "Specific action",\n      "rationale": "Why this matters",\n      "priority": "low | medium | high"\n    }\n  ],\n  "assumptions": ["Assumption or missing-data caveat"],\n  "confidence_score": 0-100\n}\n\nRules:\n- Use only provided data and stored connector status.\n- Treat deterministicAnalysis and crawl_evidence as the source of truth.\n- Every report_draft section must include source_urls from the provided evidence, or an empty array when evidence is missing.\n- Do not invent live competitor rankings or market share.\n- If evidence is weak, add caveats to assumptions and lower confidence.\n- Prefer specific SEO, content, and positioning actions.\n- Return valid JSON only.`,
     },
   ];
 }
@@ -1531,6 +1584,33 @@ function normalizeCompetitivePatterns(value: unknown): SeoCompetitivePattern[] {
     .filter((item): item is SeoCompetitivePattern => Boolean(item));
 }
 
+function normalizeReportDraft(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .slice(0, 6)
+    .map((item) => {
+      const row = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+      const heading = asString(row.heading).slice(0, 160);
+      const body = asString(row.body).slice(0, 1200);
+
+      if (!heading || !body) {
+        return null;
+      }
+
+      return {
+        heading,
+        body,
+        source_urls: Array.isArray(row.source_urls)
+          ? row.source_urls.map((url) => asString(url).slice(0, 300)).filter(Boolean).slice(0, 8)
+          : [],
+      };
+    })
+    .filter((item): item is { heading: string; body: string; source_urls: string[] } => Boolean(item));
+}
+
 function normalizeCrawlEvidence(value: unknown): SeoCompetitiveCrawlSite[] {
   return Array.isArray(value) ? (value.slice(0, MAX_COMPETITOR_SITES + 1) as SeoCompetitiveCrawlSite[]) : [];
 }
@@ -1582,6 +1662,7 @@ export function normalizeCompetitiveAnalysis(
           })
           .filter((item) => item.name)
       : [],
+    report_draft: normalizeReportDraft(row.report_draft),
     recommendations: normalizeRecommendations(row.recommendations),
     assumptions: normalizeStringArray(row.assumptions, "assumptions", 10),
     confidence_score: confidenceScore,
@@ -1677,12 +1758,13 @@ export async function generateInsights(scope: SeoTenantScope) {
   const { integrations, insights, metricSnapshots } = await getSeoCollections();
   try {
     const openAi = await integrations.findOne({ user_id: scope.userId, provider: "openai", encrypted_secret: { $ne: null } });
+    const hasEnvOpenAiKey = Boolean(asString(process.env.OPENAI_API_KEY));
 
-    if (!openAi) {
+    if (!openAi && !hasEnvOpenAiKey) {
       throw new Error("Connect a ChatGPT/OpenAI token before generating AI insights.");
     }
 
-    const apiKey = getOpenAiApiKey(openAi);
+    const apiKey = getConfiguredOpenAiApiKey(openAi);
 
     const [integrationRows, metricRows] = await Promise.all([
       integrations.find({ user_id: scope.userId }).sort({ created_at: 1 }).toArray(),
@@ -1782,6 +1864,7 @@ export async function generateCompetitiveAnalysis(scope: SeoTenantScope, rawPayl
     ]);
     const deterministic = deterministicCompetitiveAnalysis({ ...payload, competitors }, crawlEvidence);
     const openAi = await integrations.findOne({ user_id: scope.userId, provider: "openai", encrypted_secret: { $ne: null } });
+    const hasEnvOpenAiKey = Boolean(asString(process.env.OPENAI_API_KEY));
     const integrationRows = await integrations.find({ user_id: scope.userId }).sort({ created_at: 1 }).toArray();
     const analysisInput = sanitizeForAiPayload({
       ...payload,
@@ -1796,12 +1879,13 @@ export async function generateCompetitiveAnalysis(scope: SeoTenantScope, rawPayl
     }) as Record<string, unknown>;
 
     let parsed: unknown = deterministic;
-    if (openAi) {
+    if (openAi || hasEnvOpenAiKey) {
       try {
+        const apiKey = getConfiguredOpenAiApiKey(openAi);
         const result = await fetchJson("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${getOpenAiApiKey(openAi)}`,
+            Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -1860,7 +1944,7 @@ export async function generateCompetitiveAnalysis(scope: SeoTenantScope, rawPayl
         industry: analysis.industry,
         competitor_count: analysis.competitors.length,
         crawled_site_count: analysis.crawl_evidence.length,
-        openai_used: Boolean(openAi),
+        openai_used: Boolean(openAi || hasEnvOpenAiKey),
       },
     });
 
