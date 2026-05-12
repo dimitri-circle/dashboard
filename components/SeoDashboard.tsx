@@ -643,7 +643,7 @@ function viewDescription(view: View, clientName: string, provider: Provider) {
   if (view === "integrations") return `${clientName}: ${providerDetails[provider].description}`;
   if (view === "analysis") return `Generate competitive briefs for ${clientName}.`;
   if (view === "insights") return `Review AI recommendations for ${clientName}.`;
-  return "Graph-style readiness, coverage, and output summary.";
+  return "Readiness, tools, reports, and traffic at a glance.";
 }
 
 function OverviewView({
@@ -682,17 +682,18 @@ function OverviewView({
         <GraphCard label="Page views" value={formatNumber(ga4Summary.pageViews)} helper="Last 28 synced days" percent={ga4Summary.pageViewPercent} />
       </section>
 
-      <section className="dashboard-grid">
-        <div className="panel">
-          <div className="section-heading">
+      <section className="overview-flow-grid">
+        <div className="panel overview-health-panel">
+          <div className="section-heading overview-panel-heading">
             <h3>Connection Health</h3>
             <p>Use this to decide what to set up next.</p>
           </div>
-          <div className="status-row compact" aria-label="Connection status">
+          <div className="status-row overview-status-grid" aria-label="Connection status">
             {(Object.keys(providerLabels) as Provider[]).map((provider) => {
               const integration = latestByProvider[provider];
               return (
                 <article className="status-card" data-status={integration?.status || "disconnected"} key={provider}>
+                  <i aria-hidden="true" />
                   <span>{providerLabels[provider]}</span>
                   <strong>{statusLabel(integration?.status)}</strong>
                 </article>
@@ -701,8 +702,8 @@ function OverviewView({
           </div>
         </div>
 
-        <div className="panel">
-          <div className="section-heading">
+        <div className="panel overview-actions-panel">
+          <div className="section-heading overview-panel-heading">
             <h3>Next Actions</h3>
             <p>Move from setup into client data.</p>
           </div>
@@ -832,14 +833,12 @@ function TopPagesList({ snapshots }: { snapshots: MetricSnapshot[] }) {
 function GraphCard({ helper, label, percent, value }: { helper: string; label: string; percent: number; value: string }) {
   return (
     <article className="graph-card">
-      <div>
+      <div className="graph-card-main">
         <span>{label}</span>
         <strong>{value}</strong>
       </div>
-      <div className="bar-chart" aria-hidden="true">
-        <span style={{ height: `${Math.max(8, Math.min(100, percent))}%` }} />
-        <span style={{ height: `${Math.max(8, Math.min(100, percent * 0.72 + 10))}%` }} />
-        <span style={{ height: `${Math.max(8, Math.min(100, percent * 0.52 + 18))}%` }} />
+      <div className="graph-progress" aria-hidden="true">
+        <span style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
       </div>
       <p>{helper}</p>
     </article>
