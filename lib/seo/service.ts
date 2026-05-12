@@ -71,6 +71,7 @@ type CompetitiveAnalysisPayload = {
   competitors?: string;
   targetKeywords?: string;
   notes?: string;
+  contextAssumptions?: string[];
 };
 
 type AuditPayload = {
@@ -171,6 +172,50 @@ const competitiveAnalysisResponseFormat = {
         "recommendations",
         "assumptions",
         "confidence_score",
+      ],
+    },
+  },
+};
+
+const competitiveBriefAutofillResponseFormat = {
+  type: "json_schema",
+  json_schema: {
+    name: "seo_competitive_brief_autofill_response",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        websiteUrl: { type: "string" },
+        industry: { type: "string" },
+        market: { type: "string" },
+        targetAudience: { type: "string" },
+        competitors: {
+          type: "array",
+          maxItems: 5,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              name: { type: "string" },
+              url: { type: "string" },
+            },
+            required: ["name", "url"],
+          },
+        },
+        targetKeywords: { type: "array", maxItems: 8, items: { type: "string" } },
+        notes: { type: "string" },
+        assumptions: { type: "array", maxItems: 8, items: { type: "string" } },
+      },
+      required: [
+        "websiteUrl",
+        "industry",
+        "market",
+        "targetAudience",
+        "competitors",
+        "targetKeywords",
+        "notes",
+        "assumptions",
       ],
     },
   },
@@ -537,6 +582,20 @@ function getConfiguredOpenAiApiKey(integration?: SeoIntegration | null) {
   return envKey;
 }
 
+function getAvailableOpenAiApiKey(integration?: SeoIntegration | null) {
+  const envKey = asString(process.env.OPENAI_API_KEY);
+
+  if (envKey) {
+    return envKey;
+  }
+
+  if (integration) {
+    return getOpenAiApiKey(integration);
+  }
+
+  throw new Error("OpenAI token is unavailable.");
+}
+
 async function recordAuditEvent({ scope, action, entityType, entityId = null, metadata = {} }: AuditPayload) {
   const { auditEvents } = await getSeoCollections();
   await auditEvents.insertOne({
@@ -892,22 +951,26 @@ function dedupeCompetitors(competitors: Array<{ name: string; url: string | null
     .slice(0, MAX_COMPETITOR_SITES);
 }
 
-function validateCompetitiveAnalysisPayload(payload: CompetitiveAnalysisPayload) {
+export function validateCompetitiveAnalysisPayload(payload: CompetitiveAnalysisPayload) {
   const clientName = asString(payload.clientName).slice(0, 140);
-  const industry = asString(payload.industry).slice(0, 140);
+  const suppliedIndustry = asString(payload.industry).slice(0, 140);
+  const industry = suppliedIndustry || "Unspecified industry";
   const websiteUrl = asString(payload.websiteUrl);
   const market = asString(payload.market).slice(0, 140);
   const targetAudience = asString(payload.targetAudience).slice(0, 240);
   const competitors = dedupeCompetitors(parseCompetitors(payload.competitors));
   const targetKeywords = parseLines(payload.targetKeywords);
   const notes = asString(payload.notes).slice(0, 1000);
+  const contextAssumptions = Array.isArray(payload.contextAssumptions)
+    ? payload.contextAssumptions.map((item) => asString(item).slice(0, 320)).filter(Boolean).slice(0, 8)
+    : [];
 
   if (!clientName) {
     throw new Error("Client name is required for competitive analysis.");
   }
 
-  if (!industry) {
-    throw new Error("Industry is required for competitive analysis.");
+  if (!suppliedIndustry) {
+    contextAssumptions.push("Industry was not supplied directly.");
   }
 
   if (websiteUrl) {
@@ -929,6 +992,7 @@ function validateCompetitiveAnalysisPayload(payload: CompetitiveAnalysisPayload)
     competitors,
     targetKeywords,
     notes,
+    contextAssumptions: contextAssumptions.slice(0, 8),
   };
 }
 
@@ -1375,6 +1439,7 @@ function deterministicCompetitiveAnalysis(
   const assumptions = [
     "Top performers are defined by observed feature coverage in this crawl, not by traffic, rankings, or revenue.",
     "The crawler executes no scripts and only reviews fetched HTML from the homepage plus obvious key internal pages.",
+    ...payload.contextAssumptions,
   ];
 
   if (!payload.websiteUrl) {
@@ -1498,6 +1563,159 @@ async function discoverCompetitors(payload: ReturnType<typeof validateCompetitiv
     return parseCompetitors(body.competitors).filter((competitor) => competitor.url);
   } catch {
     return [];
+  }
+}
+
+function needsCompetitiveBriefAutofill(payload: CompetitiveAnalysisPayload) {
+  return !asString(payload.websiteUrl) || !asString(payload.industry) || !parseCompetitors(payload.competitors).length;
+}
+
+function normalizeAutofillUrl(value: unknown) {
+  const rawUrl = asString(value);
+  if (!rawUrl) {
+    return "";
+  }
+
+  try {
+    const url = validateHttpUrl(rawUrl, "autofillUrl");
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "";
+  }
+}
+
+function formatAutofillCompetitors(value: unknown) {
+  if (!Array.isArray(value)) {
+    return "";
+  }
+
+  return value
+    .slice(0, 5)
+    .map((item) => {
+      const row = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+      const name = asString(row.name).slice(0, 140);
+      const url = normalizeAutofillUrl(row.url);
+
+      if (!name) {
+        return "";
+      }
+
+      return url ? `${name} ${url}` : name;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildCompetitiveBriefAutofillPrompt(payload: CompetitiveAnalysisPayload) {
+  return [
+    {
+      role: "system",
+      content:
+        "You prepare competitive research inputs for a crawl-based SEO dashboard. Return only valid JSON. Prefer leaving URL fields empty over inventing exact URLs. Do not claim live rankings, traffic, revenue, or market share.",
+    },
+    {
+      role: "user",
+      content: `Auto-fill the missing competitive research brief for this company:\n${JSON.stringify({
+        clientName: asString(payload.clientName),
+        websiteUrl: asString(payload.websiteUrl),
+        industry: asString(payload.industry),
+        market: asString(payload.market),
+        targetAudience: asString(payload.targetAudience),
+        competitors: asString(payload.competitors),
+        targetKeywords: asString(payload.targetKeywords),
+        notes: asString(payload.notes),
+      })}\n\nReturn this exact JSON shape:\n{\n  "websiteUrl": "official homepage URL if reasonably confident, otherwise empty string",\n  "industry": "plain industry/category",\n  "market": "likely market or geography, otherwise empty string",\n  "targetAudience": "likely buyer/user audience, otherwise empty string",\n  "competitors": [{ "name": "competitor name", "url": "official homepage URL if reasonably confident, otherwise empty string" }],\n  "targetKeywords": ["search topics likely relevant to this company"],\n  "notes": "short context summary for the later report",\n  "assumptions": ["uncertainty or inference caveat"]\n}\n\nRules:\n- Preserve any user-supplied values.\n- Use the company name to infer enough context for a first-pass crawl.\n- Return 2-5 competitors when you can identify likely direct alternatives.\n- Use official homepages only when you are reasonably confident.\n- Make uncertainty visible in assumptions.`,
+    },
+  ];
+}
+
+export function mergeCompetitiveBriefAutofill(payload: CompetitiveAnalysisPayload, rawAutofill: unknown): CompetitiveAnalysisPayload {
+  const row = rawAutofill && typeof rawAutofill === "object" ? (rawAutofill as Record<string, unknown>) : {};
+  const autofillNotes = asString(row.notes).slice(0, 800);
+  const existingNotes = asString(payload.notes).slice(0, 1000);
+  const assumptions = Array.isArray(row.assumptions)
+    ? row.assumptions.map((item) => asString(item).slice(0, 320)).filter(Boolean).slice(0, 8)
+    : [];
+  const autofillCompetitors = formatAutofillCompetitors(row.competitors);
+  const autofillKeywords = Array.isArray(row.targetKeywords)
+    ? row.targetKeywords.map((item) => asString(item).slice(0, 120)).filter(Boolean).slice(0, 8).join("\n")
+    : "";
+
+  return {
+    ...payload,
+    websiteUrl: asString(payload.websiteUrl) || normalizeAutofillUrl(row.websiteUrl),
+    industry: asString(payload.industry) || asString(row.industry).slice(0, 140),
+    market: asString(payload.market) || asString(row.market).slice(0, 140),
+    targetAudience: asString(payload.targetAudience) || asString(row.targetAudience).slice(0, 240),
+    competitors: asString(payload.competitors) || autofillCompetitors,
+    targetKeywords: asString(payload.targetKeywords) || autofillKeywords,
+    notes: [existingNotes, autofillNotes].filter(Boolean).join("\n\n").slice(0, 1000),
+    contextAssumptions: [
+      ...(payload.contextAssumptions || []),
+      "Research context was auto-filled from the company name using OpenAI before crawling public pages.",
+      ...assumptions,
+    ].slice(0, 8),
+  };
+}
+
+async function autofillCompetitiveBrief(
+  payload: CompetitiveAnalysisPayload,
+  openAi: SeoIntegration | null,
+  hasEnvOpenAiKey: boolean
+) {
+  if (!needsCompetitiveBriefAutofill(payload)) {
+    return payload;
+  }
+
+  if (!openAi && !hasEnvOpenAiKey) {
+    return {
+      ...payload,
+      contextAssumptions: [
+        ...(payload.contextAssumptions || []),
+        "OpenAI was not connected, so the research brief could not be auto-filled from company name alone.",
+      ],
+    };
+  }
+
+  try {
+    const apiKey = getAvailableOpenAiApiKey(openAi);
+    const result = await fetchJson("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_SEO_MODEL || "gpt-4o-mini",
+        temperature: 0.15,
+        response_format: competitiveBriefAutofillResponseFormat,
+        messages: buildCompetitiveBriefAutofillPrompt(payload),
+      }),
+    });
+
+    if (!result.ok) {
+      throw new Error(`OpenAI brief auto-fill failed with HTTP ${result.status}.`);
+    }
+
+    const body = result.body as { choices?: Array<{ message?: { content?: string; refusal?: string } }> };
+    if (body.choices?.[0]?.message?.refusal) {
+      throw new Error("OpenAI refused to auto-fill the competitive brief.");
+    }
+
+    const content = body.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new Error("OpenAI returned an empty auto-fill response.");
+    }
+
+    return mergeCompetitiveBriefAutofill(payload, JSON.parse(content));
+  } catch (error) {
+    return {
+      ...payload,
+      contextAssumptions: [
+        ...(payload.contextAssumptions || []),
+        `OpenAI brief auto-fill was skipped: ${error instanceof Error ? error.message : "unknown error"}`,
+      ],
+    };
   }
 }
 
@@ -1853,7 +2071,10 @@ export async function generateInsights(scope: SeoTenantScope) {
 export async function generateCompetitiveAnalysis(scope: SeoTenantScope, rawPayload: CompetitiveAnalysisPayload) {
   const { integrations, competitiveAnalyses } = await getSeoCollections();
   try {
-    const payload = validateCompetitiveAnalysisPayload(rawPayload);
+    const openAi = await integrations.findOne({ user_id: scope.userId, provider: "openai", encrypted_secret: { $ne: null } });
+    const hasEnvOpenAiKey = Boolean(asString(process.env.OPENAI_API_KEY));
+    const enrichedPayload = await autofillCompetitiveBrief(rawPayload, openAi, hasEnvOpenAiKey);
+    const payload = validateCompetitiveAnalysisPayload(enrichedPayload);
     const discoveredCompetitors = await discoverCompetitors(payload);
     const competitors = dedupeCompetitors([...payload.competitors, ...discoveredCompetitors]);
     const crawlEvidence = await Promise.all([
@@ -1863,8 +2084,6 @@ export async function generateCompetitiveAnalysis(scope: SeoTenantScope, rawPayl
       ),
     ]);
     const deterministic = deterministicCompetitiveAnalysis({ ...payload, competitors }, crawlEvidence);
-    const openAi = await integrations.findOne({ user_id: scope.userId, provider: "openai", encrypted_secret: { $ne: null } });
-    const hasEnvOpenAiKey = Boolean(asString(process.env.OPENAI_API_KEY));
     const integrationRows = await integrations.find({ user_id: scope.userId }).sort({ created_at: 1 }).toArray();
     const analysisInput = sanitizeForAiPayload({
       ...payload,
@@ -1881,7 +2100,7 @@ export async function generateCompetitiveAnalysis(scope: SeoTenantScope, rawPayl
     let parsed: unknown = deterministic;
     if (openAi || hasEnvOpenAiKey) {
       try {
-        const apiKey = getConfiguredOpenAiApiKey(openAi);
+        const apiKey = getAvailableOpenAiApiKey(openAi);
         const result = await fetchJson("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: {
