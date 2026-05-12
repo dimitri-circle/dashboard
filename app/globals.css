@@ -8,6 +8,9 @@
   --good: #145c42;
   --bad: #9f1f17;
   --warn: #7a4d12;
+  --accent: #2257c7;
+  --accent-soft: rgba(34, 87, 199, 0.1);
+  --blue: #2257c7;
 }
 
 * {
@@ -451,19 +454,37 @@ select {
 
 .status-card {
   display: grid;
-  gap: 6px;
-  min-height: 78px;
+  gap: 8px;
+  min-height: 86px;
   padding: 14px;
   color: var(--ink);
   text-align: left;
+}
+
+.status-card i {
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(17, 18, 20, 0.16);
+  border-radius: 999px;
+  background: rgba(17, 18, 20, 0.08);
 }
 
 .status-card[data-status="connected"] {
   border-color: rgba(20, 92, 66, 0.3);
 }
 
+.status-card[data-status="connected"] i {
+  border-color: rgba(20, 92, 66, 0.28);
+  background: var(--good);
+}
+
 .status-card[data-status="error"] {
   border-color: rgba(159, 31, 23, 0.3);
+}
+
+.status-card[data-status="error"] i {
+  border-color: rgba(159, 31, 23, 0.28);
+  background: var(--bad);
 }
 
 .status-card-button {
@@ -490,62 +511,119 @@ select {
 
 .overview {
   display: grid;
-  gap: 18px;
+  gap: 22px;
 }
 
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
 }
 
 .graph-card {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 12px;
-  min-height: 164px;
-  padding: 16px;
+  gap: 18px;
+  min-height: 156px;
+  padding: 18px;
+  overflow: hidden;
+}
+
+.graph-card::before {
+  content: "";
+  width: 42px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.graph-card-main {
+  display: grid;
+  gap: 6px;
 }
 
 .graph-card strong {
   display: block;
-  margin-top: 8px;
-  font-size: clamp(2rem, 3vw, 3.2rem);
-  line-height: 0.9;
+  font-size: 3rem;
+  line-height: 0.92;
+  letter-spacing: 0;
 }
 
 .graph-card p {
-  grid-column: 1 / -1;
   margin: 0;
-  line-height: 1.4;
+  max-width: 19rem;
+  line-height: 1.45;
 }
 
-.bar-chart {
-  display: flex;
-  align-items: end;
-  gap: 5px;
-  width: 54px;
-  height: 86px;
-  padding: 8px;
-  border-radius: 8px;
-  background: rgba(17, 18, 20, 0.06);
+.graph-progress {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(17, 18, 20, 0.08);
 }
 
-.bar-chart span {
-  width: 10px;
-  border-radius: 999px 999px 2px 2px;
-  background: #111214;
+.graph-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #14a37f);
 }
 
 .quick-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  margin-top: 16px;
+  margin-top: 18px;
+}
+
+.quick-actions .button {
+  justify-content: flex-start;
+  min-height: 48px;
+  padding: 0 16px;
+  text-align: left;
+}
+
+.overview-flow-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.overview-health-panel,
+.overview-actions-panel {
+  display: grid;
+  align-content: start;
+}
+
+.overview-panel-heading {
+  display: grid;
+  justify-content: start;
+  gap: 6px;
+}
+
+.overview-panel-heading p {
+  max-width: 32rem;
+  line-height: 1.5;
+}
+
+.overview-status-grid {
+  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.overview-status-grid .status-card {
+  min-height: 112px;
+  align-content: start;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.overview-status-grid .status-card strong {
+  max-width: 8rem;
+  line-height: 1.08;
 }
 
 .metric-panel {
-  margin-top: 16px;
+  margin-top: 0;
 }
 
 .split-heading {
@@ -884,6 +962,9 @@ select {
 }
 
 .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 38px;
   border: 1px solid rgba(17, 18, 20, 0.16);
   border-radius: 8px;
@@ -1311,6 +1392,7 @@ select {
   .hero,
   .dashboard-shell,
   .dashboard-grid,
+  .overview-flow-grid,
   .overview-grid,
   .client-grid,
   .status-row,
