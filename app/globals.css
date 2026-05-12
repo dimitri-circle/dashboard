@@ -782,6 +782,97 @@ select {
   color: rgba(17, 18, 20, 0.74);
 }
 
+.competitive-workspace {
+  display: grid;
+  grid-template-columns: minmax(330px, 0.72fr) minmax(0, 1.28fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.competitive-hero {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+  gap: 18px;
+  align-items: end;
+}
+
+.competitive-hero .section-heading {
+  margin: 0;
+}
+
+.competitive-hero h3 {
+  max-width: 18ch;
+  margin: 6px 0 0;
+  font-size: 4.2rem;
+  line-height: 0.96;
+}
+
+.competitive-hero p,
+.competitive-empty-state p {
+  max-width: 680px;
+  line-height: 1.6;
+}
+
+.competitive-proof-grid,
+.competitive-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.competitive-proof-grid div,
+.competitive-summary-grid div {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.66);
+  padding: 12px;
+}
+
+.competitive-proof-grid strong,
+.competitive-summary-grid strong {
+  display: block;
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+.competitive-proof-grid span,
+.competitive-summary-grid span {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 760;
+  line-height: 1.25;
+}
+
+.competitive-brief-panel {
+  position: sticky;
+  top: 18px;
+}
+
+.competitive-results-panel {
+  min-width: 0;
+}
+
+.competitive-empty-state {
+  display: grid;
+  align-content: center;
+  min-height: 420px;
+  border: 1px dashed rgba(17, 18, 20, 0.18);
+  border-radius: 8px;
+  padding: 22px;
+  background: rgba(255, 255, 255, 0.46);
+}
+
+.competitive-empty-state h4 {
+  max-width: 18ch;
+  margin: 8px 0 0;
+  font-size: 3rem;
+  line-height: 1;
+}
+
 .check {
   align-content: end;
   grid-template-columns: 18px 1fr;
@@ -964,6 +1055,10 @@ select {
   box-shadow: 0 16px 36px rgba(31, 20, 10, 0.06);
 }
 
+.competitive-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .analysis-card dl {
   margin: 0;
 }
@@ -1072,6 +1167,36 @@ select {
   flex-wrap: wrap;
   gap: 10px;
   font-size: 0.78rem;
+}
+
+@media (max-width: 980px) {
+  .competitive-workspace,
+  .competitive-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .competitive-brief-panel {
+    position: static;
+  }
+
+  .competitive-hero h3 {
+    font-size: 3.2rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .competitive-proof-grid,
+  .competitive-summary-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .competitive-hero h3 {
+    font-size: 2.4rem;
+  }
+
+  .competitive-empty-state h4 {
+    font-size: 2.1rem;
+  }
 }
 
 .empty-state {

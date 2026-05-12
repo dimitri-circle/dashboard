@@ -1051,14 +1051,48 @@ function CompetitiveView({
   competitiveAnalyses: CompetitiveAnalysis[];
   onGenerateCompetitiveAnalysis: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const latestAnalysis = competitiveAnalyses[0];
+  const latestEvidenceCount = latestAnalysis?.crawl_evidence?.reduce((total, site) => total + site.pages.length, 0) || 0;
+  const latestSourceCount = latestAnalysis?.crawl_evidence?.filter((site) => site.status === "success" || site.status === "partial").length || 0;
+
   return (
-    <div className="dashboard-grid">
-      <section className="panel" data-tour="competitive-analysis" aria-labelledby="competitive-title">
+    <div className="competitive-workspace">
+      <section className="panel competitive-hero" aria-labelledby="competitive-title">
         <div className="section-heading">
-          <h3 id="competitive-title">Competitive Analysis</h3>
-          <p>Crawl and compare websites first. OpenAI can summarize the evidence when a token is connected.</p>
+          <div>
+            <span className="eyebrow">Competitive workspace</span>
+            <h3 id="competitive-title">Evidence-backed competitor reports</h3>
+            <p>
+              Build a client-ready brief from crawlable website evidence. The system separates observed facts from
+              interpretation, then adds editable report sections when OpenAI is available.
+            </p>
+          </div>
         </div>
 
+        <div className="competitive-proof-grid">
+          <div>
+            <strong>{competitiveAnalyses.length}</strong>
+            <span>saved reports</span>
+          </div>
+          <div>
+            <strong>{latestSourceCount}</strong>
+            <span>latest sources crawled</span>
+          </div>
+          <div>
+            <strong>{latestEvidenceCount}</strong>
+            <span>latest pages reviewed</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel competitive-brief-panel" data-tour="competitive-analysis" aria-labelledby="competitive-brief-title">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Research brief</span>
+            <h3 id="competitive-brief-title">Define the comparison.</h3>
+            <p>Start with known competitors. Add URLs whenever possible so the report can cite evidence.</p>
+          </div>
+        </div>
         <form className="competitive-form" onSubmit={onGenerateCompetitiveAnalysis}>
           <Field name="clientName" label="Client name" placeholder={activeClient?.name || "Acme Health"} required />
           <Field name="websiteUrl" label="Website URL" placeholder="https://example.com" type="url" />
@@ -1081,21 +1115,31 @@ function CompetitiveView({
             <textarea name="notes" placeholder="Positioning, offers, constraints, or market context" rows={4} />
           </label>
           <button className="button button-primary" data-tour="generate-competitive-analysis" type="submit" disabled={analyzing}>
-            {analyzing ? "Crawling..." : "Crawl and Compare Websites"}
+            {analyzing ? "Collecting evidence..." : "Generate evidence-backed report"}
           </button>
         </form>
       </section>
 
-      <section className="panel">
+      <section className="panel competitive-results-panel">
         <div className="section-heading">
-          <h3>Briefs</h3>
-          <p>Stored competitive reports for the active client.</p>
+          <div>
+            <span className="eyebrow">Output</span>
+            <h3>Reports and evidence</h3>
+            <p>Each report keeps the answer, the source trail, and the editable draft in one place.</p>
+          </div>
         </div>
         <div className="analysis-results" aria-live="polite">
           {competitiveAnalyses.length ? (
             competitiveAnalyses.map((analysis) => <CompetitiveAnalysisCard analysis={analysis} key={analysis.id} />)
           ) : (
-            <div className="empty-state">Add a client URL and competitor URLs to generate the first crawl-based comparison.</div>
+            <div className="competitive-empty-state">
+              <span className="eyebrow">No report yet</span>
+              <h4>Your first competitive brief will appear here.</h4>
+              <p>
+                Add a client URL and 1-3 competitor URLs. The first useful output should show what was crawled,
+                what gaps were observed, and which claims are still uncertain.
+              </p>
+            </div>
           )}
         </div>
       </section>
@@ -1169,6 +1213,8 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
   const topPerformers = analysis.top_performers || [];
   const crawlEvidence = analysis.crawl_evidence || [];
   const reportDraft = analysis.report_draft || [];
+  const successfulSites = crawlEvidence.filter((site) => site.status === "success" || site.status === "partial");
+  const reviewedPageCount = crawlEvidence.reduce((total, site) => total + site.pages.length, 0);
 
   return (
     <article className="analysis-card">
@@ -1184,6 +1230,26 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
       </div>
 
       <p>{analysis.summary}</p>
+
+      <div className="competitive-summary-grid">
+        <div>
+          <span>Competitors</span>
+          <strong>{analysis.competitors.length}</strong>
+        </div>
+        <div>
+          <span>Sources</span>
+          <strong>{successfulSites.length}</strong>
+        </div>
+        <div>
+          <span>Pages reviewed</span>
+          <strong>{reviewedPageCount}</strong>
+        </div>
+        <div>
+          <span>Draft sections</span>
+          <strong>{reportDraft.length}</strong>
+        </div>
+      </div>
+
       {topPerformers.length ? (
         <div className="evidence-strip">
           {topPerformers.map((performer) => (
@@ -1202,7 +1268,7 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
 
       {missingPatterns.length ? (
         <div className="pattern-list">
-          <h5>Competitors have, client does not</h5>
+          <h5>Feature gap matrix</h5>
           {missingPatterns.slice(0, 5).map((pattern) => (
             <div className="pattern-row" key={`${analysis.id}-${pattern.feature}`}>
               <strong>{pattern.label}</strong>
@@ -1235,7 +1301,7 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
 
       {crawlEvidence.length ? (
         <div className="crawl-evidence">
-          <h5>Crawl evidence</h5>
+          <h5>Evidence board</h5>
           {crawlEvidence.map((site) => (
             <div className="crawl-site" key={`${analysis.id}-${site.site_role}-${site.name}`}>
               <div className="card-top">
@@ -1245,6 +1311,7 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
               <p>
                 {site.feature_count} features across {site.pages.filter((page) => page.status === "success").length} crawled pages
               </p>
+              {site.errors.length ? <p>{site.errors.slice(0, 2).join(" ")}</p> : null}
               <SourceLinks urls={site.pages.map((page) => page.url)} />
             </div>
           ))}
