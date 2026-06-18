@@ -1,4 +1,4 @@
-import { MongoClient, ServerApiVersion, type Collection, type Db } from "mongodb";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type {
   SeoAuditEvent,
   SeoAppUser,
@@ -9,100 +9,271 @@ import type {
   SeoMetricSnapshot,
 } from "./types";
 
-let clientPromise: Promise<MongoClient> | null = null;
-let dbInstance: Db | null = null;
+type RowWithId = { id: string; _id?: string };
+type SeoTableName =
+  | "seo_audit_events"
+  | "seo_app_users"
+  | "seo_clients"
+  | "seo_competitive_analyses"
+  | "seo_insights"
+  | "seo_integrations"
+  | "seo_metric_snapshots";
 
-function getMongoUri() {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) {
-    throw new Error("MONGODB_URI is required for SEO Intelligence storage.");
+type FilterValue = string | number | boolean | null | { $ne?: unknown; $in?: unknown[] };
+type Filter = Record<string, FilterValue>;
+type SortSpec = Record<string, 1 | -1>;
+type UpdateSpec<T> = {
+  $set?: Partial<T>;
+  $setOnInsert?: Partial<T>;
+};
+
+let supabaseClient: SupabaseClient | null = null;
+
+function getSupabaseUrl() {
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!url) {
+    throw new Error("SUPABASE_URL is required for SEO Intelligence storage.");
   }
-  return uri;
+  return url;
 }
 
-export async function getMongoClient() {
-  if (!clientPromise) {
-    const client = new MongoClient(getMongoUri(), {
-      serverApi: {
-        version: ServerApiVersion.v1,
-        strict: true,
-        deprecationErrors: true,
+function getSupabaseSecretKey() {
+  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) {
+    throw new Error("SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY is required for SEO Intelligence storage.");
+  }
+  return key;
+}
+
+export function getSupabaseAdminClient() {
+  if (!supabaseClient) {
+    supabaseClient = createClient(getSupabaseUrl(), getSupabaseSecretKey(), {
+      auth: {
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        persistSession: false,
       },
     });
-
-    clientPromise = client.connect().catch((error) => {
-      clientPromise = null;
-      dbInstance = null;
-      throw error;
-    });
   }
 
-  return clientPromise;
+  return supabaseClient;
 }
 
-export async function getSeoDb() {
-  if (!dbInstance) {
-    const client = await getMongoClient();
-    dbInstance = client.db(process.env.MONGODB_DB || "seo_intelligence");
+function cleanRow<T>(row: Partial<T>) {
+  return Object.fromEntries(
+    Object.entries(row as Record<string, unknown>).filter(([key, value]) => key !== "_id" && value !== undefined)
+  ) as Partial<T>;
+}
+
+function plainFilterValues(filter: Filter) {
+  return Object.fromEntries(Object.entries(filter).filter(([, value]) => !value || typeof value !== "object"));
+}
+
+function applyFilter<T>(query: T, filter: Filter) {
+  return Object.entries(filter).reduce((nextQuery, [key, value]) => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      if ("$ne" in value) {
+        return value.$ne === null
+          ? (nextQuery as { not: (column: string, operator: string, value: null) => T }).not(key, "is", null)
+          : (nextQuery as { neq: (column: string, value: unknown) => T }).neq(key, value.$ne);
+      }
+
+      if ("$in" in value) {
+        return (nextQuery as { in: (column: string, values: unknown[]) => T }).in(key, value.$in || []);
+      }
+    }
+
+    return value === null
+      ? (nextQuery as { is: (column: string, value: null) => T }).is(key, null)
+      : (nextQuery as { eq: (column: string, value: unknown) => T }).eq(key, value);
+  }, query);
+}
+
+function onConflictFor(tableName: SeoTableName, filter: Filter) {
+  if (tableName === "seo_app_users" && "email" in filter) return "email";
+  if ("id" in filter) return "id";
+  return undefined;
+}
+
+function table(tableName: SeoTableName) {
+  return getSupabaseAdminClient().from(tableName) as any;
+}
+
+class SupabaseFindQuery<T extends RowWithId> {
+  private sortSpec: SortSpec | null = null;
+  private rowLimit: number | null = null;
+
+  constructor(
+    private readonly tableName: SeoTableName,
+    private readonly filter: Filter
+  ) {}
+
+  sort(sortSpec: SortSpec) {
+    this.sortSpec = sortSpec;
+    return this;
   }
 
-  return dbInstance;
+  limit(rowLimit: number) {
+    this.rowLimit = rowLimit;
+    return this;
+  }
+
+  async toArray() {
+    let query = applyFilter(table(this.tableName).select("*"), this.filter);
+
+    if (this.sortSpec) {
+      for (const [column, direction] of Object.entries(this.sortSpec)) {
+        query = query.order(column, { ascending: direction === 1 });
+      }
+    }
+
+    if (this.rowLimit !== null) {
+      query = query.limit(this.rowLimit);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return (data || []) as T[];
+  }
+}
+
+class SupabaseCollection<T extends RowWithId> {
+  constructor(private readonly tableName: SeoTableName) {}
+
+  async createIndex() {
+    return this.tableName;
+  }
+
+  find(filter: Filter = {}) {
+    return new SupabaseFindQuery<T>(this.tableName, filter);
+  }
+
+  async findOne(filter: Filter) {
+    const { data, error } = await applyFilter(table(this.tableName).select("*"), filter)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return (data as T | null) || null;
+  }
+
+  async insertOne(row: T) {
+    const { error } = await table(this.tableName).insert(cleanRow<T>(row));
+    if (error) {
+      throw new Error(error.message);
+    }
+    return { insertedId: row.id };
+  }
+
+  async insertMany(rows: T[]) {
+    if (!rows.length) {
+      return { insertedCount: 0 };
+    }
+
+    const { error } = await table(this.tableName).insert(rows.map((row) => cleanRow<T>(row)));
+    if (error) {
+      throw new Error(error.message);
+    }
+    return { insertedCount: rows.length };
+  }
+
+  async updateOne(filter: Filter, update: UpdateSpec<T>, options: { upsert?: boolean } = {}) {
+    const set = cleanRow<T>(update.$set || {});
+    const setOnInsert = cleanRow<T>(update.$setOnInsert || {});
+
+    if (options.upsert && update.$setOnInsert) {
+      const existing = await this.findOne(filter);
+      if (existing) {
+        return { matchedCount: 1, modifiedCount: 0, upsertedCount: 0 };
+      }
+
+      const { error } = await table(this.tableName).insert(setOnInsert);
+      if (error) {
+        throw new Error(error.message);
+      }
+      return { matchedCount: 0, modifiedCount: 0, upsertedCount: 1 };
+    }
+
+    if (options.upsert) {
+      const row = { ...plainFilterValues(filter), ...set };
+      const onConflict = onConflictFor(this.tableName, filter);
+      const { error } = await table(this.tableName).upsert(row, onConflict ? { onConflict } : undefined);
+      if (error) {
+        throw new Error(error.message);
+      }
+      return { matchedCount: 1, modifiedCount: 1, upsertedCount: 0 };
+    }
+
+    const { data, error } = await applyFilter(table(this.tableName).update(set).select("id"), filter);
+    if (error) {
+      throw new Error(error.message);
+    }
+    return { matchedCount: data?.length || 0, modifiedCount: data?.length || 0 };
+  }
+
+  async replaceOne(filter: Filter, replacement: T) {
+    const { data, error } = await applyFilter(
+      table(this.tableName).update(cleanRow<T>(replacement)).select("id"),
+      filter
+    );
+    if (error) {
+      throw new Error(error.message);
+    }
+    return { matchedCount: data?.length || 0, modifiedCount: data?.length || 0 };
+  }
+
+  async deleteOne(filter: Filter) {
+    const { data, error } = await applyFilter(table(this.tableName).delete().select("id"), filter);
+    if (error) {
+      throw new Error(error.message);
+    }
+    return { deletedCount: Math.min(data?.length || 0, 1) };
+  }
+
+  async deleteMany(filter: Filter) {
+    const { data, error } = await applyFilter(table(this.tableName).delete().select("id"), filter);
+    if (error) {
+      throw new Error(error.message);
+    }
+    return { deletedCount: data?.length || 0 };
+  }
 }
 
 export async function pingSeoDb() {
-  const client = await getMongoClient();
-  await client.db(process.env.MONGODB_DB || "seo_intelligence").command({ ping: 1 });
+  const { error } = await table("seo_clients").select("id").limit(1);
+  if (error) {
+    throw new Error(error.message);
+  }
   return true;
 }
 
 export async function getSeoCollections(): Promise<{
-  integrations: Collection<SeoIntegration>;
-  insights: Collection<SeoInsight>;
-  metricSnapshots: Collection<SeoMetricSnapshot>;
-  competitiveAnalyses: Collection<SeoCompetitiveAnalysis>;
-  clients: Collection<SeoClient>;
-  auditEvents: Collection<SeoAuditEvent>;
-  appUsers: Collection<SeoAppUser>;
+  integrations: SupabaseCollection<SeoIntegration>;
+  insights: SupabaseCollection<SeoInsight>;
+  metricSnapshots: SupabaseCollection<SeoMetricSnapshot>;
+  competitiveAnalyses: SupabaseCollection<SeoCompetitiveAnalysis>;
+  clients: SupabaseCollection<SeoClient>;
+  auditEvents: SupabaseCollection<SeoAuditEvent>;
+  appUsers: SupabaseCollection<SeoAppUser>;
 }> {
-  const db = await getSeoDb();
   return {
-    integrations: db.collection<SeoIntegration>("seo_integrations"),
-    insights: db.collection<SeoInsight>("seo_insights"),
-    metricSnapshots: db.collection<SeoMetricSnapshot>("seo_metric_snapshots"),
-    competitiveAnalyses: db.collection<SeoCompetitiveAnalysis>("seo_competitive_analyses"),
-    clients: db.collection<SeoClient>("seo_clients"),
-    auditEvents: db.collection<SeoAuditEvent>("seo_audit_events"),
-    appUsers: db.collection<SeoAppUser>("seo_app_users"),
+    integrations: new SupabaseCollection<SeoIntegration>("seo_integrations"),
+    insights: new SupabaseCollection<SeoInsight>("seo_insights"),
+    metricSnapshots: new SupabaseCollection<SeoMetricSnapshot>("seo_metric_snapshots"),
+    competitiveAnalyses: new SupabaseCollection<SeoCompetitiveAnalysis>("seo_competitive_analyses"),
+    clients: new SupabaseCollection<SeoClient>("seo_clients"),
+    auditEvents: new SupabaseCollection<SeoAuditEvent>("seo_audit_events"),
+    appUsers: new SupabaseCollection<SeoAppUser>("seo_app_users"),
   };
 }
 
-export async function ensureSeoIndexes() {
-  const { clients, integrations, insights, metricSnapshots, competitiveAnalyses, auditEvents, appUsers } =
-    await getSeoCollections();
-
-  await Promise.all([
-    appUsers.createIndex({ email: 1 }, { unique: true, name: "seo_app_users_email_unique" }),
-    clients.createIndex({ id: 1 }, { unique: true, name: "seo_clients_id_unique" }),
-    clients.createIndex({ name: 1 }, { name: "seo_clients_name" }),
-    integrations.createIndex({ user_id: 1, provider: 1 }, { name: "seo_integrations_client_provider" }),
-    integrations.createIndex({ user_id: 1, id: 1 }, { unique: true, name: "seo_integrations_client_id_unique" }),
-    integrations.createIndex({ user_id: 1, status: 1 }, { name: "seo_integrations_client_status" }),
-    insights.createIndex({ user_id: 1, created_at: -1 }, { name: "seo_insights_client_created" }),
-    metricSnapshots.createIndex(
-      { user_id: 1, provider: 1, captured_at: -1 },
-      { name: "seo_metric_snapshots_client_provider_captured" }
-    ),
-    metricSnapshots.createIndex(
-      { user_id: 1, metric_name: 1, captured_at: -1 },
-      { name: "seo_metric_snapshots_client_metric_captured" }
-    ),
-    competitiveAnalyses.createIndex(
-      { user_id: 1, created_at: -1 },
-      { name: "seo_competitive_analyses_client_created" }
-    ),
-    auditEvents.createIndex({ user_id: 1, created_at: -1 }, { name: "seo_audit_events_client_created" }),
-    auditEvents.createIndex({ action: 1, created_at: -1 }, { name: "seo_audit_events_action_created" }),
-  ]);
-
+export async function ensureSeoStorage() {
+  await pingSeoDb();
   return { ok: true };
 }

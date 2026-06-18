@@ -1,7 +1,7 @@
 import crypto, { randomUUID } from "node:crypto";
 import { load } from "cheerio";
 import { decryptSecret, encryptSecret } from "./crypto";
-import { ensureSeoIndexes, getSeoCollections } from "./db";
+import { ensureSeoStorage, getSeoCollections } from "./db";
 import type {
   SeoClient,
   SeoCompetitiveAnalysis,
@@ -266,7 +266,7 @@ export function nowIso() {
 }
 
 export async function bootstrapSeoStorage() {
-  await ensureSeoIndexes();
+  await ensureSeoStorage();
   await listClients();
   return { ok: true };
 }

@@ -5,7 +5,7 @@ export type SeoStatus = "disconnected" | "connected" | "error";
 export type SeoPriority = "low" | "medium" | "high";
 
 export type SeoClient = {
-  _id?: ObjectId;
+  _id?: string;
   id: string;
   name: string;
   notes: string | null;
@@ -22,7 +22,7 @@ export type EncryptedSecret = {
 };
 
 export type SeoIntegration = {
-  _id?: ObjectId;
+  _id?: string;
   id: string;
   user_id: string;
   provider: SeoProvider;
@@ -41,7 +41,7 @@ export type SafeSeoIntegration = Omit<SeoIntegration, "_id" | "encrypted_secret"
 };
 
 export type SeoInsight = {
-  _id?: ObjectId;
+  _id?: string;
   id: string;
   user_id: string;
   title: string;
@@ -56,7 +56,7 @@ export type SeoInsight = {
 };
 
 export type SeoMetricSnapshot = {
-  _id?: ObjectId;
+  _id?: string;
   id: string;
   user_id: string;
   provider: SeoProvider;
@@ -114,7 +114,7 @@ export type SeoCompetitiveReportSection = {
 };
 
 export type SeoCompetitiveAnalysis = {
-  _id?: ObjectId;
+  _id?: string;
   id: string;
   user_id: string;
   client_name: string;
@@ -148,7 +148,7 @@ export type SeoCompetitiveAnalysis = {
 };
 
 export type SeoAuditEvent = {
-  _id?: ObjectId;
+  _id?: string;
   id: string;
   user_id: string;
   action: string;
@@ -159,7 +159,7 @@ export type SeoAuditEvent = {
 };
 
 export type SeoAppUser = {
-  _id?: ObjectId;
+  _id?: string;
   id: string;
   email: string;
   password_hash: string;
@@ -167,4 +167,3 @@ export type SeoAppUser = {
   created_at: string;
   updated_at: string;
 };
-import type { ObjectId } from "mongodb";

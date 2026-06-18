@@ -2,17 +2,17 @@
 
 ## Overview
 
-This repository is now a Vercel-ready Next.js App Router application backed by MongoDB. The app exposes `/api/seo/*` route handlers for integration metadata, encrypted secrets, connector tests, metric snapshots, AI-generated insights, and competitive analysis briefs.
+This repository is now a Vercel-ready Next.js App Router application backed by Supabase Postgres. The app exposes `/api/seo/*` route handlers for integration metadata, encrypted secrets, connector tests, metric snapshots, AI-generated insights, and competitive analysis briefs.
 
 ## Setup
 
-Create a 32-byte encryption key before saving secrets and configure MongoDB:
+Create a 32-byte encryption key before saving secrets and configure Supabase:
 
 ```bash
 cp .env.example .env.local
 export SEO_SECRET_ENCRYPTION_KEY="$(openssl rand -hex 32)"
-export MONGODB_URI="mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/?retryWrites=true&w=majority"
-export MONGODB_DB="seo_intelligence"
+export SUPABASE_URL="https://your-project.supabase.co"
+export SUPABASE_SECRET_KEY="sb_secret_or_service_role_key"
 npm run dev
 ```
 
@@ -29,8 +29,8 @@ Open `http://localhost:3000`.
 
 For Vercel, add the same values under Project Settings → Environment Variables:
 
-- `MONGODB_URI`
-- `MONGODB_DB`
+- `SUPABASE_URL`
+- `SUPABASE_SECRET_KEY` (or `SUPABASE_SERVICE_ROLE_KEY` for legacy projects)
 - `SEO_SECRET_ENCRYPTION_KEY`
 - `CRON_SECRET`
 - `OPENAI_SEO_MODEL` (optional)
@@ -42,7 +42,13 @@ For Vercel, add the same values under Project Settings → Environment Variables
 - `SEO_APP_PASSWORD` (recommended dashboard login password; falls back to `CRON_SECRET` if omitted)
 - `SEO_APP_SESSION_TOKEN` (recommended random token stored in the login cookie; falls back to `CRON_SECRET` if omitted)
 
-After MongoDB env vars are set, initialize indexes:
+Apply the database schema before using the dashboard:
+
+```bash
+supabase db push
+```
+
+After Supabase env vars are set and the schema exists, bootstrap the app data:
 
 ```bash
 curl -X POST http://localhost:3000/api/seo/bootstrap
@@ -63,7 +69,7 @@ curl http://localhost:3000/api/seo/health
 
 ## Client Workspaces
 
-The dashboard now opens to an overview screen with graph-style readiness cards. A persistent sidebar switches between Overview, Clients, Tool Setup, Competitive Analysis, and Insights. Tool Setup is split into focused setup pages for GA4, GTM, Hotjar, ChatGPT / OpenAI, and MCP so users can configure one connector at a time. Users can pick an existing client or add a new client in the Clients view. The selected client id is sent to every SEO API request as `x-seo-client-id`, and MongoDB reads/writes are filtered by that value. This means each client workspace has separate:
+The dashboard opens with a client selection stage. If no clients exist, it only asks for the first client. After a client exists, the dashboard shows Overview, Tool Setup, Competitive Analysis, and Insights. Tool Setup is split into focused setup pages for GA4, GTM, Hotjar, ChatGPT / OpenAI, and MCP so users can configure one connector at a time. The selected client id is sent to every SEO API request as `x-seo-client-id`, and Supabase reads/writes are filtered by that value. This means each client workspace has separate:
 
 - integration metadata
 - encrypted API keys
@@ -71,7 +77,7 @@ The dashboard now opens to an overview screen with graph-style readiness cards. 
 - metric snapshots
 - generated insights
 
-The current MVP includes a simple email/password login backed by MongoDB collection `seo_app_users`. Passwords are stored as salted hashes, not plaintext. The env vars `SEO_APP_EMAIL`, `SEO_APP_PASSWORD`, and `SEO_APP_SESSION_TOKEN` remain as a fallback so existing deployments do not lock themselves out. This protects the app shell and SEO API routes with an HTTP-only cookie. Before broader production use, replace this with account-level auth so users can only access client ids assigned to them.
+The current MVP includes a simple email/password login backed by Supabase table `seo_app_users`. Passwords are stored as salted hashes, not plaintext. The env vars `SEO_APP_EMAIL`, `SEO_APP_PASSWORD`, and `SEO_APP_SESSION_TOKEN` remain as a fallback so existing deployments do not lock themselves out. This protects the app shell and SEO API routes with an HTTP-only cookie. Before broader production use, replace this with account-level auth so users can only access client ids assigned to them.
 
 For temporary controlled deployments, set `SEO_ALLOWED_CLIENT_IDS` to a comma-separated list such as `acme,globex`. This does not replace real auth, but it prevents arbitrary workspace ids from being accepted.
 
@@ -101,7 +107,7 @@ OpenAI also summarizes the already-collected crawl evidence. If no token is conn
 
 ## Security Model
 
-- Secrets are encrypted server-side with AES-256-GCM using `SEO_SECRET_ENCRYPTION_KEY` before being written to MongoDB.
+- Secrets are encrypted server-side with AES-256-GCM using `SEO_SECRET_ENCRYPTION_KEY` before being written to Supabase.
 - API responses use safe integration objects and do not include `encrypted_secret`.
 - Secrets are not logged by the server or rendered back into the frontend.
 - Expensive/mutating API routes have lightweight per-process rate limits.

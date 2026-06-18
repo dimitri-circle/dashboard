@@ -2,26 +2,29 @@ import { NextResponse } from "next/server";
 import { pingSeoDb } from "@/lib/seo/db";
 
 export async function GET() {
-  const hasMongoEnv = Boolean(process.env.MONGODB_URI && process.env.MONGODB_DB);
-  let mongodbReachable = false;
-  let mongodbStatus = hasMongoEnv ? "not_checked" : "missing_env";
+  const hasSupabaseEnv = Boolean(
+    (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL) &&
+      (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)
+  );
+  let supabaseReachable = false;
+  let supabaseStatus = hasSupabaseEnv ? "not_checked" : "missing_env";
 
-  if (hasMongoEnv) {
+  if (hasSupabaseEnv) {
     try {
-      mongodbReachable = await pingSeoDb();
-      mongodbStatus = "reachable";
+      supabaseReachable = await pingSeoDb();
+      supabaseStatus = "reachable";
     } catch {
-      mongodbStatus = "unreachable";
+      supabaseStatus = "unreachable";
     }
   }
 
   return NextResponse.json({
     ok: true,
     checks: {
-      mongodb_uri: Boolean(process.env.MONGODB_URI),
-      mongodb_db: Boolean(process.env.MONGODB_DB),
-      mongodb_reachable: mongodbReachable,
-      mongodb_status: mongodbStatus,
+      supabase_url: Boolean(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL),
+      supabase_secret_key: Boolean(process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY),
+      supabase_reachable: supabaseReachable,
+      supabase_status: supabaseStatus,
       encryption_key: Boolean(process.env.SEO_SECRET_ENCRYPTION_KEY),
       cron_secret: Boolean(process.env.CRON_SECRET),
       openai_model: process.env.OPENAI_SEO_MODEL || "gpt-4o-mini",
