@@ -1,3 +1,5 @@
+import { createElement } from "react";
+
 type LoginPageProps = {
   searchParams?: Promise<{
     error?: string;
@@ -18,11 +20,17 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   return (
     <main className="login-page">
+      {createElement("reactive-dot-ribbon", {
+        "aria-hidden": "true",
+        background: "",
+        className: "login-background-ribbon",
+        source: "/dots-pattern.webp",
+      })}
       <section className="login-card" aria-labelledby="login-title">
         <div>
           <p className="eyebrow">SEO Intelligence</p>
-          <h1 id="login-title">Sign in</h1>
-          <p>Use your workspace email and password to access client analytics, encrypted tools, and AI reports.</p>
+          <h1 id="login-title">Sign in to continue.</h1>
+          <p>Use your workspace account to open client analytics, encrypted tools, and AI reports.</p>
         </div>
 
         {message ? (
@@ -42,7 +50,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             <input name="password" type="password" placeholder="Enter password" required autoComplete="current-password" />
           </label>
           <button className="button button-primary" type="submit">
-            Sign in
+            Continue
           </button>
         </form>
       </section>
