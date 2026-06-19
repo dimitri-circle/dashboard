@@ -123,10 +123,17 @@ select {
 
 .dashboard-shell {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 76px minmax(0, 1fr);
   gap: 18px;
   align-items: start;
   margin-top: 0;
+  transition: grid-template-columns 180ms ease;
+}
+
+.dashboard-shell[data-nav-open="true"],
+.dashboard-shell:has(.app-sidebar:hover),
+.dashboard-shell:has(.app-sidebar:focus-within) {
+  grid-template-columns: 280px minmax(0, 1fr);
 }
 
 .app-sidebar {
@@ -139,6 +146,10 @@ select {
   padding: 16px;
   background: rgba(255, 255, 255, 0.72);
   box-shadow: 0 16px 36px rgba(31, 20, 10, 0.06);
+  overflow: hidden;
+  transition:
+    background 180ms ease,
+    box-shadow 180ms ease;
 }
 
 .app-sidebar {
@@ -167,6 +178,25 @@ select {
   padding-top: 14px;
 }
 
+.nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  border: 1px solid rgba(17, 18, 20, 0.12);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink);
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.nav-short {
+  display: none;
+  font-weight: 900;
+}
+
 .nav-group {
   display: grid;
   gap: 8px;
@@ -183,9 +213,43 @@ select {
 }
 
 .nav-item {
-  display: grid;
-  gap: 4px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
   padding: 12px;
+}
+
+.sidebar-signout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) {
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .sidebar-brand,
+.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .nav-item strong,
+.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .provider-subnav,
+.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .sidebar-signout span:not(.nav-short) {
+  display: none;
+}
+
+.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .nav-short {
+  display: inline;
+}
+
+.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .nav-item,
+.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .sidebar-signout,
+.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .nav-toggle {
+  width: 100%;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .nav-item[data-active="true"] {
@@ -244,34 +308,6 @@ select {
   flex-wrap: wrap;
 }
 
-.client-switcher {
-  display: grid;
-  gap: 6px;
-}
-
-.client-switcher label {
-  font-size: 0.74rem;
-  font-weight: 850;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.client-switcher div {
-  display: flex;
-  gap: 8px;
-}
-
-.client-switcher input {
-  width: min(260px, 44vw);
-  min-height: 38px;
-  border: 1px solid rgba(17, 18, 20, 0.16);
-  border-radius: 8px;
-  padding: 0 10px;
-  background: rgba(255, 255, 255, 0.86);
-  color: var(--ink);
-}
-
 .dashboard h2,
 .dashboard h3,
 .dashboard h4,
@@ -285,60 +321,11 @@ select {
   line-height: 1;
 }
 
-.client-stage {
-  position: relative;
+.client-page {
+  min-height: calc(100vh - 36px);
   display: grid;
-  align-content: end;
-  min-height: clamp(480px, 52vw, 720px);
-  overflow: hidden;
-  isolation: isolate;
-}
-
-.client-stage-ribbon {
-  position: absolute;
-  inset: 28% -18% -10%;
-  z-index: 0;
-  opacity: 0.74;
-  pointer-events: none;
-  --dot-ribbon-height: 430px;
-  --dot-ribbon-mobile-height: 280px;
-  --dot-ribbon-min-height: 360px;
-  --dot-ribbon-mobile-min-height: 260px;
-  --dot-ribbon-radius: 0;
-  --dot-ribbon-border: transparent;
-  --dot-ribbon-frame-background: transparent;
-  --dot-ribbon-frame-shadow: none;
-  --dot-ribbon-glow-b: transparent;
-  --dot-ribbon-aura-strength: 0.18;
-}
-
-.client-stage-copy {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  gap: 18px;
-  width: min(920px, 100%);
-  margin: 0 auto clamp(36px, 6vw, 92px);
-  text-align: center;
-}
-
-.client-stage-copy h2 {
-  margin: 0 auto;
-  max-width: 12ch;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(3.6rem, 6.6vw, 7rem);
-  font-weight: 600;
-  letter-spacing: 0;
-  line-height: 0.9;
-}
-
-.client-stage-copy p:not(.eyebrow) {
-  max-width: 840px;
-  margin: 0 auto;
-  color: var(--muted);
-  font-size: clamp(1.02rem, 1.6vw, 1.35rem);
-  font-weight: 700;
-  line-height: 1.45;
+  place-items: center;
+  padding: clamp(28px, 7vw, 96px) 0;
 }
 
 .dashboard-client-selection {
@@ -346,17 +333,25 @@ select {
   z-index: 1;
   display: grid;
   gap: 16px;
-  width: min(1120px, 100%);
+  width: min(680px, 100%);
   margin: 0 auto;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 20px;
   background: rgba(255, 255, 255, 0.74);
   box-shadow: 0 18px 42px rgba(31, 20, 10, 0.06);
+  -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }
 
 .dashboard-client-topline {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.dashboard-client-topline > div {
   display: grid;
   gap: 8px;
 }
@@ -369,7 +364,7 @@ select {
 
 .dashboard-client-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 
@@ -425,7 +420,7 @@ select {
 
 .first-client-form {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(160px, 0.75fr) auto;
+  grid-template-columns: minmax(180px, 1fr) auto;
   gap: 10px;
   align-items: end;
 }
@@ -1343,28 +1338,6 @@ select {
     grid-template-columns: 1fr;
   }
 
-  .client-stage {
-    min-height: 520px;
-  }
-
-  .client-stage-ribbon {
-    inset: 30% -34% -12%;
-  }
-
-  .client-stage-copy {
-    gap: 12px;
-    margin-bottom: 34px;
-  }
-
-  .client-stage-copy h2 {
-    max-width: 11ch;
-    font-size: clamp(3rem, 14vw, 4.8rem);
-  }
-
-  .client-stage-copy p:not(.eyebrow) {
-    font-size: 1rem;
-  }
-
   .dashboard-client-selection {
     padding: 16px;
   }
@@ -1396,7 +1369,8 @@ select {
   .dashboard-header,
   .section-heading,
   .split-heading,
-  .card-top {
+  .card-top,
+  .dashboard-client-topline {
     align-items: flex-start;
     flex-direction: column;
   }

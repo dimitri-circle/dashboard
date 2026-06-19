@@ -290,6 +290,30 @@ function slugifyClientId(name: string) {
   return normalizeClientId(slug || DEFAULT_CLIENT_ID);
 }
 
+async function assignClientId(clients: Awaited<ReturnType<typeof getSeoCollections>>["clients"], name: string, requestedId: string) {
+  if (requestedId) {
+    const id = normalizeClientId(requestedId);
+    if (await clients.findOne({ id })) {
+      throw new Error("A client with this id already exists.");
+    }
+    return id;
+  }
+
+  const baseId = slugifyClientId(name);
+  let id = baseId;
+
+  for (let attempt = 1; attempt <= 100; attempt += 1) {
+    if (!(await clients.findOne({ id }))) {
+      return id;
+    }
+
+    const suffix = `-${attempt + 1}`;
+    id = normalizeClientId(`${baseId.slice(0, 64 - suffix.length)}${suffix}`);
+  }
+
+  throw new Error("Unable to assign a unique client id.");
+}
+
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -637,12 +661,7 @@ export async function createClient(payload: ClientPayload) {
     throw new Error("Client name is required.");
   }
 
-  const id = normalizeClientId(asString(payload.id) || slugifyClientId(name));
-  const existing = await clients.findOne({ id });
-
-  if (existing) {
-    throw new Error("A client with this id already exists.");
-  }
+  const id = await assignClientId(clients, name, asString(payload.id));
 
   const timestamp = nowIso();
   const client: SeoClient = {

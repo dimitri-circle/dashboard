@@ -1,11 +1,11 @@
 "use client";
 
-import { createElement, FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
+import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Joyride, STATUS, type EventData, type Step, type TooltipRenderProps } from "react-joyride";
 
 type Provider = "ga4" | "gtm" | "hotjar" | "openai" | "mcp";
 type Status = "disconnected" | "connected" | "error";
-type View = "overview" | "integrations" | "analysis" | "insights";
+type View = "clients" | "overview" | "integrations" | "analysis" | "insights";
 
 type Client = {
   id: string;
@@ -120,11 +120,19 @@ const providerDetails: Record<Provider, { title: string; description: string }> 
 const providerOrder = Object.keys(providerLabels) as Provider[];
 
 const navItems: Array<{ id: View; label: string; description: string }> = [
+  { id: "clients", label: "Clients", description: "Choose workspace" },
   { id: "overview", label: "Overview", description: "Health and report coverage" },
   { id: "integrations", label: "Tool Setup", description: "Connect keys and metadata" },
   { id: "analysis", label: "Competitive Analysis", description: "Generate market briefs" },
   { id: "insights", label: "Insights", description: "Review AI recommendations" },
 ];
+const navShortLabels: Record<View, string> = {
+  clients: "C",
+  overview: "O",
+  integrations: "T",
+  analysis: "A",
+  insights: "I",
+};
 
 const DEFAULT_CLIENT_ID = "demo-client";
 const CLIENT_STORAGE_KEY = "seo-intelligence-client-id";
@@ -235,7 +243,7 @@ function formPayload(form: HTMLFormElement, provider: Provider) {
 }
 
 export function SeoDashboard() {
-  const [view, setView] = useState<View>("overview");
+  const [view, setView] = useState<View>("clients");
   const [clientId, setClientId] = useState(DEFAULT_CLIENT_ID);
   const [clients, setClients] = useState<Client[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
@@ -249,6 +257,8 @@ export function SeoDashboard() {
   const [analyzing, setAnalyzing] = useState(false);
   const [tourRunning, setTourRunning] = useState(false);
   const [activeProvider, setActiveProvider] = useState<Provider>("ga4");
+  const [navPinned, setNavPinned] = useState(false);
+  const [navActive, setNavActive] = useState(false);
 
   const activeClient = clients.find((client) => client.id === clientId);
   const latestByProvider = useMemo(() => {
@@ -261,6 +271,7 @@ export function SeoDashboard() {
   const savedToolCount = Object.values(latestByProvider).filter(Boolean).length;
   const readiness = Math.round(((latestByProvider.openai ? 1 : 0) + Math.min(savedToolCount, 4) / 4) * 50);
   const hasClients = clients.length > 0;
+  const navOpen = navPinned || navActive;
 
   async function loadDashboard(activeClientId = clientId) {
     try {
@@ -337,13 +348,11 @@ export function SeoDashboard() {
     const form = event.currentTarget;
     const formData = new FormData(form);
     const name = String(formData.get("name") || "").trim();
-    const id = String(formData.get("id") || "").trim();
-    const notes = String(formData.get("notes") || "").trim();
 
     try {
       const body = await api<{ client: Client }>(clientId, "/api/seo/clients", {
         method: "POST",
-        body: JSON.stringify({ name, id, notes }),
+        body: JSON.stringify({ name }),
       });
       form.reset();
       window.localStorage.setItem(CLIENT_STORAGE_KEY, body.client.id);
@@ -469,7 +478,7 @@ export function SeoDashboard() {
   }
 
   return (
-    <section className="dashboard-shell" aria-labelledby="dashboard-title">
+    <section className="dashboard-shell" data-nav-open={navOpen} aria-labelledby="dashboard-title">
       <Joyride
         onEvent={handleTourCallback}
         continuous
@@ -489,7 +498,27 @@ export function SeoDashboard() {
         tooltipComponent={CinematicTourTooltip}
       />
 
-      <aside className="app-sidebar" aria-label="Dashboard navigation">
+      <aside
+        className="app-sidebar"
+        aria-label="Dashboard navigation"
+        onFocus={() => setNavActive(true)}
+        onMouseEnter={() => setNavActive(true)}
+        onMouseLeave={() => setNavActive(false)}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            setNavActive(false);
+          }
+        }}
+      >
+        <button
+          className="nav-toggle"
+          type="button"
+          aria-label={navPinned ? "Collapse navigation" : "Expand navigation"}
+          aria-expanded={navOpen}
+          onClick={() => setNavPinned((current) => !current)}
+        >
+          <span aria-hidden="true">{navPinned ? "Close" : "Menu"}</span>
+        </button>
         <div className="sidebar-brand">
           <p className="eyebrow">SEO Intelligence</p>
           <h1>Dashboard</h1>
@@ -506,7 +535,9 @@ export function SeoDashboard() {
                   data-tour={item.id === "integrations" ? "nav-integrations" : item.id === "analysis" ? "nav-analysis" : item.id === "insights" ? "nav-insights" : undefined}
                   type="button"
                   onClick={() => setView(item.id)}
+                  aria-label={item.label}
                 >
+                  <span className="nav-short" aria-hidden="true">{navShortLabels[item.id]}</span>
                   <strong>{item.label}</strong>
                 </button>
                 {item.id === "integrations" && view === "integrations" ? (
@@ -533,64 +564,46 @@ export function SeoDashboard() {
         ) : null}
 
         <form action="/api/auth/logout" method="post">
-          <button className="button" type="submit">
-            Sign out
+          <button className="button sidebar-signout" type="submit" aria-label="Sign out">
+            <span className="nav-short" aria-hidden="true">S</span>
+            <span>Sign out</span>
           </button>
         </form>
       </aside>
 
       <div className="dashboard" aria-live="polite">
-        <section className="client-stage" aria-labelledby="client-stage-title">
-          {createElement("reactive-dot-ribbon", {
-            "aria-label": "Ambient client activity",
-            className: "client-stage-ribbon",
-            source: "/dots-pattern.webp",
-          })}
-
-          <div className="client-stage-copy">
-            <p className="eyebrow">Client dashboard</p>
-            <h2 id="client-stage-title">{hasClients ? "Select a client, scan the work." : "Add a client, start the work."}</h2>
-            <p>
-              {hasClients
-                ? "Switch the active client context from one clear area, then review the work status without losing the dashboard background."
-                : "Create the first client workspace, then the dashboard will open the actionable work areas."}
-            </p>
-          </div>
-
-          <ClientSelectionPanel
-            clientId={clientId}
-            clients={clients}
-            loading={loading}
-            onAddClient={addClient}
-            onSwitchClient={switchClient}
-          />
-        </section>
-
         {notice ? (
           <div className="alert" data-type={notice.type} role="status">
             {notice.message}
           </div>
         ) : null}
 
+        {!hasClients || view === "clients" ? (
+          <ClientsView
+            clientId={clientId}
+            clients={clients}
+            loading={loading}
+            onAddClient={addClient}
+            onSwitchClient={switchClient}
+          />
+        ) : null}
+
         {hasClients ? (
           <>
-            <div className="dashboard-header">
-              <div>
-                <p className="eyebrow">{activeClient?.name || clientId}</p>
-                <h2 id="dashboard-title">{viewTitle(view, activeProvider)}</h2>
-                <p className="active-client">{viewDescription(view, activeClient?.name || clientId, activeProvider)}</p>
-              </div>
-              <div className="dashboard-tools">
-                <button className="button" type="button" onClick={() => setTourRunning(true)}>
-                  Start Tutorial
-                </button>
-                {view !== "overview" ? (
-                  <button className="button" type="button" onClick={() => setView("overview")}>
-                    Back to Overview
+            {view !== "clients" ? (
+              <div className="dashboard-header">
+                <div>
+                  <p className="eyebrow">{activeClient?.name || clientId}</p>
+                  <h2 id="dashboard-title">{viewTitle(view, activeProvider)}</h2>
+                  <p className="active-client">{viewDescription(view, activeClient?.name || clientId, activeProvider)}</p>
+                </div>
+                <div className="dashboard-tools">
+                  <button className="button" type="button" onClick={() => setTourRunning(true)}>
+                    Start Tutorial
                   </button>
-                ) : null}
+                </div>
               </div>
-            </div>
+            ) : null}
 
             {view === "overview" ? (
               <OverviewView
@@ -640,6 +653,7 @@ export function SeoDashboard() {
 }
 
 function viewTitle(view: View, provider: Provider) {
+  if (view === "clients") return "Clients";
   if (view === "integrations") return providerDetails[provider].title;
   if (view === "analysis") return "Competitive Analysis";
   if (view === "insights") return "Insights";
@@ -647,13 +661,14 @@ function viewTitle(view: View, provider: Provider) {
 }
 
 function viewDescription(view: View, clientName: string, provider: Provider) {
+  if (view === "clients") return "Choose or create the active client workspace.";
   if (view === "integrations") return `${clientName}: ${providerDetails[provider].description}`;
   if (view === "analysis") return `Generate competitive briefs for ${clientName}.`;
   if (view === "insights") return `Review AI recommendations for ${clientName}.`;
   return "Graph-style readiness, coverage, and output summary.";
 }
 
-function ClientSelectionPanel({
+function ClientsView({
   clientId,
   clients,
   loading,
@@ -667,52 +682,61 @@ function ClientSelectionPanel({
   onSwitchClient: (clientId: string) => void;
 }) {
   const hasClients = clients.length > 0;
+  const [mode, setMode] = useState<"list" | "create">("list");
+  const showForm = !hasClients || mode === "create";
 
   return (
-    <section className="dashboard-client-selection" aria-labelledby="client-selection-title">
-      <div className="dashboard-client-topline">
-        <p className="eyebrow">Client selection</p>
-        <h2 id="client-selection-title">{hasClients ? "Choose the active client." : "Add your first client."}</h2>
-      </div>
-
-      {loading ? <p className="client-selection-empty">Loading clients...</p> : null}
-
-      {!loading && hasClients ? (
-        <div className="dashboard-client-list" aria-label="Available clients">
-          {clients.map((client) => {
-            const isActive = client.id === clientId;
-
-            return (
-              <button
-                className="dashboard-client-option"
-                data-active={isActive}
-                key={client.id}
-                type="button"
-                onClick={() => onSwitchClient(client.id)}
-              >
-                <span className="client-status-dot" data-active={isActive} aria-hidden="true" />
-                <span>{client.name}</span>
-              </button>
-            );
-          })}
+    <section className="client-page" aria-labelledby="client-selection-title">
+      <div className="dashboard-client-selection" data-tour="client-switcher">
+        <div className="dashboard-client-topline">
+          <div>
+            <p className="eyebrow">Client selection</p>
+            <h2 id="client-selection-title">{showForm ? "Create a client." : "Choose a client."}</h2>
+          </div>
+          {hasClients ? (
+            <button className="button" type="button" onClick={() => setMode(showForm ? "list" : "create")}>
+              {showForm ? "Show Clients" : "New Client"}
+            </button>
+          ) : null}
         </div>
-      ) : null}
 
-      {!loading && !hasClients ? (
-        <form className="first-client-form" onSubmit={onAddClient}>
-          <label>
-            Client name
-            <input name="name" placeholder="Acme Health" required />
-          </label>
-          <label>
-            Client id
-            <input name="id" placeholder="acme-health" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{1,62}[a-zA-Z0-9]" />
-          </label>
-          <button className="button button-primary" type="submit">
-            Add First Client
-          </button>
-        </form>
-      ) : null}
+        {loading ? <p className="client-selection-empty">Loading clients...</p> : null}
+
+        {!loading && hasClients && !showForm ? (
+          <div className="dashboard-client-list" aria-label="Available clients">
+            {clients.map((client) => {
+              const isActive = client.id === clientId;
+
+              return (
+                <button
+                  className="dashboard-client-option"
+                  data-active={isActive}
+                  key={client.id}
+                  type="button"
+                  onClick={() => onSwitchClient(client.id)}
+                >
+                  <span className="client-status-dot" data-active={isActive} aria-hidden="true" />
+                  <span>{client.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {!loading && showForm ? (
+          <form className="first-client-form" onSubmit={onAddClient}>
+            <label>
+              Client name
+              <input name="name" placeholder="Acme Health" required />
+            </label>
+            <button className="button button-primary" type="submit">
+              {hasClients ? "Create Client" : "Add First Client"}
+            </button>
+          </form>
+        ) : null}
+
+        {!loading && showForm ? <p className="client-selection-empty">Client id is assigned automatically.</p> : null}
+      </div>
     </section>
   );
 }
