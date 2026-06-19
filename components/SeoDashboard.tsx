@@ -1,11 +1,11 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createElement, FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Joyride, STATUS, type EventData, type Step, type TooltipRenderProps } from "react-joyride";
 
 type Provider = "ga4" | "gtm" | "hotjar" | "openai" | "mcp";
 type Status = "disconnected" | "connected" | "error";
-type View = "overview" | "clients" | "integrations" | "analysis" | "insights";
+type View = "overview" | "integrations" | "analysis" | "insights";
 
 type Client = {
   id: string;
@@ -121,9 +121,8 @@ const providerOrder = Object.keys(providerLabels) as Provider[];
 
 const navItems: Array<{ id: View; label: string; description: string }> = [
   { id: "overview", label: "Overview", description: "Health and report coverage" },
-  { id: "clients", label: "Clients", description: "Pick or add workspaces" },
   { id: "integrations", label: "Tool Setup", description: "Connect keys and metadata" },
-  { id: "analysis", label: "Competitive", description: "Generate market briefs" },
+  { id: "analysis", label: "Competitive Analysis", description: "Generate market briefs" },
   { id: "insights", label: "Insights", description: "Review AI recommendations" },
 ];
 
@@ -141,7 +140,7 @@ const tourSteps: Step[] = [
   {
     target: "[data-tour='side-nav']",
     title: "Use the sidebar to move",
-    content: "Switch between overview, clients, tool setup, competitive analysis, and insights without losing context.",
+    content: "Switch between overview, tool setup, competitive analysis, and insights without losing context.",
     placement: "right",
   },
   {
@@ -261,23 +260,35 @@ export function SeoDashboard() {
   const connectedCount = Object.values(latestByProvider).filter((integration) => integration?.status === "connected").length;
   const savedToolCount = Object.values(latestByProvider).filter(Boolean).length;
   const readiness = Math.round(((latestByProvider.openai ? 1 : 0) + Math.min(savedToolCount, 4) / 4) * 50);
-
-  async function loadClients(activeClientId = clientId) {
-    const body = await api<{ clients: Client[] }>(activeClientId, "/api/seo/clients");
-    setClients(body.clients);
-    return body.clients;
-  }
+  const hasClients = clients.length > 0;
 
   async function loadDashboard(activeClientId = clientId) {
     try {
-      const [clientBody, integrationBody, insightBody, competitiveBody, metricBody] = await Promise.all([
-        api<{ clients: Client[] }>(activeClientId, "/api/seo/clients"),
-        api<{ integrations: Integration[] }>(activeClientId, "/api/seo/integrations"),
-        api<{ insights: Insight[] }>(activeClientId, "/api/seo/insights"),
-        api<{ analyses: CompetitiveAnalysis[] }>(activeClientId, "/api/seo/competitive-analysis"),
-        api<{ metricSnapshots: MetricSnapshot[] }>(activeClientId, "/api/seo/metrics"),
-      ]);
+      setLoading(true);
+      const clientBody = await api<{ clients: Client[] }>(activeClientId, "/api/seo/clients");
       setClients(clientBody.clients);
+
+      if (!clientBody.clients.length) {
+        setIntegrations([]);
+        setInsights([]);
+        setCompetitiveAnalyses([]);
+        setMetricSnapshots([]);
+        setNotice(null);
+        return;
+      }
+
+      const resolvedClientId = clientBody.clients.some((client) => client.id === activeClientId) ? activeClientId : clientBody.clients[0].id;
+      if (resolvedClientId !== activeClientId) {
+        window.localStorage.setItem(CLIENT_STORAGE_KEY, resolvedClientId);
+        setClientId(resolvedClientId);
+      }
+
+      const [integrationBody, insightBody, competitiveBody, metricBody] = await Promise.all([
+        api<{ integrations: Integration[] }>(resolvedClientId, "/api/seo/integrations"),
+        api<{ insights: Insight[] }>(resolvedClientId, "/api/seo/insights"),
+        api<{ analyses: CompetitiveAnalysis[] }>(resolvedClientId, "/api/seo/competitive-analysis"),
+        api<{ metricSnapshots: MetricSnapshot[] }>(resolvedClientId, "/api/seo/metrics"),
+      ]);
       setIntegrations(integrationBody.integrations);
       setInsights(insightBody.insights);
       setCompetitiveAnalyses(competitiveBody.analyses);
@@ -335,9 +346,10 @@ export function SeoDashboard() {
         body: JSON.stringify({ name, id, notes }),
       });
       form.reset();
-      await loadClients(clientId);
-      switchClient(body.client.id);
-      setView("clients");
+      window.localStorage.setItem(CLIENT_STORAGE_KEY, body.client.id);
+      setClientId(body.client.id);
+      setView("overview");
+      await loadDashboard(body.client.id);
       setNotice({ type: "success", message: `${body.client.name} client workspace created.` });
     } catch (error) {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to add client." });
@@ -484,66 +496,41 @@ export function SeoDashboard() {
           <p>{loading ? "Loading workspace..." : `${clients.length} client workspace${clients.length === 1 ? "" : "s"}`}</p>
         </div>
 
-        <nav className="side-nav" data-tour="side-nav" aria-label="Primary">
-          {navItems.map((item) => (
-            <div className="nav-group" key={item.id}>
-              <button
-                className="nav-item"
-                data-active={view === item.id}
-                data-tour={item.id === "integrations" ? "nav-integrations" : item.id === "analysis" ? "nav-analysis" : item.id === "insights" ? "nav-insights" : undefined}
-                type="button"
-                onClick={() => setView(item.id)}
-              >
-                <strong>{item.label}</strong>
-                <span>{item.description}</span>
-              </button>
-              {item.id === "integrations" ? (
-                <div className="provider-subnav" data-tour="tool-provider-nav" aria-label="Tool setup pages">
-                  {providerOrder.map((provider) => (
-                    <button
-                      className="provider-subnav-item"
-                      data-active={activeProvider === provider}
-                      key={provider}
-                      type="button"
-                      onClick={() => {
-                        setActiveProvider(provider);
-                        setView("integrations");
-                      }}
-                    >
-                      {providerLabels[provider]}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ))}
-        </nav>
-
-        <div className="sidebar-clients" data-tour="client-switcher">
-          <div className="sidebar-section-title">
-            <span>Active Client</span>
-            <button className="text-button" type="button" onClick={() => setView("clients")}>
-              Manage
-            </button>
-          </div>
-          <div className="client-list">
-            {clients.map((client) => (
-              <button
-                className="client-item"
-                data-active={client.id === clientId}
-                key={client.id}
-                type="button"
-                onClick={() => {
-                  switchClient(client.id);
-                  setView("clients");
-                }}
-              >
-                <strong>{client.name}</strong>
-                <span>{client.id}</span>
-              </button>
+        {hasClients ? (
+          <nav className="side-nav" data-tour="side-nav" aria-label="Primary">
+            {navItems.map((item) => (
+              <div className="nav-group" key={item.id}>
+                <button
+                  className="nav-item"
+                  data-active={view === item.id}
+                  data-tour={item.id === "integrations" ? "nav-integrations" : item.id === "analysis" ? "nav-analysis" : item.id === "insights" ? "nav-insights" : undefined}
+                  type="button"
+                  onClick={() => setView(item.id)}
+                >
+                  <strong>{item.label}</strong>
+                </button>
+                {item.id === "integrations" && view === "integrations" ? (
+                  <div className="provider-subnav" data-tour="tool-provider-nav" aria-label="Tool setup pages">
+                    {providerOrder.map((provider) => (
+                      <button
+                        className="provider-subnav-item"
+                        data-active={activeProvider === provider}
+                        key={provider}
+                        type="button"
+                        onClick={() => {
+                          setActiveProvider(provider);
+                          setView("integrations");
+                        }}
+                      >
+                        {providerLabels[provider]}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             ))}
-          </div>
-        </div>
+          </nav>
+        ) : null}
 
         <form action="/api/auth/logout" method="post">
           <button className="button" type="submit">
@@ -553,23 +540,31 @@ export function SeoDashboard() {
       </aside>
 
       <div className="dashboard" aria-live="polite">
-        <div className="dashboard-header">
-          <div>
-            <p className="eyebrow">{activeClient?.name || clientId}</p>
-            <h2 id="dashboard-title">{viewTitle(view, activeProvider)}</h2>
-            <p className="active-client">{viewDescription(view, activeClient?.name || clientId, activeProvider)}</p>
+        <section className="client-stage" aria-labelledby="client-stage-title">
+          {createElement("reactive-dot-ribbon", {
+            "aria-label": "Ambient client activity",
+            className: "client-stage-ribbon",
+            source: "/dots-pattern.webp",
+          })}
+
+          <div className="client-stage-copy">
+            <p className="eyebrow">Client dashboard</p>
+            <h2 id="client-stage-title">{hasClients ? "Select a client, scan the work." : "Add a client, start the work."}</h2>
+            <p>
+              {hasClients
+                ? "Switch the active client context from one clear area, then review the work status without losing the dashboard background."
+                : "Create the first client workspace, then the dashboard will open the actionable work areas."}
+            </p>
           </div>
-          <div className="dashboard-tools">
-            <button className="button" type="button" onClick={() => setTourRunning(true)}>
-              Start Tutorial
-            </button>
-            {view !== "overview" ? (
-              <button className="button" type="button" onClick={() => setView("overview")}>
-                Back to Overview
-              </button>
-            ) : null}
-          </div>
-        </div>
+
+          <ClientSelectionPanel
+            clientId={clientId}
+            clients={clients}
+            loading={loading}
+            onAddClient={addClient}
+            onSwitchClient={switchClient}
+          />
+        </section>
 
         {notice ? (
           <div className="alert" data-type={notice.type} role="status">
@@ -577,53 +572,67 @@ export function SeoDashboard() {
           </div>
         ) : null}
 
-        {view === "overview" ? (
-          <OverviewView
-            connectedCount={connectedCount}
-            savedToolCount={savedToolCount}
-            clients={clients}
-            competitiveAnalyses={competitiveAnalyses}
-            insights={insights}
-            latestByProvider={latestByProvider}
-            metricSnapshots={metricSnapshots}
-            onSyncGa4={syncGa4Metrics}
-            readiness={readiness}
-            setView={setView}
-            syncingGa4={syncingGa4}
-          />
-        ) : null}
+        {hasClients ? (
+          <>
+            <div className="dashboard-header">
+              <div>
+                <p className="eyebrow">{activeClient?.name || clientId}</p>
+                <h2 id="dashboard-title">{viewTitle(view, activeProvider)}</h2>
+                <p className="active-client">{viewDescription(view, activeClient?.name || clientId, activeProvider)}</p>
+              </div>
+              <div className="dashboard-tools">
+                <button className="button" type="button" onClick={() => setTourRunning(true)}>
+                  Start Tutorial
+                </button>
+                {view !== "overview" ? (
+                  <button className="button" type="button" onClick={() => setView("overview")}>
+                    Back to Overview
+                  </button>
+                ) : null}
+              </div>
+            </div>
 
-        {view === "clients" ? (
-          <ClientsView activeClient={activeClient} clientId={clientId} clients={clients} onAddClient={addClient} onSwitchClient={switchClient} />
-        ) : null}
+            {view === "overview" ? (
+              <OverviewView
+                connectedCount={connectedCount}
+                savedToolCount={savedToolCount}
+                latestByProvider={latestByProvider}
+                metricSnapshots={metricSnapshots}
+                onSyncGa4={syncGa4Metrics}
+                readiness={readiness}
+                syncingGa4={syncingGa4}
+              />
+            ) : null}
 
-        {view === "integrations" ? (
-          <IntegrationsView
-            activeProvider={activeProvider}
-            latestByProvider={latestByProvider}
-            loading={loading}
-            onSaveIntegration={saveIntegration}
-            onSelectProvider={setActiveProvider}
-            onTestProvider={testProvider}
-          />
-        ) : null}
+            {view === "integrations" ? (
+              <IntegrationsView
+                activeProvider={activeProvider}
+                latestByProvider={latestByProvider}
+                loading={loading}
+                onSaveIntegration={saveIntegration}
+                onSelectProvider={setActiveProvider}
+                onTestProvider={testProvider}
+              />
+            ) : null}
 
-        {view === "analysis" ? (
-          <CompetitiveView
-            activeClient={activeClient}
-            analyzing={analyzing}
-            competitiveAnalyses={competitiveAnalyses}
-            onGenerateCompetitiveAnalysis={generateCompetitiveAnalysis}
-          />
-        ) : null}
+            {view === "analysis" ? (
+              <CompetitiveView
+                activeClient={activeClient}
+                analyzing={analyzing}
+                competitiveAnalyses={competitiveAnalyses}
+                onGenerateCompetitiveAnalysis={generateCompetitiveAnalysis}
+              />
+            ) : null}
 
-        {view === "insights" ? (
-          <InsightsView
-            generating={generating}
-            insights={insights}
-            latestByProvider={latestByProvider}
-            onGenerateInsights={generateInsights}
-          />
+            {view === "insights" ? (
+              <InsightsView
+                generating={generating}
+                insights={insights}
+                latestByProvider={latestByProvider}
+                onGenerateInsights={generateInsights}
+              />
+            ) : null}
+          </>
         ) : null}
       </div>
     </section>
@@ -631,7 +640,6 @@ export function SeoDashboard() {
 }
 
 function viewTitle(view: View, provider: Provider) {
-  if (view === "clients") return "Clients";
   if (view === "integrations") return providerDetails[provider].title;
   if (view === "analysis") return "Competitive Analysis";
   if (view === "insights") return "Insights";
@@ -639,36 +647,91 @@ function viewTitle(view: View, provider: Provider) {
 }
 
 function viewDescription(view: View, clientName: string, provider: Provider) {
-  if (view === "clients") return "Pick a workspace or add a new client.";
   if (view === "integrations") return `${clientName}: ${providerDetails[provider].description}`;
   if (view === "analysis") return `Generate competitive briefs for ${clientName}.`;
   if (view === "insights") return `Review AI recommendations for ${clientName}.`;
   return "Graph-style readiness, coverage, and output summary.";
 }
 
-function OverviewView({
+function ClientSelectionPanel({
+  clientId,
   clients,
+  loading,
+  onAddClient,
+  onSwitchClient,
+}: {
+  clientId: string;
+  clients: Client[];
+  loading: boolean;
+  onAddClient: (event: FormEvent<HTMLFormElement>) => void;
+  onSwitchClient: (clientId: string) => void;
+}) {
+  const hasClients = clients.length > 0;
+
+  return (
+    <section className="dashboard-client-selection" aria-labelledby="client-selection-title">
+      <div className="dashboard-client-topline">
+        <p className="eyebrow">Client selection</p>
+        <h2 id="client-selection-title">{hasClients ? "Choose the active client." : "Add your first client."}</h2>
+      </div>
+
+      {loading ? <p className="client-selection-empty">Loading clients...</p> : null}
+
+      {!loading && hasClients ? (
+        <div className="dashboard-client-list" aria-label="Available clients">
+          {clients.map((client) => {
+            const isActive = client.id === clientId;
+
+            return (
+              <button
+                className="dashboard-client-option"
+                data-active={isActive}
+                key={client.id}
+                type="button"
+                onClick={() => onSwitchClient(client.id)}
+              >
+                <span className="client-status-dot" data-active={isActive} aria-hidden="true" />
+                <span>{client.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {!loading && !hasClients ? (
+        <form className="first-client-form" onSubmit={onAddClient}>
+          <label>
+            Client name
+            <input name="name" placeholder="Acme Health" required />
+          </label>
+          <label>
+            Client id
+            <input name="id" placeholder="acme-health" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{1,62}[a-zA-Z0-9]" />
+          </label>
+          <button className="button button-primary" type="submit">
+            Add First Client
+          </button>
+        </form>
+      ) : null}
+    </section>
+  );
+}
+
+function OverviewView({
   connectedCount,
-  competitiveAnalyses,
-  insights,
   latestByProvider,
   metricSnapshots,
   onSyncGa4,
   readiness,
   savedToolCount,
-  setView,
   syncingGa4,
 }: {
-  clients: Client[];
   connectedCount: number;
-  competitiveAnalyses: CompetitiveAnalysis[];
-  insights: Insight[];
   latestByProvider: Partial<Record<Provider, Integration>>;
   metricSnapshots: MetricSnapshot[];
   onSyncGa4: () => void;
   readiness: number;
   savedToolCount: number;
-  setView: (view: View) => void;
   syncingGa4: boolean;
 }) {
   const ga4Summary = getGa4Summary(metricSnapshots);
@@ -682,49 +745,21 @@ function OverviewView({
         <GraphCard label="Page views" value={formatNumber(ga4Summary.pageViews)} helper="Last 28 synced days" percent={ga4Summary.pageViewPercent} />
       </section>
 
-      <section className="dashboard-grid">
-        <div className="panel">
-          <div className="section-heading">
-            <h3>Connection Health</h3>
-            <p>Use this to decide what to set up next.</p>
-          </div>
-          <div className="status-row compact" aria-label="Connection status">
-            {(Object.keys(providerLabels) as Provider[]).map((provider) => {
-              const integration = latestByProvider[provider];
-              return (
-                <article className="status-card" data-status={integration?.status || "disconnected"} key={provider}>
-                  <span>{providerLabels[provider]}</span>
-                  <strong>{statusLabel(integration?.status)}</strong>
-                </article>
-              );
-            })}
-          </div>
+      <section className="panel">
+        <div className="section-heading">
+          <h3>Connection Health</h3>
+          <p>Use this to decide what to set up next.</p>
         </div>
-
-        <div className="panel">
-          <div className="section-heading">
-            <h3>Next Actions</h3>
-            <p>Move from setup into client data.</p>
-          </div>
-          <div className="quick-actions">
-            <button className="button button-primary" type="button" onClick={() => setView("clients")}>
-              Manage Clients
-            </button>
-            <button className="button" type="button" onClick={() => setView("integrations")}>
-              Connect Tools
-            </button>
-            <button className="button" type="button" onClick={() => setView("analysis")}>
-              Run Competitive Analysis
-            </button>
-            <button className="button" type="button" onClick={() => setView("insights")}>
-              Review Insights
-            </button>
-          </div>
-          <div className="mini-summary">
-            <span>{clients.length} clients</span>
-            <span>{savedToolCount} tools saved</span>
-            <span>{insights.length + competitiveAnalyses.length} reports</span>
-          </div>
+        <div className="status-row compact" aria-label="Connection status">
+          {(Object.keys(providerLabels) as Provider[]).map((provider) => {
+            const integration = latestByProvider[provider];
+            return (
+              <article className="status-card" data-status={integration?.status || "disconnected"} key={provider}>
+                <span>{providerLabels[provider]}</span>
+                <strong>{statusLabel(integration?.status)}</strong>
+              </article>
+            );
+          })}
         </div>
       </section>
 
@@ -843,74 +878,6 @@ function GraphCard({ helper, label, percent, value }: { helper: string; label: s
       </div>
       <p>{helper}</p>
     </article>
-  );
-}
-
-function ClientsView({
-  activeClient,
-  clientId,
-  clients,
-  onAddClient,
-  onSwitchClient,
-}: {
-  activeClient?: Client;
-  clientId: string;
-  clients: Client[];
-  onAddClient: (event: FormEvent<HTMLFormElement>) => void;
-  onSwitchClient: (clientId: string) => void;
-}) {
-  return (
-    <div className="dashboard-grid">
-      <section className="panel">
-        <div className="section-heading">
-          <h3>Client Workspaces</h3>
-          <p>Each client keeps separate integrations, encrypted keys, analyses, and insights.</p>
-        </div>
-        <div className="client-grid">
-          {clients.map((client) => (
-            <button
-              className="client-card"
-              data-active={client.id === clientId}
-              key={client.id}
-              type="button"
-              onClick={() => onSwitchClient(client.id)}
-            >
-              <strong>{client.name}</strong>
-              <span>{client.id}</span>
-              <p>{client.notes || "No notes yet."}</p>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="panel" data-tour="add-client-form">
-        <div className="section-heading">
-          <h3>Add Client</h3>
-          <p>Keep the id simple, like vast or acme-health.</p>
-        </div>
-        <form className="add-client-form" onSubmit={onAddClient}>
-          <label>
-            Client name
-            <input name="name" placeholder="Vast" required />
-          </label>
-          <label>
-            Client id
-            <input name="id" placeholder="vast" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{1,62}[a-zA-Z0-9]" />
-          </label>
-          <label>
-            Notes
-            <textarea name="notes" placeholder="Optional context" rows={4} />
-          </label>
-          <button className="button button-primary" type="submit">
-            Add client
-          </button>
-        </form>
-        <div className="active-client-panel">
-          <span>Current workspace</span>
-          <strong>{activeClient?.name || clientId}</strong>
-        </div>
-      </section>
-    </div>
   );
 }
 

@@ -9,7 +9,9 @@
       :host {
         --dot-ribbon-aspect: 2048 / 1094;
         --dot-ribbon-mobile-aspect: 2048 / 1094;
+        --dot-ribbon-height: auto;
         --dot-ribbon-min-height: 220px;
+        --dot-ribbon-mobile-min-height: max(var(--dot-ribbon-min-height), 250px);
         --dot-ribbon-radius: 30px;
         --dot-ribbon-border: rgba(15, 15, 16, 0.1);
         --dot-ribbon-ink: 15, 15, 16;
@@ -17,6 +19,12 @@
         --dot-ribbon-paper-bottom: rgba(244, 239, 231, 0.88);
         --dot-ribbon-glow-a: rgba(255, 255, 255, 0.76);
         --dot-ribbon-glow-b: rgba(15, 15, 16, 0.08);
+        --dot-ribbon-frame-background:
+          radial-gradient(circle at 26% 32%, var(--dot-ribbon-glow-a), transparent 36%),
+          linear-gradient(180deg, var(--dot-ribbon-paper-top), var(--dot-ribbon-paper-bottom));
+        --dot-ribbon-frame-shadow:
+          0 18px 42px rgba(31, 20, 10, 0.08),
+          inset 0 1px 0 rgba(255, 255, 255, 0.86);
         --dot-ribbon-brand-ink: 23, 23, 23;
         --dot-ribbon-brand-muted: 115, 115, 115;
         --dot-ribbon-brand-stone: 161, 161, 161;
@@ -30,22 +38,62 @@
         width: 100%;
       }
 
+      :host([background]) {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        width: 100vw;
+        height: 100vh;
+        pointer-events: none;
+        overflow: hidden;
+      }
+
       .frame {
         position: relative;
+        width: 100%;
+        max-width: 100%;
+        height: var(--dot-ribbon-height);
         min-height: var(--dot-ribbon-min-height);
         aspect-ratio: var(--dot-ribbon-aspect);
         border: 1px solid var(--dot-ribbon-border);
         border-radius: var(--dot-ribbon-radius);
         overflow: hidden;
-        background:
-          radial-gradient(circle at 26% 32%, var(--dot-ribbon-glow-a), transparent 36%),
-          linear-gradient(180deg, var(--dot-ribbon-paper-top), var(--dot-ribbon-paper-bottom));
-        box-shadow:
-          0 18px 42px rgba(31, 20, 10, 0.08),
-          inset 0 1px 0 rgba(255, 255, 255, 0.86);
+        background: var(--dot-ribbon-frame-background);
+        box-shadow: var(--dot-ribbon-frame-shadow);
         transform-origin: 42% 54%;
         will-change: transform, filter;
         isolation: isolate;
+      }
+
+      :host([background]) .frame {
+        width: 100%;
+        height: 100%;
+        min-height: 100vh;
+        aspect-ratio: auto;
+        border: 0;
+        border-radius: 0;
+        background:
+          radial-gradient(circle at 18% 18%, rgba(255, 255, 255, 0.9), transparent 28%),
+          radial-gradient(circle at 86% 12%, rgba(24, 54, 118, 0.08), transparent 30%),
+          radial-gradient(circle at 78% 78%, rgba(12, 145, 154, 0.07), transparent 30%),
+          linear-gradient(180deg, rgba(252, 250, 247, 0.96), rgba(236, 228, 216, 0.92));
+        box-shadow: none;
+      }
+
+      :host([background]) .frame::before {
+        left: -72px;
+        bottom: 8vh;
+        width: 220px;
+        height: 220px;
+        opacity: 0.42;
+      }
+
+      :host([background]) .frame::after {
+        top: -56px;
+        right: -42px;
+        width: 260px;
+        height: 260px;
+        opacity: 0.36;
       }
 
       .frame::before,
@@ -108,6 +156,14 @@
         display: none;
       }
 
+      :host([background]) canvas {
+        cursor: default;
+      }
+
+      :host([background]) .hint {
+        display: none;
+      }
+
       .frame.is-live {
         animation: stage-sweep 1500ms cubic-bezier(0.18, 0.84, 0.22, 1) both;
       }
@@ -132,7 +188,8 @@
       @media (max-width: 720px) {
         .frame {
           aspect-ratio: var(--dot-ribbon-mobile-aspect, var(--dot-ribbon-aspect));
-          min-height: max(var(--dot-ribbon-min-height), 250px);
+          height: var(--dot-ribbon-mobile-height, var(--dot-ribbon-height));
+          min-height: var(--dot-ribbon-mobile-min-height);
           border-radius: 24px;
         }
 
