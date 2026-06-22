@@ -87,6 +87,29 @@ type MetricSnapshot = {
   created_at: string;
 };
 
+type BlogAuditClaimStatus = "PASS" | "FAIL" | "UNSUPPORTED" | "STALE_RISK" | "BLOCKED";
+
+type BlogAuditReport = {
+  recommendation: "PASS" | "PASS_WITH_EDITS" | "DO_NOT_PUBLISH";
+  truthScore: number;
+  brandScore: number;
+  summary: string;
+  claims: Array<{
+    claim: string;
+    status: BlogAuditClaimStatus;
+    reason: string;
+    evidence: string[];
+    suggestedRewrite: string;
+  }>;
+  brandFindings: Array<{
+    issue: string;
+    severity: "low" | "medium" | "high";
+    suggestedRewrite: string;
+  }>;
+  missingEvidence: string[];
+  publishRisks: string[];
+};
+
 const providerLabels: Record<Provider, string> = {
   ga4: "GA4",
   gtm: "GTM",
@@ -123,7 +146,7 @@ const providerOrder = Object.keys(providerLabels) as Provider[];
 const navItems: Array<{ id: View; label: string; description: string; icon: NavIconName }> = [
   { id: "clients", label: "Clients", description: "Choose workspace", icon: "clients" },
   { id: "overview", label: "Overview", description: "Health and report coverage", icon: "overview" },
-  { id: "brain", label: "Br(AI)N", description: "Brand intelligence memory", icon: "brain" },
+  { id: "brain", label: "Br(AI)N", description: "Vast blog audit", icon: "brain" },
   { id: "integrations", label: "Tool Setup", description: "Connect keys and metadata", icon: "tools" },
   { id: "analysis", label: "Competitive Analysis", description: "Generate market briefs", icon: "analysis" },
   { id: "insights", label: "Insights", description: "Review AI recommendations", icon: "insights" },
@@ -144,6 +167,12 @@ const tourSteps: Step[] = [
     target: "[data-tour='side-nav']",
     title: "Use the sidebar to move",
     content: "Switch between overview, Br(AI)N, tool setup, competitive analysis, and insights without losing context.",
+    placement: "right",
+  },
+  {
+    target: "[data-tour='nav-brain']",
+    title: "Audit Vast blog drafts",
+    content: "Br(AI)N checks a draft against current Vast truth sources and brand rules before publication.",
     placement: "right",
   },
   {
@@ -539,7 +568,17 @@ export function SeoDashboard() {
                 <button
                   className="nav-item"
                   data-active={view === item.id}
-                  data-tour={item.id === "integrations" ? "nav-integrations" : item.id === "analysis" ? "nav-analysis" : item.id === "insights" ? "nav-insights" : undefined}
+                  data-tour={
+                    item.id === "brain"
+                      ? "nav-brain"
+                      : item.id === "integrations"
+                        ? "nav-integrations"
+                        : item.id === "analysis"
+                          ? "nav-analysis"
+                          : item.id === "insights"
+                            ? "nav-insights"
+                            : undefined
+                  }
                   type="button"
                   onClick={() => setView(item.id)}
                   aria-label={item.label}
@@ -624,7 +663,7 @@ export function SeoDashboard() {
               />
             ) : null}
 
-            {view === "brain" ? <BrainView activeClient={activeClient} latestByProvider={latestByProvider} /> : null}
+            {view === "brain" ? <BrainView activeClient={activeClient} clientId={clientId} /> : null}
 
             {view === "integrations" ? (
               <IntegrationsView
@@ -757,7 +796,7 @@ function viewTitle(view: View, provider: Provider) {
 
 function viewDescription(view: View, clientName: string, provider: Provider) {
   if (view === "clients") return "Choose or create the active client workspace.";
-  if (view === "brain") return `${clientName}: brand memory, voice, and AI context.`;
+  if (view === "brain") return `${clientName}: audit Vast drafts for truth, evidence, and brand fit.`;
   if (view === "integrations") return `${clientName}: ${providerDetails[provider].description}`;
   if (view === "analysis") return `Generate competitive briefs for ${clientName}.`;
   if (view === "insights") return `Review AI recommendations for ${clientName}.`;
@@ -1019,56 +1058,212 @@ function GraphCard({ helper, label, percent, value }: { helper: string; label: s
   );
 }
 
-function BrainView({
-  activeClient,
-  latestByProvider,
-}: {
-  activeClient?: Client;
-  latestByProvider: Partial<Record<Provider, Integration>>;
-}) {
-  const connectedTools = Object.values(latestByProvider).filter((integration) => integration?.status === "connected").length;
-  const clientName = activeClient?.name || "Client";
+function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId: string }) {
+  const [auditReport, setAuditReport] = useState<BlogAuditReport | null>(null);
+  const [auditing, setAuditing] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+
+  async function runAudit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const file = formData.get("file") as File | null;
+
+    if (file && file.size === 0) {
+      formData.delete("file");
+    }
+
+    try {
+      setAuditing(true);
+      setAuditError(null);
+      const response = await fetch("/api/blog-audit", {
+        method: "POST",
+        headers: {
+          "x-seo-client-id": clientId,
+        },
+        body: formData,
+      });
+      const text = await response.text();
+      const body = text ? JSON.parse(text) : {};
+
+      if (!response.ok) {
+        throw new Error(body.error || "Unable to audit blog draft.");
+      }
+
+      setAuditReport(body as BlogAuditReport);
+    } catch (error) {
+      setAuditError(error instanceof Error ? error.message : "Unable to audit blog draft.");
+    } finally {
+      setAuditing(false);
+    }
+  }
 
   return (
-    <section className="panel brain-panel" aria-labelledby="brain-title">
-      <div className="section-heading">
+    <div className="brain-workspace">
+      <section className="panel brain-hero" aria-labelledby="brain-workspace-title">
         <div>
-          <span className="eyebrow">Brand intelligence memory</span>
-          <h3 id="brain-title">{clientName} Br(AI)N</h3>
-          <p>Keep the client voice, market facts, and AI context in one focused place.</p>
+          <span className="eyebrow">Vast Blog Audit</span>
+          <h3 id="brain-workspace-title">Truth before publishing.</h3>
+          <p>
+            Br(AI)N checks draft claims against Vast docs, site knowledge, live pricing, brand sources, and approved
+            social feeds.
+          </p>
         </div>
-      </div>
-
-      <div className="brain-focus">
-        <div className="brain-logo-lockup">
-          {activeClient ? <ClientLogo client={activeClient} /> : null}
+        <div className="brain-guardrails" aria-label="Publishing guardrails">
           <div>
-            <span>Active brand</span>
-            <strong>{clientName}</strong>
+            <strong>{activeClient?.name || "Client"}</strong>
+            <span>workspace</span>
+          </div>
+          <div>
+            <strong>Audit only</strong>
+            <span>human approval required</span>
           </div>
         </div>
-        <div className="brain-stat">
-          <span>Connected context</span>
-          <strong>{connectedTools}/5 tools</strong>
+      </section>
+
+      <section className="panel blog-audit-panel" aria-labelledby="blog-audit-form-title">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Draft input</span>
+            <h3 id="blog-audit-form-title">Upload or paste a blog draft.</h3>
+          </div>
+        </div>
+
+        <form className="blog-audit-form" onSubmit={runAudit}>
+          <div className="audit-input-grid">
+            <label>
+              Title
+              <input name="title" placeholder="How to Run Qwen on Vast.ai" />
+            </label>
+            <label>
+              Format
+              <select name="format" defaultValue="markdown">
+                <option value="markdown">Markdown</option>
+                <option value="plain_text">Plain text</option>
+                <option value="html">HTML</option>
+                <option value="url">URL</option>
+              </select>
+            </label>
+          </div>
+          <label>
+            URL
+            <input name="url" placeholder="https://example.com/draft" type="url" />
+          </label>
+          <label>
+            Upload file
+            <input name="file" type="file" accept=".md,.markdown,.txt,.html,.htm,text/markdown,text/plain,text/html" />
+          </label>
+          <label>
+            Draft content
+            <textarea
+              name="content"
+              placeholder="# How to Run Qwen on Vast.ai&#10;&#10;Vast.ai offers..."
+              rows={12}
+            />
+          </label>
+          <div className="actions">
+            <button className="button button-primary" type="submit" disabled={auditing}>
+              {auditing ? "Auditing..." : "Audit Draft"}
+            </button>
+          </div>
+        </form>
+
+        {auditError ? (
+          <div className="alert" data-type="error" role="status">
+            {auditError}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="panel audit-report-panel" aria-labelledby="blog-audit-report-title">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Structured report</span>
+            <h3 id="blog-audit-report-title">Audit result</h3>
+          </div>
+        </div>
+
+        {auditReport ? <AuditReportView report={auditReport} /> : <div className="empty-state">Run an audit to see truth, brand, evidence, and publish risk.</div>}
+      </section>
+    </div>
+  );
+}
+
+function AuditReportView({ report }: { report: BlogAuditReport }) {
+  return (
+    <div className="audit-report">
+      <div className="audit-score-grid">
+        <ScoreBlock label="Recommendation" value={formatRecommendation(report.recommendation)} tone={report.recommendation} />
+        <ScoreBlock label="Truth score" value={`${report.truthScore}`} />
+        <ScoreBlock label="Brand score" value={`${report.brandScore}`} />
+        <ScoreBlock label="Claims" value={`${report.claims.length}`} />
+      </div>
+
+      <p className="audit-summary">{report.summary}</p>
+
+      <div className="audit-section">
+        <h4>Claims</h4>
+        <div className="audit-claim-list">
+          {report.claims.length ? (
+            report.claims.map((claim, index) => (
+              <article className="audit-claim" data-status={claim.status} key={`${claim.claim}-${index}`}>
+                <div className="card-top">
+                  <span className="audit-status" data-status={claim.status}>
+                    {claim.status.replace(/_/g, " ")}
+                  </span>
+                  <SourceLinks urls={claim.evidence} />
+                </div>
+                <strong>{claim.claim}</strong>
+                <p>{claim.reason}</p>
+                {claim.suggestedRewrite && claim.suggestedRewrite !== "No rewrite required." ? (
+                  <div className="audit-rewrite">
+                    <span>Suggested rewrite</span>
+                    <p>{claim.suggestedRewrite}</p>
+                  </div>
+                ) : null}
+              </article>
+            ))
+          ) : (
+            <div className="empty-state">No factual claims were extracted.</div>
+          )}
         </div>
       </div>
 
-      <div className="brain-list" aria-label="Brand intelligence areas">
-        <div>
-          <span>Voice</span>
-          <strong>Messaging, tone, claims, and language guardrails.</strong>
-        </div>
-        <div>
-          <span>Market</span>
-          <strong>Audience, competitors, proof points, and positioning.</strong>
-        </div>
-        <div>
-          <span>AI Context</span>
-          <strong>Reusable instructions for reports, insights, and generated briefs.</strong>
-        </div>
-      </div>
-    </section>
+      <AuditList title="Brand findings" items={report.brandFindings.map((finding) => `${finding.severity}: ${finding.issue} ${finding.suggestedRewrite}`)} />
+      <AuditList title="Missing evidence" items={report.missingEvidence} />
+      <AuditList title="Publish risks" items={report.publishRisks} />
+    </div>
   );
+}
+
+function ScoreBlock({ label, tone, value }: { label: string; tone?: string; value: string }) {
+  return (
+    <div className="audit-score" data-tone={tone}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function AuditList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="audit-section">
+      <h4>{title}</h4>
+      {items.length ? (
+        <ul className="audit-list">
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <div className="empty-state">No items returned.</div>
+      )}
+    </div>
+  );
+}
+
+function formatRecommendation(value: BlogAuditReport["recommendation"]) {
+  return value.replace(/_/g, " ");
 }
 
 function IntegrationsView({
