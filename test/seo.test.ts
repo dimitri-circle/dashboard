@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { auditBlogDraft, cleanExtractedText, splitFactualClaims, type VastSourceResult } from "../lib/blog-audit";
 import { hashPassword, verifyPassword } from "../lib/seo/auth";
 import { decryptSecret, encryptSecret } from "../lib/seo/crypto";
 import { rateLimit, resetRateLimitsForTests } from "../lib/seo/rate-limit";
@@ -18,6 +19,120 @@ import { normalizeClientId } from "../lib/seo/tenant";
 
 process.env.SEO_SECRET_ENCRYPTION_KEY =
   process.env.SEO_SECRET_ENCRYPTION_KEY || "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+const auditSourceFixture: VastSourceResult[] = [
+  {
+    id: "docs-llms",
+    name: "Vast docs knowledge",
+    url: "https://docs.vast.ai/llms.txt",
+    kind: "docs",
+    required: true,
+    status: "ok",
+    fetchedAt: "2026-06-22T00:00:00.000Z",
+    text: "Vast.ai documentation includes creating GPU instances, SSH keys, templates, API keys, and environment variables.",
+  },
+  {
+    id: "site-llms-full",
+    name: "Vast full site knowledge",
+    url: "https://vast.ai/llms-full.txt",
+    kind: "site",
+    required: true,
+    status: "ok",
+    fetchedAt: "2026-06-22T00:00:00.000Z",
+    text: "Vast.ai is a GPU cloud platform offering on-demand access to GPUs from data centers and independent hosts worldwide.",
+  },
+  {
+    id: "pricing-api",
+    name: "Live Vast inventory and pricing",
+    url: "https://vast.ai/api/vast-pricing",
+    kind: "inventory",
+    required: true,
+    timeSensitive: true,
+    status: "ok",
+    fetchedAt: "2026-06-22T00:00:00.000Z",
+    text: "Vast live pricing inventory rtx 4090 $0.180/hr minimum $0.300/hr median 1200 offers. h100 $0.790/hr minimum 400 offers.",
+  },
+  {
+    id: "press-kit",
+    name: "Vast press kit",
+    url: "https://vast.ai/press-kit",
+    kind: "brand",
+    required: true,
+    status: "ok",
+    fetchedAt: "2026-06-22T00:00:00.000Z",
+    text: "Vast.ai is an AI compute platform connecting developers with high-performance GPU cloud resources. Founded in 2018.",
+  },
+  {
+    id: "x-official",
+    name: "Official X public messaging",
+    url: "https://x.com/vast_ai",
+    kind: "social",
+    required: false,
+    status: "ok",
+    fetchedAt: "2026-06-22T00:00:00.000Z",
+    text: "Vast.ai shares product updates and public messaging through the official X account.",
+  },
+  {
+    id: "linkedin-approved-feed",
+    name: "Approved LinkedIn feed",
+    url: "",
+    kind: "social",
+    required: false,
+    approvedFeedOnly: true,
+    status: "blocked",
+    fetchedAt: "2026-06-22T00:00:00.000Z",
+    text: "",
+    error: "LinkedIn is available only through an approved feed.",
+  },
+];
+
+test("blog audit extracts clean Markdown claims", () => {
+  const text = cleanExtractedText(
+    "# How to Run Qwen\n\nVast.ai offers on-demand GPU instances. Run `vastai search offers` after checking pricing.",
+    "text/plain",
+    "markdown"
+  );
+
+  assert.doesNotMatch(text, /^#/);
+  assert.ok(splitFactualClaims(text).some((claim) => claim.includes("Vast.ai offers on-demand GPU instances")));
+});
+
+test("blog audit marks observed current claims and stale pricing risks", async () => {
+  const report = await auditBlogDraft(
+    {
+      title: "How to Run Qwen on Vast.ai",
+      format: "markdown",
+      content:
+        "# How to Run Qwen\n\nVast.ai offers on-demand access to GPUs from data centers and independent hosts worldwide. RTX 4090 pricing can start around $0.18/hr on Vast.ai.",
+    },
+    { sources: auditSourceFixture }
+  );
+
+  assert.equal(report.claims[0].status, "PASS");
+  assert.equal(report.claims[1].status, "STALE_RISK");
+  assert.ok(report.claims[1].evidence.includes("https://vast.ai/api/vast-pricing"));
+  assert.equal(report.recommendation, "PASS_WITH_EDITS");
+});
+
+test("blog audit blocks unsupported guarantees before publication", async () => {
+  const report = await auditBlogDraft(
+    {
+      title: "Vast Blog Draft",
+      format: "plain_text",
+      content: "Vast AI always has the cheapest H100 GPUs available with 100% uptime for every workload.",
+    },
+    { sources: auditSourceFixture }
+  );
+
+  assert.equal(report.recommendation, "DO_NOT_PUBLISH");
+  assert.ok(report.claims.some((claim) => claim.status === "FAIL"));
+  const failedClaim = report.claims.find((claim) => claim.status === "FAIL");
+  assert.ok(failedClaim);
+  assert.doesNotMatch(failedClaim.suggestedRewrite, /\b(100%|always|cheapest|uptime)\b/i);
+  assert.match(failedClaim.suggestedRewrite, /live Vast inventory/i);
+  assert.ok(report.brandFindings.some((finding) => finding.severity === "high"));
+  assert.ok(report.missingEvidence.some((item) => item.includes("LinkedIn")));
+});
 
 test("encryption utility does not return plaintext", () => {
   const encrypted = encryptSecret("sk-secret-token");
