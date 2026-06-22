@@ -163,6 +163,58 @@ select {
   gap: 10px;
 }
 
+.sidebar-client-context {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 8px;
+  padding: 6px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.sidebar-client-context span,
+.brain-logo-lockup span,
+.brain-stat span,
+.brain-list span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.sidebar-client-context strong {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.95rem;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border: 1px solid rgba(17, 18, 20, 0.14);
+  border-radius: 8px;
+  background:
+    linear-gradient(145deg, rgba(17, 18, 20, 0.94), rgba(17, 18, 20, 0.74)),
+    #111214;
+  color: #ffffff;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
 .sidebar-brand h1,
 .sidebar-brand p {
   margin: 0;
@@ -182,6 +234,7 @@ select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   min-height: 38px;
   border: 1px solid rgba(17, 18, 20, 0.12);
   border-radius: 8px;
@@ -192,9 +245,16 @@ select {
   cursor: pointer;
 }
 
-.nav-short {
-  display: none;
-  font-weight: 900;
+.nav-icon {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  color: currentColor;
+  opacity: 0.92;
+}
+
+.nav-label {
+  min-width: 0;
 }
 
 .nav-group {
@@ -233,19 +293,15 @@ select {
 }
 
 .dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .sidebar-brand,
-.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .nav-item strong,
 .dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .provider-subnav,
-.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .sidebar-signout span:not(.nav-short) {
+.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .nav-label {
   display: none;
-}
-
-.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .nav-short {
-  display: inline;
 }
 
 .dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .nav-item,
 .dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .sidebar-signout,
-.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .nav-toggle {
+.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .nav-toggle,
+.dashboard-shell:not([data-nav-open="true"]) .app-sidebar:not(:hover):not(:focus-within) .sidebar-client-context {
   width: 100%;
   justify-content: center;
   padding-left: 0;
@@ -400,18 +456,6 @@ select {
   box-shadow: 0 16px 34px rgba(12, 145, 154, 0.1);
 }
 
-.client-status-dot {
-  width: 10px;
-  height: 10px;
-  flex: 0 0 10px;
-  border-radius: 999px;
-  background: var(--warn);
-}
-
-.client-status-dot[data-active="true"] {
-  background: #23885f;
-}
-
 .client-selection-empty {
   margin: 0;
   color: var(--muted);
@@ -522,6 +566,63 @@ select {
 .overview {
   display: grid;
   gap: 18px;
+}
+
+.brain-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.brain-focus {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, auto);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.brain-logo-lockup,
+.brain-stat {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(17, 18, 20, 0.04);
+}
+
+.brain-logo-lockup .client-logo {
+  width: 48px;
+  height: 48px;
+  flex-basis: 48px;
+  font-size: 0.9rem;
+}
+
+.brain-logo-lockup strong,
+.brain-stat strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.brain-list {
+  display: grid;
+  border-top: 1px solid var(--line);
+}
+
+.brain-list div {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 14px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.brain-list strong {
+  font-size: 1.05rem;
+  line-height: 1.35;
 }
 
 .overview-grid {
@@ -1327,11 +1428,16 @@ select {
 
   .hero,
   .dashboard-shell,
+  .dashboard-shell[data-nav-open="true"],
+  .dashboard-shell:has(.app-sidebar:hover),
+  .dashboard-shell:has(.app-sidebar:focus-within),
   .overview-grid,
   .status-row,
   .integration-grid,
   .metric-dashboard,
   .tool-page-layout,
+  .brain-focus,
+  .brain-list div,
   .two-col,
   .first-client-form,
   .insights {

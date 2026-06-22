@@ -5,7 +5,8 @@ import { Joyride, STATUS, type EventData, type Step, type TooltipRenderProps } f
 
 type Provider = "ga4" | "gtm" | "hotjar" | "openai" | "mcp";
 type Status = "disconnected" | "connected" | "error";
-type View = "clients" | "overview" | "integrations" | "analysis" | "insights";
+type View = "clients" | "overview" | "brain" | "integrations" | "analysis" | "insights";
+type NavIconName = "clients" | "overview" | "brain" | "tools" | "analysis" | "insights" | "menu" | "close" | "signout";
 
 type Client = {
   id: string;
@@ -119,20 +120,14 @@ const providerDetails: Record<Provider, { title: string; description: string }> 
 
 const providerOrder = Object.keys(providerLabels) as Provider[];
 
-const navItems: Array<{ id: View; label: string; description: string }> = [
-  { id: "clients", label: "Clients", description: "Choose workspace" },
-  { id: "overview", label: "Overview", description: "Health and report coverage" },
-  { id: "integrations", label: "Tool Setup", description: "Connect keys and metadata" },
-  { id: "analysis", label: "Competitive Analysis", description: "Generate market briefs" },
-  { id: "insights", label: "Insights", description: "Review AI recommendations" },
+const navItems: Array<{ id: View; label: string; description: string; icon: NavIconName }> = [
+  { id: "clients", label: "Clients", description: "Choose workspace", icon: "clients" },
+  { id: "overview", label: "Overview", description: "Health and report coverage", icon: "overview" },
+  { id: "brain", label: "Br(AI)N", description: "Brand intelligence memory", icon: "brain" },
+  { id: "integrations", label: "Tool Setup", description: "Connect keys and metadata", icon: "tools" },
+  { id: "analysis", label: "Competitive Analysis", description: "Generate market briefs", icon: "analysis" },
+  { id: "insights", label: "Insights", description: "Review AI recommendations", icon: "insights" },
 ];
-const navShortLabels: Record<View, string> = {
-  clients: "C",
-  overview: "O",
-  integrations: "T",
-  analysis: "A",
-  insights: "I",
-};
 
 const DEFAULT_CLIENT_ID = "demo-client";
 const CLIENT_STORAGE_KEY = "seo-intelligence-client-id";
@@ -148,7 +143,7 @@ const tourSteps: Step[] = [
   {
     target: "[data-tour='side-nav']",
     title: "Use the sidebar to move",
-    content: "Switch between overview, tool setup, competitive analysis, and insights without losing context.",
+    content: "Switch between overview, Br(AI)N, tool setup, competitive analysis, and insights without losing context.",
     placement: "right",
   },
   {
@@ -333,13 +328,15 @@ export function SeoDashboard() {
       return;
     }
 
+    const nextClient = clients.find((client) => client.id === nextClientId);
     window.localStorage.setItem(CLIENT_STORAGE_KEY, nextClientId);
     setClientId(nextClientId);
+    setView("overview");
     setIntegrations([]);
     setInsights([]);
     setMetricSnapshots([]);
     setCompetitiveAnalyses([]);
-    setNotice({ type: "info", message: `Viewing client workspace: ${nextClientId}` });
+    setNotice({ type: "info", message: `Viewing client workspace: ${nextClient?.name || nextClientId}` });
     loadDashboard(nextClientId);
   }
 
@@ -517,8 +514,18 @@ export function SeoDashboard() {
           aria-expanded={navOpen}
           onClick={() => setNavPinned((current) => !current)}
         >
-          <span aria-hidden="true">{navPinned ? "Close" : "Menu"}</span>
+          <NavIcon name={navPinned ? "close" : "menu"} />
+          <span className="nav-label" aria-hidden="true">{navPinned ? "Close" : "Menu"}</span>
         </button>
+        {activeClient ? (
+          <div className="sidebar-client-context" aria-label={`Active client: ${activeClient.name}`}>
+            <ClientLogo client={activeClient} />
+            <div className="nav-label">
+              <span>Active client</span>
+              <strong>{activeClient.name}</strong>
+            </div>
+          </div>
+        ) : null}
         <div className="sidebar-brand">
           <p className="eyebrow">SEO Intelligence</p>
           <h1>Dashboard</h1>
@@ -537,8 +544,8 @@ export function SeoDashboard() {
                   onClick={() => setView(item.id)}
                   aria-label={item.label}
                 >
-                  <span className="nav-short" aria-hidden="true">{navShortLabels[item.id]}</span>
-                  <strong>{item.label}</strong>
+                  <NavIcon name={item.icon} />
+                  <strong className="nav-label">{item.label}</strong>
                 </button>
                 {item.id === "integrations" && view === "integrations" ? (
                   <div className="provider-subnav" data-tour="tool-provider-nav" aria-label="Tool setup pages">
@@ -565,8 +572,8 @@ export function SeoDashboard() {
 
         <form action="/api/auth/logout" method="post">
           <button className="button sidebar-signout" type="submit" aria-label="Sign out">
-            <span className="nav-short" aria-hidden="true">S</span>
-            <span>Sign out</span>
+            <NavIcon name="signout" />
+            <span className="nav-label">Sign out</span>
           </button>
         </form>
       </aside>
@@ -617,6 +624,8 @@ export function SeoDashboard() {
               />
             ) : null}
 
+            {view === "brain" ? <BrainView activeClient={activeClient} latestByProvider={latestByProvider} /> : null}
+
             {view === "integrations" ? (
               <IntegrationsView
                 activeProvider={activeProvider}
@@ -652,8 +661,94 @@ export function SeoDashboard() {
   );
 }
 
+function NavIcon({ name }: { name: NavIconName }) {
+  const common = {
+    fill: "none",
+    stroke: "currentColor",
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    strokeWidth: 2,
+  };
+
+  return (
+    <svg className="nav-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      {name === "clients" ? (
+        <>
+          <path {...common} d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+          <path {...common} d="M2.8 19.2c.6-3.1 2.5-5 5.2-5s4.6 1.9 5.2 5" />
+          <path {...common} d="M17 10.5a2.5 2.5 0 1 0 0-5" />
+          <path {...common} d="M14.5 14.6c2.5.2 4.1 1.7 4.7 4.6" />
+        </>
+      ) : null}
+      {name === "overview" ? (
+        <>
+          <path {...common} d="M4 13h6V4H4v9Z" />
+          <path {...common} d="M14 20h6V4h-6v16Z" />
+          <path {...common} d="M4 20h6v-3H4v3Z" />
+        </>
+      ) : null}
+      {name === "brain" ? (
+        <>
+          <path {...common} d="M9 4.5a3 3 0 0 0-3 3v.3a3 3 0 0 0-1.2 5.4 3 3 0 0 0 3 5.3H9" />
+          <path {...common} d="M15 4.5a3 3 0 0 1 3 3v.3a3 3 0 0 1 1.2 5.4 3 3 0 0 1-3 5.3H15" />
+          <path {...common} d="M9 4.5v14" />
+          <path {...common} d="M15 4.5v14" />
+          <path {...common} d="M9 10h6" />
+          <path {...common} d="M9 14h6" />
+        </>
+      ) : null}
+      {name === "tools" ? (
+        <>
+          <path {...common} d="M14.5 6.5 17.5 3 21 6.5 17.5 10l-3-3.5Z" />
+          <path {...common} d="m14.5 6.5-8.2 8.2a2.4 2.4 0 1 0 3.4 3.4l8.2-8.2" />
+          <path {...common} d="M4 7h4" />
+          <path {...common} d="M6 5v4" />
+        </>
+      ) : null}
+      {name === "analysis" ? (
+        <>
+          <path {...common} d="M4 18V6" />
+          <path {...common} d="M4 18h16" />
+          <path {...common} d="m7 14 3.2-3.2 2.6 2.6L18.5 7.5" />
+          <path {...common} d="M16 7.5h2.5V10" />
+        </>
+      ) : null}
+      {name === "insights" ? (
+        <>
+          <path {...common} d="M9 18h6" />
+          <path {...common} d="M10 21h4" />
+          <path {...common} d="M8.3 14.5a6 6 0 1 1 7.4 0c-.9.7-1.3 1.5-1.4 2.5H9.7c-.1-1-.5-1.8-1.4-2.5Z" />
+          <path {...common} d="M12 7v3" />
+          <path {...common} d="m10.8 10.8 1.2 1.2 1.8-2" />
+        </>
+      ) : null}
+      {name === "menu" ? (
+        <>
+          <path {...common} d="M4 7h16" />
+          <path {...common} d="M4 12h16" />
+          <path {...common} d="M4 17h16" />
+        </>
+      ) : null}
+      {name === "close" ? (
+        <>
+          <path {...common} d="M6 6l12 12" />
+          <path {...common} d="M18 6 6 18" />
+        </>
+      ) : null}
+      {name === "signout" ? (
+        <>
+          <path {...common} d="M10 5H6.5A2.5 2.5 0 0 0 4 7.5v9A2.5 2.5 0 0 0 6.5 19H10" />
+          <path {...common} d="M13 16l4-4-4-4" />
+          <path {...common} d="M17 12H9" />
+        </>
+      ) : null}
+    </svg>
+  );
+}
+
 function viewTitle(view: View, provider: Provider) {
   if (view === "clients") return "Clients";
+  if (view === "brain") return "Br(AI)N";
   if (view === "integrations") return providerDetails[provider].title;
   if (view === "analysis") return "Competitive Analysis";
   if (view === "insights") return "Insights";
@@ -662,10 +757,29 @@ function viewTitle(view: View, provider: Provider) {
 
 function viewDescription(view: View, clientName: string, provider: Provider) {
   if (view === "clients") return "Choose or create the active client workspace.";
+  if (view === "brain") return `${clientName}: brand memory, voice, and AI context.`;
   if (view === "integrations") return `${clientName}: ${providerDetails[provider].description}`;
   if (view === "analysis") return `Generate competitive briefs for ${clientName}.`;
   if (view === "insights") return `Review AI recommendations for ${clientName}.`;
   return "Graph-style readiness, coverage, and output summary.";
+}
+
+function clientInitials(name: string) {
+  const words = name
+    .replace(/[^a-zA-Z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return "CL";
+  const initials = words.slice(0, 2).map((word) => word[0]).join("");
+  return initials.toUpperCase();
+}
+
+function ClientLogo({ client }: { client: Client }) {
+  return (
+    <span className="client-logo" aria-hidden="true">
+      {clientInitials(client.name)}
+    </span>
+  );
 }
 
 function ClientsView({
@@ -715,7 +829,7 @@ function ClientsView({
                   type="button"
                   onClick={() => onSwitchClient(client.id)}
                 >
-                  <span className="client-status-dot" data-active={isActive} aria-hidden="true" />
+                  <ClientLogo client={client} />
                   <span>{client.name}</span>
                 </button>
               );
@@ -902,6 +1016,58 @@ function GraphCard({ helper, label, percent, value }: { helper: string; label: s
       </div>
       <p>{helper}</p>
     </article>
+  );
+}
+
+function BrainView({
+  activeClient,
+  latestByProvider,
+}: {
+  activeClient?: Client;
+  latestByProvider: Partial<Record<Provider, Integration>>;
+}) {
+  const connectedTools = Object.values(latestByProvider).filter((integration) => integration?.status === "connected").length;
+  const clientName = activeClient?.name || "Client";
+
+  return (
+    <section className="panel brain-panel" aria-labelledby="brain-title">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">Brand intelligence memory</span>
+          <h3 id="brain-title">{clientName} Br(AI)N</h3>
+          <p>Keep the client voice, market facts, and AI context in one focused place.</p>
+        </div>
+      </div>
+
+      <div className="brain-focus">
+        <div className="brain-logo-lockup">
+          {activeClient ? <ClientLogo client={activeClient} /> : null}
+          <div>
+            <span>Active brand</span>
+            <strong>{clientName}</strong>
+          </div>
+        </div>
+        <div className="brain-stat">
+          <span>Connected context</span>
+          <strong>{connectedTools}/5 tools</strong>
+        </div>
+      </div>
+
+      <div className="brain-list" aria-label="Brand intelligence areas">
+        <div>
+          <span>Voice</span>
+          <strong>Messaging, tone, claims, and language guardrails.</strong>
+        </div>
+        <div>
+          <span>Market</span>
+          <strong>Audience, competitors, proof points, and positioning.</strong>
+        </div>
+        <div>
+          <span>AI Context</span>
+          <strong>Reusable instructions for reports, insights, and generated briefs.</strong>
+        </div>
+      </div>
+    </section>
   );
 }
 
