@@ -653,12 +653,6 @@ select {
   margin-top: 16px;
 }
 
-.audit-input-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(160px, 0.38fr);
-  gap: 12px;
-}
-
 .blog-audit-form label {
   display: grid;
   gap: 6px;
@@ -683,15 +677,82 @@ select {
   padding: 0 10px;
 }
 
-.blog-audit-form input[type="file"] {
-  padding: 8px 10px;
-}
-
 .blog-audit-form textarea {
   min-height: 250px;
   padding: 12px;
   font: inherit;
   resize: vertical;
+}
+
+.audit-upload-card {
+  position: relative;
+  min-height: 168px;
+  place-items: center;
+  border: 1px dashed rgba(20, 92, 66, 0.26);
+  border-radius: 8px;
+  padding: 28px;
+  background: rgba(245, 252, 249, 0.58);
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.audit-upload-card:hover,
+.audit-upload-card:focus-within {
+  border-color: rgba(20, 92, 66, 0.5);
+  background: rgba(245, 252, 249, 0.82);
+  box-shadow: 0 18px 34px rgba(20, 92, 66, 0.08);
+}
+
+.audit-upload-card input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.audit-upload-card strong {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: clamp(1.45rem, 2.4vw, 2rem);
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-upload-card small {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.audit-input-divider {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.16em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.audit-input-divider::before,
+.audit-input-divider::after {
+  content: "";
+  height: 1px;
+  background: var(--line);
+}
+
+.audit-paste-field textarea {
+  min-height: clamp(280px, 34vh, 520px);
 }
 
 .audit-report-panel {

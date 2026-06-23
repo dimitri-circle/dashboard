@@ -1062,6 +1062,7 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
   const [auditReport, setAuditReport] = useState<BlogAuditReport | null>(null);
   const [auditing, setAuditing] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
 
   async function runAudit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1130,35 +1131,28 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
         </div>
 
         <form className="blog-audit-form" onSubmit={runAudit}>
-          <div className="audit-input-grid">
-            <label>
-              Title
-              <input name="title" placeholder="How to Run Qwen on Vast.ai" />
-            </label>
-            <label>
-              Format
-              <select name="format" defaultValue="markdown">
-                <option value="markdown">Markdown</option>
-                <option value="plain_text">Plain text</option>
-                <option value="html">HTML</option>
-                <option value="url">URL</option>
-              </select>
-            </label>
+          <label className="audit-upload-card">
+            <input
+              name="file"
+              type="file"
+              accept=".md,.markdown,.mdx,.txt,.html,.htm,.csv,.docx,.zip,text/markdown,text/plain,text/html,text/csv,application/zip,application/x-zip-compressed,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              onChange={(event) => setSelectedFileName(event.currentTarget.files?.[0]?.name || null)}
+            />
+            <span className="eyebrow">Upload draft or ZIP</span>
+            <strong>{selectedFileName || "Choose a file"}</strong>
+            <small>Markdown, text, HTML, CSV, DOCX, and ZIP files are supported.</small>
+          </label>
+
+          <div className="audit-input-divider" aria-hidden="true">
+            <span>or paste it</span>
           </div>
-          <label>
-            URL
-            <input name="url" placeholder="https://example.com/draft" type="url" />
-          </label>
-          <label>
-            Upload file
-            <input name="file" type="file" accept=".md,.markdown,.txt,.html,.htm,text/markdown,text/plain,text/html" />
-          </label>
-          <label>
-            Draft content
+
+          <label className="audit-paste-field">
+            Paste draft
             <textarea
               name="content"
-              placeholder="# How to Run Qwen on Vast.ai&#10;&#10;Vast.ai offers..."
-              rows={12}
+              placeholder="Paste the draft here."
+              rows={14}
             />
           </label>
           <div className="actions">
