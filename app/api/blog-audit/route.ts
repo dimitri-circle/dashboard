@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { auditBlogDraft, type BlogAuditInput } from "@/lib/blog-audit";
+import { readBlogAuditFormPayload } from "@/lib/blog-upload";
 import { rateLimitFromRequest } from "@/lib/seo/rate-limit";
+
+export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
@@ -21,21 +24,8 @@ async function readPayload(request: Request): Promise<BlogAuditInput> {
 
   if (contentType.includes("multipart/form-data")) {
     const form = await request.formData();
-    const file = form.get("file");
-    const fileContent =
-      file && typeof file === "object" && "text" in file ? await (file as { text: () => Promise<string> }).text() : "";
-
-    return {
-      title: asString(form.get("title")),
-      format: asString(form.get("format")) || (fileContent ? "plain_text" : undefined),
-      content: fileContent || asString(form.get("content")),
-      url: asString(form.get("url")),
-    };
+    return readBlogAuditFormPayload(form);
   }
 
   return (await request.json()) as BlogAuditInput;
-}
-
-function asString(value: FormDataEntryValue | null) {
-  return typeof value === "string" ? value.trim() : "";
 }

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import JSZip from "jszip";
 import { auditBlogDraft, cleanExtractedText, splitFactualClaims, type VastSourceResult } from "../lib/blog-audit";
+import { readBlogAuditFormPayload } from "../lib/blog-upload";
 import { hashPassword, verifyPassword } from "../lib/seo/auth";
 import { decryptSecret, encryptSecret } from "../lib/seo/crypto";
 import { rateLimit, resetRateLimitsForTests } from "../lib/seo/rate-limit";
@@ -132,6 +134,97 @@ test("blog audit blocks unsupported guarantees before publication", async () => 
   assert.match(failedClaim.suggestedRewrite, /live Vast inventory/i);
   assert.ok(report.brandFindings.some((finding) => finding.severity === "high"));
   assert.ok(report.missingEvidence.some((item) => item.includes("LinkedIn")));
+});
+
+test("blog audit uses one performant external evidence search for unsupported claims", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.OPENAI_API_KEY;
+  let requestBody: Record<string, any> | null = null;
+  let requestCount = 0;
+
+  process.env.OPENAI_API_KEY = "test-openai-key";
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestCount += 1;
+    assert.equal(String(input), "https://api.openai.com/v1/responses");
+    requestBody = JSON.parse(String(init?.body || "{}"));
+
+    return new Response(
+      JSON.stringify({
+        output: [
+          {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                text: JSON.stringify({
+                  results: [
+                    {
+                      id: "c1",
+                      claim: "NVIDIA was founded in 1993 as a graphics company.",
+                      status: "PASS",
+                      reason: "NVIDIA timeline supports the 1993 founding claim.",
+                      evidence: ["https://www.nvidia.com/en-us/about-nvidia/corporate-timeline/"],
+                      suggestedRewrite: "No rewrite required.",
+                    },
+                  ],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  }) as typeof fetch;
+
+  try {
+    const report = await auditBlogDraft(
+      {
+        title: "External evidence test",
+        format: "plain_text",
+        content: "NVIDIA was founded in 1993 as a graphics company.",
+      },
+      { sources: auditSourceFixture }
+    );
+
+    assert.equal(requestCount, 1);
+    assert.equal(requestBody?.tool_choice, "required");
+    assert.equal(requestBody?.tools?.[0]?.type, "web_search");
+    assert.equal(requestBody?.tools?.[0]?.search_context_size, "low");
+    assert.ok(String(requestBody?.input || "").length < 2200);
+    assert.equal(report.claims[0].status, "PASS");
+    assert.equal(report.claims[0].evidence[0], "https://www.nvidia.com/en-us/about-nvidia/corporate-timeline/");
+    assert.match(report.claims[0].reason, /External evidence check/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = originalApiKey;
+    }
+  }
+});
+
+test("blog audit form accepts ZIP uploads with draft files", async () => {
+  const zip = new JSZip();
+  zip.file(
+    "drafts/qwen-vast.md",
+    "# How to Run Qwen on Vast.ai\n\nVast.ai offers on-demand GPU instances for AI workloads."
+  );
+  zip.file("__MACOSX/._ignored.txt", "ignored");
+  const zipBuffer = await zip.generateAsync({ type: "uint8array" });
+  const form = new FormData();
+
+  form.set("file", new File([zipBuffer], "vast-blog-draft.zip", { type: "application/zip" }));
+  form.set("content", "This pasted fallback should not replace the uploaded file.");
+
+  const payload = await readBlogAuditFormPayload(form);
+
+  assert.equal(payload.format, "plain_text");
+  assert.equal(payload.title, "vast-blog-draft");
+  assert.match(payload.content || "", /Source file: drafts\/qwen-vast\.md/);
+  assert.match(payload.content || "", /Vast\.ai offers on-demand GPU instances/);
+  assert.doesNotMatch(payload.content || "", /pasted fallback/);
 });
 
 test("encryption utility does not return plaintext", () => {

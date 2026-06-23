@@ -59,12 +59,25 @@ export type VastSourceResult = VastAuditSource & {
 
 type AuditOptions = {
   sources?: VastSourceResult[];
+  externalEvidence?: ExternalEvidenceResult[];
+};
+
+type ExternalEvidenceStatus = Extract<BlogAuditClaimStatus, "PASS" | "FAIL" | "UNSUPPORTED" | "STALE_RISK">;
+
+type ExternalEvidenceResult = {
+  claim: string;
+  status: ExternalEvidenceStatus;
+  reason: string;
+  evidence: string[];
+  suggestedRewrite?: string;
 };
 
 const BLOG_TEXT_LIMIT = 120_000;
 const MAX_FETCH_BYTES = 700_000;
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_CLAIMS = 32;
+const MAX_EXTERNAL_EVIDENCE_CLAIMS = 8;
+const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 
 const STOP_WORDS = new Set([
   "about",
@@ -192,7 +205,10 @@ export async function auditBlogDraft(input: BlogAuditInput, options: AuditOption
   const cleanText = await extractBlogText(normalizedInput);
   const claims = splitFactualClaims(cleanText);
   const sources = options.sources || (await fetchVastAuditSources());
-  const claimFindings = claims.map((claim) => auditClaim(claim, sources));
+  const baseClaimFindings = claims.map((claim) => auditClaim(claim, sources));
+  const externalEvidence =
+    options.externalEvidence || (await fetchExternalEvidenceForClaims(baseClaimFindings, sources));
+  const claimFindings = applyExternalEvidence(baseClaimFindings, externalEvidence);
   const brandFindings = auditBrand(cleanText);
   const missingEvidence = buildMissingEvidence(claimFindings, sources, claims);
   const publishRisks = buildPublishRisks(claimFindings, brandFindings, sources);
@@ -426,6 +442,275 @@ function auditClaim(claim: string, sources: VastSourceResult[]): BlogAuditClaim 
   };
 }
 
+async function fetchExternalEvidenceForClaims(claims: BlogAuditClaim[], sources: VastSourceResult[]) {
+  if (process.env.EXTERNAL_EVIDENCE_DISABLED === "1") {
+    return [];
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return [];
+  }
+
+  const candidates = claims
+    .filter((claim) => claim.status === "UNSUPPORTED")
+    .slice(0, MAX_EXTERNAL_EVIDENCE_CLAIMS)
+    .map((claim, index) => ({
+      id: `c${index + 1}`,
+      claim: claim.claim,
+    }));
+
+  if (!candidates.length) {
+    return [];
+  }
+
+  try {
+    const response = await fetch(OPENAI_RESPONSES_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(buildExternalEvidenceRequest(candidates, sources)),
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const payload = await response.json();
+    return normalizeExternalEvidenceResponse(payload, candidates);
+  } catch {
+    return [];
+  }
+}
+
+function buildExternalEvidenceRequest(
+  candidates: Array<{ id: string; claim: string }>,
+  sources: VastSourceResult[]
+) {
+  const checkedVastSources = sources
+    .filter((source) => source.status === "ok" && source.url)
+    .map((source) => source.url)
+    .slice(0, 8);
+
+  return {
+    model: process.env.OPENAI_WEB_SEARCH_MODEL || process.env.OPENAI_SEO_MODEL || "gpt-4.1-mini",
+    tools: [
+      {
+        type: process.env.OPENAI_WEB_SEARCH_TOOL || "web_search",
+        search_context_size: process.env.OPENAI_WEB_SEARCH_CONTEXT_SIZE || "low",
+      },
+    ],
+    tool_choice: "required",
+    include: ["web_search_call.action.sources"],
+    max_output_tokens: 1400,
+    input: buildExternalEvidencePrompt(candidates, checkedVastSources),
+  };
+}
+
+function buildExternalEvidencePrompt(candidates: Array<{ id: string; claim: string }>, checkedVastSources: string[]) {
+  return [
+    "Validate only the listed claims using live web sources.",
+    "Use web search first. Do not rely on memory.",
+    "Prefer official, primary, dated, or vendor-owned sources.",
+    "PASS only when a reviewable URL directly supports the exact claim.",
+    "FAIL only when a reviewable URL directly contradicts the claim.",
+    "STALE_RISK for pricing, availability, inventory, rankings, or current-market claims unless the source is current and dated.",
+    "UNSUPPORTED when no reviewable source is found.",
+    "Keep reasons under 22 words. Keep rewrites under 24 words.",
+    "Return only minified JSON with this shape:",
+    '{"results":[{"id":"c1","claim":"...","status":"PASS|FAIL|UNSUPPORTED|STALE_RISK","reason":"...","evidence":["https://..."],"suggestedRewrite":"..."}]}',
+    `Already checked Vast URLs: ${JSON.stringify(checkedVastSources)}`,
+    `Claims: ${JSON.stringify(candidates)}`,
+  ].join("\n");
+}
+
+function normalizeExternalEvidenceResponse(
+  payload: unknown,
+  candidates: Array<{ id: string; claim: string }>
+): ExternalEvidenceResult[] {
+  const rawText = extractOpenAIOutputText(payload);
+  const parsed = parseFirstJsonObject(rawText) as { results?: Array<Record<string, unknown>> } | null;
+
+  if (!parsed || !Array.isArray(parsed.results)) {
+    return [];
+  }
+
+  const candidateIds = new Set(candidates.map((candidate) => candidate.id));
+  const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate.claim]));
+  const candidateByClaim = new Map(candidates.map((candidate) => [normalizeForSearch(candidate.claim), candidate.claim]));
+  const fallbackUrls = collectReviewableUrls(payload);
+
+  const normalizedResults: Array<ExternalEvidenceResult | null> = parsed.results.map((result) => {
+      const id = typeof result.id === "string" && candidateIds.has(result.id) ? result.id : "";
+      const resultClaim = typeof result.claim === "string" ? result.claim : "";
+      const claim = id
+        ? candidateById.get(id) || resultClaim
+        : candidateByClaim.get(normalizeForSearch(resultClaim)) || resultClaim;
+      const evidence = normalizeEvidenceUrls(result.evidence).slice(0, 4);
+      const status = normalizeExternalEvidenceStatus(result.status, evidence);
+      const reason = typeof result.reason === "string" ? normalizeWhitespace(result.reason).slice(0, 260) : "";
+      const suggestedRewrite =
+        typeof result.suggestedRewrite === "string" ? normalizeWhitespace(result.suggestedRewrite).slice(0, 260) : "";
+
+      if (!claim || (!id && !candidateByClaim.has(normalizeForSearch(claim)))) {
+        return null;
+      }
+
+      return {
+        claim,
+        status,
+        reason: reason || "External evidence check completed.",
+        evidence: evidence.length ? evidence : status === "UNSUPPORTED" ? [] : fallbackUrls.slice(0, 2),
+        suggestedRewrite,
+      };
+    });
+
+  return normalizedResults
+    .filter((result): result is ExternalEvidenceResult => result !== null)
+    .filter((result) => result.status === "UNSUPPORTED" || result.evidence.length > 0)
+    .slice(0, candidates.length);
+}
+
+function applyExternalEvidence(claims: BlogAuditClaim[], externalEvidence: ExternalEvidenceResult[]) {
+  if (!externalEvidence.length) {
+    return claims;
+  }
+
+  const evidenceByClaim = new Map(
+    externalEvidence.map((result) => [normalizeForSearch(result.claim), result])
+  );
+
+  return claims.map((claim) => {
+    const external = evidenceByClaim.get(normalizeForSearch(claim.claim));
+    if (!external) {
+      return claim;
+    }
+
+    if (external.status === "UNSUPPORTED") {
+      return {
+        ...claim,
+        reason: "The claim was not observed in Vast sources, and no reviewable external source was found.",
+      };
+    }
+
+    return {
+      ...claim,
+      status: external.status,
+      reason: `External evidence check: ${external.reason}`,
+      evidence: external.evidence,
+      suggestedRewrite: external.suggestedRewrite || (external.status === "PASS" ? "No rewrite required." : softenClaim(claim.claim)),
+    };
+  });
+}
+
+function normalizeExternalEvidenceStatus(status: unknown, evidence: string[]): ExternalEvidenceStatus {
+  if (!evidence.length) {
+    return "UNSUPPORTED";
+  }
+
+  if (status === "PASS" || status === "FAIL" || status === "STALE_RISK" || status === "UNSUPPORTED") {
+    return status;
+  }
+
+  return "UNSUPPORTED";
+}
+
+function extractOpenAIOutputText(payload: unknown) {
+  const direct = payload && typeof payload === "object" && "output_text" in payload ? (payload as { output_text?: unknown }).output_text : "";
+  if (typeof direct === "string" && direct.trim()) {
+    return direct;
+  }
+
+  const chunks: string[] = [];
+  collectTextChunks(payload, chunks);
+  return chunks.join("\n");
+}
+
+function collectTextChunks(value: unknown, chunks: string[]) {
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  if ("text" in value && typeof (value as { text?: unknown }).text === "string") {
+    chunks.push((value as { text: string }).text);
+  }
+
+  if ("output_text" in value && typeof (value as { output_text?: unknown }).output_text === "string") {
+    chunks.push((value as { output_text: string }).output_text);
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectTextChunks(item, chunks));
+    return;
+  }
+
+  Object.values(value).forEach((item) => collectTextChunks(item, chunks));
+}
+
+function parseFirstJsonObject(rawText: string) {
+  const start = rawText.indexOf("{");
+  const end = rawText.lastIndexOf("}");
+  if (start === -1 || end <= start) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawText.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+function collectReviewableUrls(value: unknown) {
+  const urls = new Set<string>();
+
+  function visit(item: unknown) {
+    if (!item || typeof item !== "object") {
+      return;
+    }
+
+    if ("url" in item && typeof (item as { url?: unknown }).url === "string" && isReviewableUrl((item as { url: string }).url)) {
+      urls.add((item as { url: string }).url);
+    }
+
+    if (Array.isArray(item)) {
+      item.forEach(visit);
+      return;
+    }
+
+    Object.values(item).forEach(visit);
+  }
+
+  visit(value);
+  return Array.from(urls).slice(0, 8);
+}
+
+function normalizeEvidenceUrls(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(isReviewableUrl)
+    )
+  );
+}
+
+function isReviewableUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return (url.protocol === "https:" || url.protocol === "http:") && !isPrivateHostname(url.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 function hasExtractableXPostText(rawText: string, cleanText: string) {
   if (process.env.VAST_X_FEED_URL && !process.env.VAST_X_FEED_URL.includes("x.com")) {
     return cleanText.length > 120;
@@ -445,10 +730,11 @@ function findEvidence(claim: string, sources: VastSourceResult[]) {
       const score = tokens.length ? hits.length / tokens.length : 0;
       const exactChunk = compactClaimPhrase(claim);
       const exactMatch = exactChunk.length > 34 && sourceText.includes(exactChunk);
+      const livePricingHit = source.kind === "inventory" && isTimeSensitiveClaim(claim) && modelHits.length > 0;
 
       return {
         source,
-        score: score + (modelHits.length ? 0.25 : 0) + (exactMatch ? 0.35 : 0),
+        score: score + (modelHits.length ? 0.25 : 0) + (exactMatch ? 0.35 : 0) + (livePricingHit ? 0.5 : 0),
       };
     })
     .filter(({ score }) => score >= 0.58)
@@ -550,7 +836,7 @@ function buildPublishRisks(claims: BlogAuditClaim[], brandFindings: BlogAuditBra
   }
 
   if (claims.some((claim) => claim.status === "UNSUPPORTED")) {
-    risks.push("Some claims were not observed in current Vast sources.");
+    risks.push("Some claims were not supported by current Vast or external sources.");
   }
 
   if (claims.some((claim) => claim.status === "STALE_RISK")) {
