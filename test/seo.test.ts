@@ -195,6 +195,101 @@ test("blog audit uses one performant external evidence search for unsupported cl
     assert.equal(report.claims[0].status, "PASS");
     assert.equal(report.claims[0].evidence[0], "https://www.nvidia.com/en-us/about-nvidia/corporate-timeline/");
     assert.match(report.claims[0].reason, /External evidence check/);
+    assert.equal(report.externalEvidence.status, "CHECKED");
+    assert.equal(report.externalEvidence.checkedClaims, 1);
+    assert.equal(report.externalEvidence.supportedClaims, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = originalApiKey;
+    }
+  }
+});
+
+test("blog audit blocks external-only claims when OpenAI key is missing", async () => {
+  const originalApiKey = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+
+  try {
+    const report = await auditBlogDraft(
+      {
+        title: "External evidence unavailable test",
+        format: "plain_text",
+        content: "NVIDIA was founded in 1993 as a graphics company.",
+      },
+      { sources: auditSourceFixture }
+    );
+
+    assert.equal(report.externalEvidence.status, "UNAVAILABLE");
+    assert.match(report.externalEvidence.message, /missing OpenAI key/i);
+    assert.equal(report.claims[0].status, "BLOCKED");
+    assert.match(report.claims[0].reason, /missing OpenAI key/i);
+    assert.ok(report.publishRisks.some((risk) => /missing OpenAI key/i.test(risk)));
+  } finally {
+    if (originalApiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = originalApiKey;
+    }
+  }
+});
+
+test("blog audit attaches reviewable OpenAI source URLs when evidence array is empty", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.OPENAI_API_KEY;
+
+  process.env.OPENAI_API_KEY = "test-openai-key";
+  globalThis.fetch = (async () => {
+    return new Response(
+      JSON.stringify({
+        output: [
+          {
+            type: "web_search_call",
+            action: {
+              sources: [{ url: "https://www.nvidia.com/en-us/about-nvidia/corporate-timeline/" }],
+            },
+          },
+          {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                text: JSON.stringify({
+                  results: [
+                    {
+                      id: "c1",
+                      claim: "NVIDIA was founded in 1993 as a graphics company.",
+                      status: "PASS",
+                      reason: "NVIDIA timeline supports the founding date.",
+                      evidence: [],
+                      suggestedRewrite: "No rewrite required.",
+                    },
+                  ],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  }) as typeof fetch;
+
+  try {
+    const report = await auditBlogDraft(
+      {
+        title: "External evidence source fallback test",
+        format: "plain_text",
+        content: "NVIDIA was founded in 1993 as a graphics company.",
+      },
+      { sources: auditSourceFixture }
+    );
+
+    assert.equal(report.claims[0].status, "PASS");
+    assert.deepEqual(report.claims[0].evidence, ["https://www.nvidia.com/en-us/about-nvidia/corporate-timeline/"]);
+    assert.deepEqual(report.externalEvidence.evidenceUrls, ["https://www.nvidia.com/en-us/about-nvidia/corporate-timeline/"]);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalApiKey === undefined) {

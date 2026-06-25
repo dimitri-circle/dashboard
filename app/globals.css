@@ -785,6 +785,43 @@ select {
   padding-top: 12px;
 }
 
+.external-evidence-status {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.external-evidence-status[data-status="CHECKED"] {
+  border-color: rgba(20, 92, 66, 0.26);
+}
+
+.external-evidence-status[data-status="UNAVAILABLE"],
+.external-evidence-status[data-status="FAILED"] {
+  border-color: rgba(159, 31, 23, 0.25);
+}
+
+.external-evidence-status span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.external-evidence-status strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.95rem;
+  line-height: 1.25;
+}
+
 .audit-section {
   border-top: 1px solid var(--line);
   padding-top: 14px;
@@ -1522,6 +1559,10 @@ select {
 
   .competitive-hero h3 {
     font-size: 2.4rem;
+  }
+
+  .external-evidence-status {
+    grid-template-columns: 1fr;
   }
 
   .competitive-empty-state h4 {

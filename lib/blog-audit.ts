@@ -36,6 +36,7 @@ export type BlogAuditReport = {
   brandFindings: BlogAuditBrandFinding[];
   missingEvidence: string[];
   publishRisks: string[];
+  externalEvidence: BlogAuditExternalEvidenceSummary;
 };
 
 type VastSourceKind = "docs" | "site" | "inventory" | "brand" | "social";
@@ -63,6 +64,15 @@ type AuditOptions = {
 };
 
 type ExternalEvidenceStatus = Extract<BlogAuditClaimStatus, "PASS" | "FAIL" | "UNSUPPORTED" | "STALE_RISK">;
+type ExternalEvidenceRunStatus = "NOT_NEEDED" | "UNAVAILABLE" | "CHECKED" | "FAILED";
+
+export type BlogAuditExternalEvidenceSummary = {
+  status: ExternalEvidenceRunStatus;
+  message: string;
+  checkedClaims: number;
+  supportedClaims: number;
+  evidenceUrls: string[];
+};
 
 type ExternalEvidenceResult = {
   claim: string;
@@ -70,6 +80,10 @@ type ExternalEvidenceResult = {
   reason: string;
   evidence: string[];
   suggestedRewrite?: string;
+};
+
+type ExternalEvidenceState = BlogAuditExternalEvidenceSummary & {
+  results: ExternalEvidenceResult[];
 };
 
 const BLOG_TEXT_LIMIT = 120_000;
@@ -207,11 +221,13 @@ export async function auditBlogDraft(input: BlogAuditInput, options: AuditOption
   const sources = options.sources || (await fetchVastAuditSources());
   const baseClaimFindings = claims.map((claim) => auditClaim(claim, sources));
   const externalEvidence =
-    options.externalEvidence || (await fetchExternalEvidenceForClaims(baseClaimFindings, sources));
+    options.externalEvidence
+      ? buildExternalEvidenceState("CHECKED", "External evidence checked.", options.externalEvidence, options.externalEvidence.length)
+      : await fetchExternalEvidenceForClaims(baseClaimFindings, sources);
   const claimFindings = applyExternalEvidence(baseClaimFindings, externalEvidence);
   const brandFindings = auditBrand(cleanText);
-  const missingEvidence = buildMissingEvidence(claimFindings, sources, claims);
-  const publishRisks = buildPublishRisks(claimFindings, brandFindings, sources);
+  const missingEvidence = buildMissingEvidence(claimFindings, sources, claims, externalEvidence);
+  const publishRisks = buildPublishRisks(claimFindings, brandFindings, sources, externalEvidence);
   const truthScore = scoreTruth(claimFindings, sources);
   const brandScore = scoreBrand(brandFindings);
   const recommendation = recommendPublication(truthScore, brandScore, claimFindings, brandFindings, sources);
@@ -225,6 +241,7 @@ export async function auditBlogDraft(input: BlogAuditInput, options: AuditOption
     brandFindings,
     missingEvidence,
     publishRisks,
+    externalEvidence: externalEvidenceSummary(externalEvidence),
   };
 }
 
@@ -442,16 +459,7 @@ function auditClaim(claim: string, sources: VastSourceResult[]): BlogAuditClaim 
   };
 }
 
-async function fetchExternalEvidenceForClaims(claims: BlogAuditClaim[], sources: VastSourceResult[]) {
-  if (process.env.EXTERNAL_EVIDENCE_DISABLED === "1") {
-    return [];
-  }
-
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return [];
-  }
-
+async function fetchExternalEvidenceForClaims(claims: BlogAuditClaim[], sources: VastSourceResult[]): Promise<ExternalEvidenceState> {
   const candidates = claims
     .filter((claim) => claim.status === "UNSUPPORTED")
     .slice(0, MAX_EXTERNAL_EVIDENCE_CLAIMS)
@@ -461,7 +469,26 @@ async function fetchExternalEvidenceForClaims(claims: BlogAuditClaim[], sources:
     }));
 
   if (!candidates.length) {
-    return [];
+    return buildExternalEvidenceState("NOT_NEEDED", "External evidence was not needed.", [], 0);
+  }
+
+  if (process.env.EXTERNAL_EVIDENCE_DISABLED === "1") {
+    return buildExternalEvidenceState(
+      "UNAVAILABLE",
+      "External evidence unavailable: external checks are disabled.",
+      [],
+      candidates.length
+    );
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return buildExternalEvidenceState(
+      "UNAVAILABLE",
+      "External evidence unavailable: missing OpenAI key.",
+      [],
+      candidates.length
+    );
   }
 
   try {
@@ -475,13 +502,29 @@ async function fetchExternalEvidenceForClaims(claims: BlogAuditClaim[], sources:
     });
 
     if (!response.ok) {
-      return [];
+      return buildExternalEvidenceState(
+        "FAILED",
+        "External evidence unavailable: OpenAI source retrieval failed.",
+        [],
+        candidates.length
+      );
     }
 
     const payload = await response.json();
-    return normalizeExternalEvidenceResponse(payload, candidates);
+    const results = normalizeExternalEvidenceResponse(payload, candidates);
+    return buildExternalEvidenceState(
+      "CHECKED",
+      "External evidence checked.",
+      results,
+      candidates.length
+    );
   } catch {
-    return [];
+    return buildExternalEvidenceState(
+      "FAILED",
+      "External evidence unavailable: OpenAI source retrieval failed.",
+      [],
+      candidates.length
+    );
   }
 }
 
@@ -548,7 +591,8 @@ function normalizeExternalEvidenceResponse(
       const claim = id
         ? candidateById.get(id) || resultClaim
         : candidateByClaim.get(normalizeForSearch(resultClaim)) || resultClaim;
-      const evidence = normalizeEvidenceUrls(result.evidence).slice(0, 4);
+      const directEvidence = normalizeEvidenceUrls(result.evidence).slice(0, 4);
+      const evidence = directEvidence.length ? directEvidence : fallbackUrls.slice(0, 2);
       const status = normalizeExternalEvidenceStatus(result.status, evidence);
       const reason = typeof result.reason === "string" ? normalizeWhitespace(result.reason).slice(0, 260) : "";
       const suggestedRewrite =
@@ -573,25 +617,42 @@ function normalizeExternalEvidenceResponse(
     .slice(0, candidates.length);
 }
 
-function applyExternalEvidence(claims: BlogAuditClaim[], externalEvidence: ExternalEvidenceResult[]) {
-  if (!externalEvidence.length) {
-    return claims;
-  }
-
+function applyExternalEvidence(claims: BlogAuditClaim[], externalEvidence: ExternalEvidenceState): BlogAuditClaim[] {
   const evidenceByClaim = new Map(
-    externalEvidence.map((result) => [normalizeForSearch(result.claim), result])
+    externalEvidence.results.map((result) => [normalizeForSearch(result.claim), result])
   );
 
   return claims.map((claim) => {
     const external = evidenceByClaim.get(normalizeForSearch(claim.claim));
+
     if (!external) {
+      if (claim.status !== "UNSUPPORTED") {
+        return claim;
+      }
+
+      if (externalEvidence.status === "CHECKED") {
+        return {
+          ...claim,
+          reason: "External evidence checked: no reviewable source found.",
+        };
+      }
+
+      if (externalEvidence.status === "UNAVAILABLE" || externalEvidence.status === "FAILED") {
+        return {
+          ...claim,
+          status: "BLOCKED",
+          reason: externalEvidence.message,
+          suggestedRewrite: "Hold this claim until external evidence can be checked.",
+        };
+      }
+
       return claim;
     }
 
     if (external.status === "UNSUPPORTED") {
       return {
         ...claim,
-        reason: "The claim was not observed in Vast sources, and no reviewable external source was found.",
+        reason: "External evidence checked: no reviewable source found.",
       };
     }
 
@@ -603,6 +664,29 @@ function applyExternalEvidence(claims: BlogAuditClaim[], externalEvidence: Exter
       suggestedRewrite: external.suggestedRewrite || (external.status === "PASS" ? "No rewrite required." : softenClaim(claim.claim)),
     };
   });
+}
+
+function buildExternalEvidenceState(
+  status: ExternalEvidenceRunStatus,
+  message: string,
+  results: ExternalEvidenceResult[],
+  checkedClaims: number
+): ExternalEvidenceState {
+  const supportedResults = results.filter((result) => result.status !== "UNSUPPORTED" && result.evidence.length > 0);
+
+  return {
+    status,
+    message,
+    checkedClaims,
+    supportedClaims: supportedResults.length,
+    evidenceUrls: Array.from(new Set(results.flatMap((result) => result.evidence))).slice(0, 12),
+    results,
+  };
+}
+
+function externalEvidenceSummary(state: ExternalEvidenceState): BlogAuditExternalEvidenceSummary {
+  const { results: _results, ...summary } = state;
+  return summary;
 }
 
 function normalizeExternalEvidenceStatus(status: unknown, evidence: string[]): ExternalEvidenceStatus {
@@ -811,7 +895,12 @@ function isTimeSensitiveClaim(claim: string) {
   return extractGpuModels(claim).length > 0 && /\b(price|pricing|cost|available|availability|inventory|current|today|now|latest)\b/i.test(claim);
 }
 
-function buildMissingEvidence(claims: BlogAuditClaim[], sources: VastSourceResult[], extractedClaims: string[]) {
+function buildMissingEvidence(
+  claims: BlogAuditClaim[],
+  sources: VastSourceResult[],
+  extractedClaims: string[],
+  externalEvidence: ExternalEvidenceState
+) {
   const missing = [
     ...sources
       .filter((source) => source.status !== "ok")
@@ -821,6 +910,10 @@ function buildMissingEvidence(claims: BlogAuditClaim[], sources: VastSourceResul
       .map((claim) => `Claim needs evidence: ${claim.claim}`),
   ];
 
+  if (externalEvidence.status === "UNAVAILABLE" || externalEvidence.status === "FAILED") {
+    missing.push(externalEvidence.message);
+  }
+
   if (!extractedClaims.length) {
     missing.push("No factual claims were extracted from the draft.");
   }
@@ -828,7 +921,12 @@ function buildMissingEvidence(claims: BlogAuditClaim[], sources: VastSourceResul
   return Array.from(new Set(missing)).slice(0, 24);
 }
 
-function buildPublishRisks(claims: BlogAuditClaim[], brandFindings: BlogAuditBrandFinding[], sources: VastSourceResult[]) {
+function buildPublishRisks(
+  claims: BlogAuditClaim[],
+  brandFindings: BlogAuditBrandFinding[],
+  sources: VastSourceResult[],
+  externalEvidence: ExternalEvidenceState
+) {
   const risks = [];
 
   if (claims.some((claim) => claim.status === "FAIL")) {
@@ -836,7 +934,15 @@ function buildPublishRisks(claims: BlogAuditClaim[], brandFindings: BlogAuditBra
   }
 
   if (claims.some((claim) => claim.status === "UNSUPPORTED")) {
-    risks.push("Some claims were not supported by current Vast or external sources.");
+    risks.push("Some claims were checked against Vast and external sources but still need support.");
+  }
+
+  if (claims.some((claim) => claim.status === "BLOCKED")) {
+    risks.push("Some claims could not complete external evidence review.");
+  }
+
+  if (externalEvidence.status === "UNAVAILABLE" || externalEvidence.status === "FAILED") {
+    risks.push(externalEvidence.message);
   }
 
   if (claims.some((claim) => claim.status === "STALE_RISK")) {

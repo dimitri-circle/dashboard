@@ -108,6 +108,13 @@ type BlogAuditReport = {
   }>;
   missingEvidence: string[];
   publishRisks: string[];
+  externalEvidence?: {
+    status: "NOT_NEEDED" | "UNAVAILABLE" | "CHECKED" | "FAILED";
+    message: string;
+    checkedClaims: number;
+    supportedClaims: number;
+    evidenceUrls: string[];
+  };
 };
 
 const providerLabels: Record<Provider, string> = {
@@ -1194,6 +1201,7 @@ function AuditReportView({ report }: { report: BlogAuditReport }) {
       </div>
 
       <p className="audit-summary">{report.summary}</p>
+      {report.externalEvidence ? <ExternalEvidenceStatusView externalEvidence={report.externalEvidence} /> : null}
 
       <div className="audit-section">
         <h4>Claims</h4>
@@ -1226,6 +1234,26 @@ function AuditReportView({ report }: { report: BlogAuditReport }) {
       <AuditList title="Brand findings" items={report.brandFindings.map((finding) => `${finding.severity}: ${finding.issue} ${finding.suggestedRewrite}`)} />
       <AuditList title="Missing evidence" items={report.missingEvidence} />
       <AuditList title="Publish risks" items={report.publishRisks} />
+    </div>
+  );
+}
+
+function ExternalEvidenceStatusView({ externalEvidence }: { externalEvidence: NonNullable<BlogAuditReport["externalEvidence"]> }) {
+  return (
+    <div className="external-evidence-status" data-status={externalEvidence.status}>
+      <div>
+        <span>External evidence</span>
+        <strong>{externalEvidence.message}</strong>
+      </div>
+      <div>
+        <span>Checked</span>
+        <strong>{externalEvidence.checkedClaims}</strong>
+      </div>
+      <div>
+        <span>Supported</span>
+        <strong>{externalEvidence.supportedClaims}</strong>
+      </div>
+      <SourceLinks urls={externalEvidence.evidenceUrls} emptyLabel="No external source links" />
     </div>
   );
 }
@@ -1669,11 +1697,11 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
   );
 }
 
-function SourceLinks({ urls }: { urls: string[] }) {
+function SourceLinks({ emptyLabel = "No source links attached", urls }: { emptyLabel?: string; urls: string[] }) {
   const uniqueUrls = Array.from(new Set(urls.filter(Boolean))).slice(0, 5);
 
   if (!uniqueUrls.length) {
-    return <span className="source-links">No source links attached</span>;
+    return <span className="source-links">{emptyLabel}</span>;
   }
 
   return (
