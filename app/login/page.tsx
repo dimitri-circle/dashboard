@@ -1,4 +1,5 @@
 import { createElement } from "react";
+import { CircleClickLogo } from "@/components/CircleClickLogo";
 
 type LoginPageProps = {
   searchParams?: Promise<{
@@ -27,10 +28,13 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         source: "/dots-pattern.webp",
       })}
       <section className="login-card" aria-labelledby="login-title">
-        <div>
-          <p className="eyebrow">SEO Intelligence</p>
-          <h1 id="login-title">Sign in to continue.</h1>
-          <p>Use your workspace account to open client analytics, encrypted tools, and AI reports.</p>
+        <div className="login-brand-lockup">
+          <CircleClickLogo className="login-brand-mark" />
+          <div>
+            <p className="eyebrow">CircleClick SEO</p>
+            <h1 id="login-title">Sign in to continue.</h1>
+            <p>Use your workspace account to open client analytics, encrypted tools, and AI reports.</p>
+          </div>
         </div>
 
         {message ? (

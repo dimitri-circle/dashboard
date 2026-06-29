@@ -4,8 +4,13 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SEO Intelligence Dashboard",
+  title: "CircleClick SEO Dashboard",
   description: "Connect SEO and analytics tools, store secrets securely, and generate AI insights.",
+  icons: {
+    icon: [{ url: "/circleclick-icon.svg", type: "image/svg+xml" }],
+    shortcut: "/circleclick-icon.svg",
+    apple: "/circleclick-icon.svg",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

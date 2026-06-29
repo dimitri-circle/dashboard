@@ -1,5 +1,6 @@
 "use client";
 
+import { CircleClickLogo } from "@/components/CircleClickLogo";
 import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Joyride, STATUS, type EventData, type Step, type TooltipRenderProps } from "react-joyride";
 
@@ -209,6 +210,7 @@ const navItems: Array<{ id: View; label: string; description: string; icon: NavI
 
 const DEFAULT_CLIENT_ID = "demo-client";
 const CLIENT_STORAGE_KEY = "seo-intelligence-client-id";
+const COMPETITIVE_REPORTS_PER_PAGE = 1;
 
 const tourSteps: Step[] = [
   {
@@ -346,7 +348,6 @@ export function SeoDashboard() {
   const [tourRunning, setTourRunning] = useState(false);
   const [activeProvider, setActiveProvider] = useState<Provider>("ga4");
   const [navPinned, setNavPinned] = useState(false);
-  const [navActive, setNavActive] = useState(false);
 
   const activeClient = clients.find((client) => client.id === clientId);
   const latestByProvider = useMemo(() => {
@@ -359,7 +360,7 @@ export function SeoDashboard() {
   const savedToolCount = Object.values(latestByProvider).filter(Boolean).length;
   const readiness = Math.round(((latestByProvider.openai ? 1 : 0) + Math.min(savedToolCount, 4) / 4) * 50);
   const hasClients = clients.length > 0;
-  const navOpen = navPinned || navActive;
+  const navOpen = navPinned;
 
   function showToastNotice(toast: Omit<ToastNoticeState, "id" | "phase">) {
     setToastNotice({
@@ -625,6 +626,13 @@ export function SeoDashboard() {
     }
   }
 
+  function handleNavSelect(nextView: View) {
+    setView(nextView);
+    if (window.matchMedia("(max-width: 880px)").matches) {
+      setNavPinned(false);
+    }
+  }
+
   return (
     <section className="dashboard-shell" data-nav-open={navOpen} aria-labelledby="dashboard-title">
       <Joyride
@@ -649,14 +657,6 @@ export function SeoDashboard() {
       <aside
         className="app-sidebar"
         aria-label="Dashboard navigation"
-        onFocus={() => setNavActive(true)}
-        onMouseEnter={() => setNavActive(true)}
-        onMouseLeave={() => setNavActive(false)}
-        onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-            setNavActive(false);
-          }
-        }}
       >
         <button
           className="nav-toggle"
@@ -678,9 +678,12 @@ export function SeoDashboard() {
           </div>
         ) : null}
         <div className="sidebar-brand">
-          <p className="eyebrow">SEO Intelligence</p>
-          <h1>Dashboard</h1>
-          <p>{loading ? "Loading workspace..." : `${clients.length} client workspace${clients.length === 1 ? "" : "s"}`}</p>
+          <CircleClickLogo className="sidebar-brand-mark" />
+          <div className="sidebar-brand-copy">
+            <p className="eyebrow">CircleClick SEO</p>
+            <h1>Dashboard</h1>
+            <p>{loading ? "Loading workspace..." : `${clients.length} client workspace${clients.length === 1 ? "" : "s"}`}</p>
+          </div>
         </div>
 
         {hasClients ? (
@@ -704,7 +707,7 @@ export function SeoDashboard() {
                             : undefined
                   }
                   type="button"
-                  onClick={() => setView(item.id)}
+                  onClick={() => handleNavSelect(item.id)}
                   aria-label={item.label}
                 >
                   <NavIcon name={item.icon} />
@@ -723,7 +726,7 @@ export function SeoDashboard() {
                         type="button"
                         onClick={() => {
                           setActiveProvider(provider);
-                          setView("integrations");
+                          handleNavSelect("integrations");
                         }}
                       >
                         {providerLabels[provider]}
@@ -743,6 +746,10 @@ export function SeoDashboard() {
           </button>
         </form>
       </aside>
+
+      {navOpen ? (
+        <button className="mobile-nav-scrim" type="button" aria-label="Close navigation" onClick={() => setNavPinned(false)} />
+      ) : null}
 
       <ToastNotice toast={toastNotice} />
 
@@ -768,7 +775,7 @@ export function SeoDashboard() {
             {view !== "clients" ? (
               <div className="dashboard-header">
                 <div>
-                  <p className="eyebrow">{activeClient?.name || clientId}</p>
+                  <ClientBadge name={activeClient?.name || clientId} />
                   <h2 id="dashboard-title">{viewTitle(view, activeProvider)}</h2>
                   <p className="active-client">{viewDescription(view, activeClient?.name || clientId, activeProvider)}</p>
                 </div>
@@ -966,6 +973,14 @@ function ClientLogo({ client }: { client: Client }) {
   return (
     <span className="client-logo" aria-hidden="true">
       {clientInitials(client.name)}
+    </span>
+  );
+}
+
+function ClientBadge({ name }: { name: string }) {
+  return (
+    <span className="client-badge" aria-label={`Active client: ${name}`} title={name}>
+      {name}
     </span>
   );
 }
@@ -1903,6 +1918,15 @@ function CompetitiveView({
   const hasReports = competitiveAnalyses.length > 0;
   const rerunClientName = latestAnalysis?.client_name || activeClient?.name || "";
   const rerunWebsiteUrl = latestAnalysis?.website_url || "";
+  const [reportPage, setReportPage] = useState(1);
+  const totalReportPages = Math.max(1, Math.ceil(competitiveAnalyses.length / COMPETITIVE_REPORTS_PER_PAGE));
+  const currentReportPage = Math.min(reportPage, totalReportPages);
+  const reportStartIndex = (currentReportPage - 1) * COMPETITIVE_REPORTS_PER_PAGE;
+  const visibleReports = competitiveAnalyses.slice(reportStartIndex, reportStartIndex + COMPETITIVE_REPORTS_PER_PAGE);
+
+  useEffect(() => {
+    setReportPage(1);
+  }, [competitiveAnalyses.length]);
 
   return (
     <div className="competitive-workspace">
@@ -1977,9 +2001,17 @@ function CompetitiveView({
             {analyzing ? "Generating..." : "Generate report"}
           </button>
         </div>
+        {competitiveAnalyses.length > COMPETITIVE_REPORTS_PER_PAGE ? (
+          <ReportPagination
+            currentPage={currentReportPage}
+            onPageChange={setReportPage}
+            totalPages={totalReportPages}
+            totalReports={competitiveAnalyses.length}
+          />
+        ) : null}
         <div className="analysis-results" aria-live="polite">
           {competitiveAnalyses.length ? (
-            competitiveAnalyses.map((analysis) => <CompetitiveAnalysisCard analysis={analysis} key={analysis.id} />)
+            visibleReports.map((analysis) => <CompetitiveAnalysisCard analysis={analysis} key={analysis.id} />)
           ) : (
             <div className="competitive-empty-state">
               <span className="eyebrow">No report yet</span>
@@ -1991,9 +2023,108 @@ function CompetitiveView({
             </div>
           )}
         </div>
+        {competitiveAnalyses.length > COMPETITIVE_REPORTS_PER_PAGE ? (
+          <ReportPagination
+            currentPage={currentReportPage}
+            onPageChange={setReportPage}
+            totalPages={totalReportPages}
+            totalReports={competitiveAnalyses.length}
+          />
+        ) : null}
       </section>
     </div>
   );
+}
+
+function ReportPagination({
+  currentPage,
+  onPageChange,
+  totalPages,
+  totalReports,
+}: {
+  currentPage: number;
+  onPageChange: (page: number) => void;
+  totalPages: number;
+  totalReports: number;
+}) {
+  const pages = buildReportPageItems(currentPage, totalPages);
+
+  return (
+    <nav className="report-pagination" aria-label="Report pages">
+      <p>
+        Showing report {currentPage} of {totalReports}
+      </p>
+      <div>
+        <button
+          aria-label="Show previous report"
+          disabled={currentPage === 1}
+          onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+          type="button"
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+          <span>Previous</span>
+        </button>
+        <span className="report-page-list" aria-label="Report page numbers">
+          {pages.map((page) =>
+            typeof page === "number" ? (
+              <button
+                aria-current={page === currentPage ? "page" : undefined}
+                aria-label={`Show report page ${page}`}
+                data-active={page === currentPage}
+                key={page}
+                onClick={() => onPageChange(page)}
+                type="button"
+              >
+                {page}
+              </button>
+            ) : (
+              <span className="report-page-ellipsis" aria-hidden="true" key={page}>
+                ...
+              </span>
+            )
+          )}
+        </span>
+        <button
+          aria-label="Show next report"
+          disabled={currentPage === totalPages}
+          onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+          type="button"
+        >
+          <span>Next</span>
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="m9 6 6 6-6 6" />
+          </svg>
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+function buildReportPageItems(currentPage: number, totalPages: number): Array<number | string> {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const middleStart = Math.max(2, currentPage - 1);
+  const middleEnd = Math.min(totalPages - 1, currentPage + 1);
+  const pages: Array<number | string> = [1];
+
+  if (middleStart > 2) {
+    pages.push("ellipsis-start");
+  }
+
+  for (let page = middleStart; page <= middleEnd; page += 1) {
+    pages.push(page);
+  }
+
+  if (middleEnd < totalPages - 1) {
+    pages.push("ellipsis-end");
+  }
+
+  pages.push(totalPages);
+  return pages;
 }
 
 function InsightsView({
@@ -2130,78 +2261,113 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
           ))}
         </div>
       ) : null}
-      <dl>
-        <div>
-          <dt>Positioning</dt>
-          <dd>{analysis.positioning}</dd>
-        </div>
-      </dl>
+      <div className="report-accordion">
+        <CollapsibleReportSection
+          count="1 brief"
+          defaultOpen
+          id={`${analysis.id}-positioning`}
+          title="Positioning"
+        >
+          <p>{analysis.positioning}</p>
+        </CollapsibleReportSection>
 
-      {missingPatterns.length ? (
-        <div className="pattern-list">
-          <h5>Feature gap matrix</h5>
-          {missingPatterns.slice(0, 5).map((pattern) => (
-            <div className="pattern-row" key={`${analysis.id}-${pattern.feature}`}>
-              <strong>{pattern.label}</strong>
-              <span>{pattern.competitors.join(", ")}</span>
-              <SourceLinks urls={pattern.evidence_urls} />
+        {missingPatterns.length ? (
+          <CollapsibleReportSection
+            count={`${missingPatterns.length} ${missingPatterns.length === 1 ? "gap" : "gaps"}`}
+            id={`${analysis.id}-feature-gaps`}
+            title="Feature gap matrix"
+          >
+            <div className="pattern-list">
+              {missingPatterns.slice(0, 5).map((pattern) => (
+                <div className="pattern-row" key={`${analysis.id}-${pattern.feature}`}>
+                  <strong>{pattern.label}</strong>
+                  <span>{pattern.competitors.join(", ")}</span>
+                  <SourceLinks urls={pattern.evidence_urls} />
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      ) : null}
+          </CollapsibleReportSection>
+        ) : null}
 
-      {reportDraft.length ? (
-        <div className="report-draft">
-          <h5>Editable report draft</h5>
-          {reportDraft.map((section) => (
-            <div className="report-section" key={`${analysis.id}-${section.heading}`}>
-              <strong>{section.heading}</strong>
-              <p>{section.body}</p>
-              <SourceLinks urls={section.source_urls} />
+        {reportDraft.length ? (
+          <CollapsibleReportSection
+            count={`${reportDraft.length} ${reportDraft.length === 1 ? "section" : "sections"}`}
+            id={`${analysis.id}-report-draft`}
+            title="Editable report draft"
+          >
+            <div className="report-draft">
+              {reportDraft.map((section) => (
+                <div className="report-section" key={`${analysis.id}-${section.heading}`}>
+                  <strong>{section.heading}</strong>
+                  <p>{section.body}</p>
+                  <SourceLinks urls={section.source_urls} />
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      ) : null}
+          </CollapsibleReportSection>
+        ) : null}
 
-      <div className="analysis-lists">
-        <TextList title="Competitor themes" items={analysis.competitor_themes} />
-        <TextList title="Content gaps" items={analysis.content_gaps} />
-        <TextList title="Keyword opportunities" items={analysis.keyword_opportunities} />
-        <TextList title="Assumptions" items={analysis.assumptions} />
-      </div>
-
-      {crawlEvidence.length ? (
-        <div className="crawl-evidence">
-          <h5>Evidence board</h5>
-          {crawlEvidence.map((site) => (
-            <div className="crawl-site" key={`${analysis.id}-${site.site_role}-${site.name}`}>
-              <div className="card-top">
-                <strong>{site.name}</strong>
-                <span>{site.status}</span>
-              </div>
-              <p>
-                {site.feature_count} features across {site.pages.filter((page) => page.status === "success").length} crawled pages
-              </p>
-              {site.errors.length ? <p>{site.errors.slice(0, 2).join(" ")}</p> : null}
-              <SourceLinks urls={site.pages.map((page) => page.url)} />
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="recommendations">
-        <h5>Recommended next actions</h5>
-        {analysis.recommendations.map((recommendation) => (
-          <div className="recommendation" key={`${analysis.id}-${recommendation.title}`}>
-            <div className="card-top">
-              <strong>{recommendation.title}</strong>
-              <span className="priority" data-priority={recommendation.priority}>
-                {recommendation.priority}
-              </span>
-            </div>
-            <p>{recommendation.rationale}</p>
+        <CollapsibleReportSection
+          count={`${
+            analysis.competitor_themes.length +
+            analysis.content_gaps.length +
+            analysis.keyword_opportunities.length +
+            analysis.assumptions.length
+          } items`}
+          id={`${analysis.id}-research-lists`}
+          title="Research themes"
+        >
+          <div className="analysis-lists">
+            <TextList title="Competitor themes" items={analysis.competitor_themes} />
+            <TextList title="Content gaps" items={analysis.content_gaps} />
+            <TextList title="Keyword opportunities" items={analysis.keyword_opportunities} />
+            <TextList title="Assumptions" items={analysis.assumptions} />
           </div>
-        ))}
+        </CollapsibleReportSection>
+
+        {crawlEvidence.length ? (
+          <CollapsibleReportSection
+            count={`${crawlEvidence.length} ${crawlEvidence.length === 1 ? "site" : "sites"}`}
+            id={`${analysis.id}-evidence-board`}
+            title="Evidence board"
+          >
+            <div className="crawl-evidence">
+              {crawlEvidence.map((site) => (
+                <div className="crawl-site" key={`${analysis.id}-${site.site_role}-${site.name}`}>
+                  <div className="card-top">
+                    <strong>{site.name}</strong>
+                    <span>{site.status}</span>
+                  </div>
+                  <p>
+                    {site.feature_count} features across {site.pages.filter((page) => page.status === "success").length} crawled pages
+                  </p>
+                  {site.errors.length ? <p>{site.errors.slice(0, 2).join(" ")}</p> : null}
+                  <SourceLinks urls={site.pages.map((page) => page.url)} />
+                </div>
+              ))}
+            </div>
+          </CollapsibleReportSection>
+        ) : null}
+
+        <CollapsibleReportSection
+          count={`${analysis.recommendations.length} ${analysis.recommendations.length === 1 ? "action" : "actions"}`}
+          id={`${analysis.id}-recommendations`}
+          title="Recommended next actions"
+        >
+          <div className="recommendations">
+            {analysis.recommendations.map((recommendation) => (
+              <div className="recommendation" key={`${analysis.id}-${recommendation.title}`}>
+                <div className="card-top">
+                  <strong>{recommendation.title}</strong>
+                  <span className="priority" data-priority={recommendation.priority}>
+                    {recommendation.priority}
+                  </span>
+                </div>
+                <p>{recommendation.rationale}</p>
+              </div>
+            ))}
+          </div>
+        </CollapsibleReportSection>
       </div>
 
       <footer>
@@ -2218,6 +2384,45 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
         />
       ) : null}
     </article>
+  );
+}
+
+function CollapsibleReportSection({
+  children,
+  count,
+  defaultOpen = false,
+  id,
+  title,
+}: {
+  children: ReactNode;
+  count: string;
+  defaultOpen?: boolean;
+  id: string;
+  title: string;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <section className="collapsible-report-section" data-open={open}>
+      <button
+        aria-controls={id}
+        aria-expanded={open}
+        className="collapsible-report-trigger"
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        <span>
+          <strong>{title}</strong>
+          <small>{count}</small>
+        </span>
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="m8 10 4 4 4-4" />
+        </svg>
+      </button>
+      <div className="collapsible-report-content" hidden={!open} id={id}>
+        {children}
+      </div>
+    </section>
   );
 }
 

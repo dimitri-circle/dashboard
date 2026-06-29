@@ -6,6 +6,7 @@ const PUBLIC_PATHS = [
   "/api/auth/logout",
   "/api/seo/health",
   "/favicon.ico",
+  "/circleclick-icon.svg",
   "/dots-pattern.webp",
   "/reactive-dot-ribbon.js",
 ];
