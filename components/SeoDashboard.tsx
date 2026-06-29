@@ -1080,6 +1080,24 @@ function ClientsView({
   const hasClients = clients.length > 0;
   const [mode, setMode] = useState<"list" | "create">("list");
   const showForm = !hasClients || mode === "create";
+  const activeClient = clients.find((client) => client.id === clientId);
+  const scopeRows = [
+    {
+      label: "Active workspace",
+      value: activeClient?.name || (loading ? "Loading" : "No client selected"),
+      helper: clientId,
+    },
+    {
+      label: "Reports",
+      value: "Scoped",
+      helper: "Competitive briefs, Br(AI)N audits, and watch results follow this client.",
+    },
+    {
+      label: "Connectors",
+      value: "Isolated",
+      helper: "Saved tool credentials and tests stay attached to the selected workspace.",
+    },
+  ];
 
   return (
     <PageWorkspace className="client-workspace">
@@ -1093,57 +1111,72 @@ function ClientsView({
         ]}
       />
 
-      <section className="client-page" aria-labelledby="client-selection-title">
-      <div className="dashboard-client-selection" data-tour="client-switcher">
-        <div className="dashboard-client-topline">
-          <div>
-            <p className="eyebrow">Client selection</p>
-            <h2 id="client-selection-title">{showForm ? "Create a client." : "Choose a client."}</h2>
+      <section className="client-page client-module-grid" aria-labelledby="client-selection-title">
+        <div className="dashboard-client-selection" data-tour="client-switcher">
+          <div className="dashboard-client-topline">
+            <div>
+              <p className="eyebrow">Client selection</p>
+              <h2 id="client-selection-title">{showForm ? "Create a client." : "Choose a client."}</h2>
+            </div>
+            {hasClients ? (
+              <button className="button" type="button" onClick={() => setMode(showForm ? "list" : "create")}>
+                {showForm ? "Show Clients" : "New Client"}
+              </button>
+            ) : null}
           </div>
-          {hasClients ? (
-            <button className="button" type="button" onClick={() => setMode(showForm ? "list" : "create")}>
-              {showForm ? "Show Clients" : "New Client"}
-            </button>
+
+          {loading ? <p className="client-selection-empty">Loading clients...</p> : null}
+
+          {!loading && hasClients && !showForm ? (
+            <div className="dashboard-client-list" aria-label="Available clients">
+              {clients.map((client) => {
+                const isActive = client.id === clientId;
+
+                return (
+                  <button
+                    className="dashboard-client-option"
+                    data-active={isActive}
+                    key={client.id}
+                    type="button"
+                    onClick={() => onSwitchClient(client.id)}
+                  >
+                    <ClientLogo client={client} />
+                    <span>{client.name}</span>
+                  </button>
+                );
+              })}
+            </div>
           ) : null}
+
+          {!loading && showForm ? (
+            <form className="first-client-form" onSubmit={onAddClient}>
+              <label>
+                Client name
+                <input name="name" placeholder="Acme Health" required />
+              </label>
+              <button className="button button-primary" type="submit">
+                {hasClients ? "Create Client" : "Add First Client"}
+              </button>
+            </form>
+          ) : null}
+
+          {!loading && showForm ? <p className="client-selection-empty">Client id is assigned automatically.</p> : null}
         </div>
 
-        {loading ? <p className="client-selection-empty">Loading clients...</p> : null}
-
-        {!loading && hasClients && !showForm ? (
-          <div className="dashboard-client-list" aria-label="Available clients">
-            {clients.map((client) => {
-              const isActive = client.id === clientId;
-
-              return (
-                <button
-                  className="dashboard-client-option"
-                  data-active={isActive}
-                  key={client.id}
-                  type="button"
-                  onClick={() => onSwitchClient(client.id)}
-                >
-                  <ClientLogo client={client} />
-                  <span>{client.name}</span>
-                </button>
-              );
-            })}
+        <aside className="panel client-scope-panel" aria-label="Client workspace scope">
+          <span className="eyebrow">Workspace scope</span>
+          <h3>Everything follows this client.</h3>
+          <p>Switching clients changes the saved tools, reports, insights, and audit history shown across the dashboard.</p>
+          <div className="client-scope-list">
+            {scopeRows.map((row) => (
+              <div key={row.label}>
+                <span>{row.label}</span>
+                <strong>{row.value}</strong>
+                <small>{row.helper}</small>
+              </div>
+            ))}
           </div>
-        ) : null}
-
-        {!loading && showForm ? (
-          <form className="first-client-form" onSubmit={onAddClient}>
-            <label>
-              Client name
-              <input name="name" placeholder="Acme Health" required />
-            </label>
-            <button className="button button-primary" type="submit">
-              {hasClients ? "Create Client" : "Add First Client"}
-            </button>
-          </form>
-        ) : null}
-
-        {!loading && showForm ? <p className="client-selection-empty">Client id is assigned automatically.</p> : null}
-      </div>
+        </aside>
       </section>
     </PageWorkspace>
   );
@@ -1864,32 +1897,33 @@ function IntegrationsView({
       />
 
       <section className="panel integrations-panel" aria-labelledby="integrations-title">
-      <div className="section-heading">
-        <h3 id="integrations-title">Tool Setup Pages</h3>
-        <p>Move across the setup pages without losing the active client or connection status.</p>
-      </div>
+        <div className="section-heading">
+          <h3 id="integrations-title">Tool Setup Pages</h3>
+          <p>Move across setup pages without losing the active client or connection status.</p>
+        </div>
 
-      <div className="status-row tool-page-picker" data-tour="status-row" aria-label="Connection status">
-        {providerOrder.map((provider) => {
-          const integration = latestByProvider[provider];
-          return (
-            <button
-              className="status-card status-card-button"
-              data-active={activeProvider === provider}
-              data-status={integration?.status || "disconnected"}
-              key={provider}
-              type="button"
-              onClick={() => onSelectProvider(provider)}
-            >
-              <span>{providerLabels[provider]}</span>
-              <strong>{statusLabel(integration?.status)}</strong>
-            </button>
-          );
-        })}
-      </div>
+        <div className="status-row tool-page-picker" data-tour="status-row" aria-label="Connection status">
+          {providerOrder.map((provider) => {
+            const integration = latestByProvider[provider];
+            return (
+              <button
+                className="status-card status-card-button"
+                data-active={activeProvider === provider}
+                data-status={integration?.status || "disconnected"}
+                key={provider}
+                type="button"
+                onClick={() => onSelectProvider(provider)}
+              >
+                <span>{providerLabels[provider]}</span>
+                <strong>{statusLabel(integration?.status)}</strong>
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
-      <div className="tool-page-layout" aria-busy={loading}>
-        <aside className="tool-page-summary" aria-label="Selected tool status">
+      <div className="tool-page-layout integrations-detail-layout" aria-busy={loading}>
+        <aside className="panel tool-page-summary" aria-label="Selected tool status">
           <span>Current setup page</span>
           <strong>{providerDetails[activeProvider].title}</strong>
           <p>{providerDetails[activeProvider].description}</p>
@@ -1967,7 +2001,6 @@ function IntegrationsView({
           ) : null}
         </div>
       </div>
-      </section>
     </PageWorkspace>
   );
 }
@@ -2203,52 +2236,87 @@ function InsightsView({
         ]}
       />
 
-      <section className="panel insights-panel" aria-labelledby="insights-title">
-      <div className="section-heading">
-        <div>
-          <h3 id="insights-title">Insight Feed</h3>
-          {!insights.length ? (
-            <p>
-              {latestByProvider.openai
-                ? "Connect GA4 and Hotjar, then generate your first SEO intelligence report."
-                : "Connect GA4, Hotjar, and OpenAI to generate your first SEO intelligence report."}
-            </p>
-          ) : null}
-        </div>
-        <button className="button button-primary" type="button" disabled={generating} onClick={onGenerateInsights}>
-          {generating ? "Generating..." : "Generate Insights"}
-        </button>
-      </div>
-
-      <div className="insights">
-        {insights.map((insight) => (
-          <article className="insight-card" key={insight.id}>
-            <div className="card-top">
-              <h4>{insight.title}</h4>
-              <span className="priority" data-priority={insight.priority}>
-                {insight.priority}
-              </span>
+      <div className="insights-layout">
+        <section className="panel insight-command-panel" aria-labelledby="insight-command-title">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Signal command</span>
+              <h3 id="insight-command-title">Generate the next recommendation set.</h3>
+              <p>
+                {latestByProvider.openai
+                  ? "Use the saved workspace signals to create fresh SEO recommendations."
+                  : "OpenAI is required before the recommendation runner can produce useful cards."}
+              </p>
             </div>
-            <p>{insight.description}</p>
-            <dl>
-              <div>
-                <dt>Impact</dt>
-                <dd>{insight.impact}</dd>
-              </div>
-              <div>
-                <dt>Recommendation</dt>
-                <dd>{insight.recommendation}</dd>
-              </div>
-            </dl>
-            <footer>
-              <span>{insight.source_provider}</span>
-              <span>{insight.confidence_score}% confidence</span>
-              <time dateTime={insight.created_at}>{new Date(insight.created_at).toLocaleString()}</time>
-            </footer>
-          </article>
-        ))}
+          </div>
+          <div className="insight-command-grid">
+            <div>
+              <span>OpenAI</span>
+              <strong>{latestByProvider.openai ? statusLabel(latestByProvider.openai.status) : "Not connected"}</strong>
+            </div>
+            <div>
+              <span>Saved cards</span>
+              <strong>{insights.length}</strong>
+            </div>
+            <div>
+              <span>Runner</span>
+              <strong>{generating ? "Working" : "Ready"}</strong>
+            </div>
+          </div>
+          <button className="button button-primary" type="button" disabled={generating} onClick={onGenerateInsights}>
+            {generating ? "Generating..." : "Generate Insights"}
+          </button>
+        </section>
+
+        <section className="panel insights-panel" aria-labelledby="insights-title">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Recommendation feed</span>
+              <h3 id="insights-title">Insight Feed</h3>
+              {!insights.length ? (
+                <p>
+                  {latestByProvider.openai
+                    ? "Connect GA4 and Hotjar, then generate your first SEO intelligence report."
+                    : "Connect GA4, Hotjar, and OpenAI to generate your first SEO intelligence report."}
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="insights">
+            {insights.length ? (
+              insights.map((insight) => (
+                <article className="insight-card" key={insight.id}>
+                  <div className="card-top">
+                    <h4>{insight.title}</h4>
+                    <span className="priority" data-priority={insight.priority}>
+                      {insight.priority}
+                    </span>
+                  </div>
+                  <p>{insight.description}</p>
+                  <dl>
+                    <div>
+                      <dt>Impact</dt>
+                      <dd>{insight.impact}</dd>
+                    </div>
+                    <div>
+                      <dt>Recommendation</dt>
+                      <dd>{insight.recommendation}</dd>
+                    </div>
+                  </dl>
+                  <footer>
+                    <span>{insight.source_provider}</span>
+                    <span>{insight.confidence_score}% confidence</span>
+                    <time dateTime={insight.created_at}>{new Date(insight.created_at).toLocaleString()}</time>
+                  </footer>
+                </article>
+              ))
+            ) : (
+              <div className="empty-state">Generated insight cards will appear here.</div>
+            )}
+          </div>
+        </section>
       </div>
-      </section>
     </PageWorkspace>
   );
 }
