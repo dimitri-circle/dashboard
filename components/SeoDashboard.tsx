@@ -8,6 +8,13 @@ type Status = "disconnected" | "connected" | "error";
 type View = "clients" | "overview" | "brain" | "watch" | "integrations" | "analysis" | "insights";
 type NavIconName = "clients" | "overview" | "brain" | "watch" | "tools" | "analysis" | "insights" | "menu" | "close" | "signout";
 type DeepAuditAccess = "public" | "vercel" | "basic" | "login" | "custom";
+type ToastNoticeState = {
+  id: number;
+  type: "success" | "info" | "error";
+  title: string;
+  message: string;
+  phase: "open" | "closing";
+};
 
 type Client = {
   id: string;
@@ -89,6 +96,15 @@ type MetricSnapshot = {
 };
 
 type BlogAuditClaimStatus = "PASS" | "FAIL" | "UNSUPPORTED" | "STALE_RISK" | "BLOCKED";
+type BlogAuditExternalEvidenceStatus = "NOT_NEEDED" | "UNAVAILABLE" | "CHECKED" | "FAILED";
+
+type BlogAuditExternalEvidenceSummary = {
+  status: BlogAuditExternalEvidenceStatus;
+  message: string;
+  checkedClaims: number;
+  supportedClaims: number;
+  evidenceUrls: string[];
+};
 
 type BlogAuditReport = {
   recommendation: "PASS" | "PASS_WITH_EDITS" | "DO_NOT_PUBLISH";
@@ -109,6 +125,7 @@ type BlogAuditReport = {
   }>;
   missingEvidence: string[];
   publishRisks: string[];
+  externalEvidence?: BlogAuditExternalEvidenceSummary;
 };
 
 type WebsiteSurfaceIssue = {
@@ -319,6 +336,7 @@ export function SeoDashboard() {
   const [metricSnapshots, setMetricSnapshots] = useState<MetricSnapshot[]>([]);
   const [competitiveAnalyses, setCompetitiveAnalyses] = useState<CompetitiveAnalysis[]>([]);
   const [notice, setNotice] = useState<{ type: "info" | "success" | "error"; message: string } | null>(null);
+  const [toastNotice, setToastNotice] = useState<ToastNoticeState | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncingGa4, setSyncingGa4] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -342,6 +360,38 @@ export function SeoDashboard() {
   const readiness = Math.round(((latestByProvider.openai ? 1 : 0) + Math.min(savedToolCount, 4) / 4) * 50);
   const hasClients = clients.length > 0;
   const navOpen = navPinned || navActive;
+
+  function showToastNotice(toast: Omit<ToastNoticeState, "id" | "phase">) {
+    setToastNotice({
+      ...toast,
+      id: Date.now(),
+      phase: "open",
+    });
+  }
+
+  useEffect(() => {
+    if (!toastNotice || toastNotice.phase === "closing") {
+      return;
+    }
+
+    const closeTimer = window.setTimeout(() => {
+      setToastNotice((current) => (current?.id === toastNotice.id ? { ...current, phase: "closing" } : current));
+    }, 3400);
+
+    return () => window.clearTimeout(closeTimer);
+  }, [toastNotice]);
+
+  useEffect(() => {
+    if (!toastNotice || toastNotice.phase !== "closing") {
+      return;
+    }
+
+    const removeTimer = window.setTimeout(() => {
+      setToastNotice((current) => (current?.id === toastNotice.id ? null : current));
+    }, 340);
+
+    return () => window.clearTimeout(removeTimer);
+  }, [toastNotice]);
 
   async function loadDashboard(activeClientId = clientId) {
     try {
@@ -532,7 +582,12 @@ export function SeoDashboard() {
         body: JSON.stringify(payload),
       });
       setCompetitiveAnalyses((current) => [body.analysis, ...current]);
-      setNotice({ type: "success", message: "Competitive analysis generated." });
+      setNotice(null);
+      showToastNotice({
+        type: "success",
+        title: "Report generated",
+        message: `${body.analysis.client_name || payload.clientName || "Competitive report"} is ready in Reports and evidence.`,
+      });
     } catch (error) {
       setNotice({
         type: "error",
@@ -688,6 +743,8 @@ export function SeoDashboard() {
           </button>
         </form>
       </aside>
+
+      <ToastNotice toast={toastNotice} />
 
       <div className="dashboard" aria-live="polite">
         {notice ? (
@@ -910,6 +967,25 @@ function ClientLogo({ client }: { client: Client }) {
     <span className="client-logo" aria-hidden="true">
       {clientInitials(client.name)}
     </span>
+  );
+}
+
+function ToastNotice({ toast }: { toast: ToastNoticeState | null }) {
+  if (!toast) {
+    return null;
+  }
+
+  return (
+    <div className="toast-stack" aria-atomic="true" aria-live="polite">
+      <div className="toast-notice" data-phase={toast.phase} data-type={toast.type} role="status">
+        <span className="toast-status-dot" aria-hidden="true" />
+        <div className="toast-copy">
+          <strong>{toast.title}</strong>
+          <p>{toast.message}</p>
+        </div>
+        <span className="toast-progress" aria-hidden="true" />
+      </div>
+    </div>
   );
 }
 
@@ -1285,6 +1361,8 @@ function AuditReportView({ report }: { report: BlogAuditReport }) {
         <ScoreBlock label="Claims" value={`${report.claims.length}`} />
       </div>
 
+      <ExternalEvidenceSummary evidence={report.externalEvidence} />
+
       <p className="audit-summary">{report.summary}</p>
 
       <div className="audit-section">
@@ -1318,6 +1396,27 @@ function AuditReportView({ report }: { report: BlogAuditReport }) {
       <AuditList title="Brand findings" items={report.brandFindings.map((finding) => `${finding.severity}: ${finding.issue} ${finding.suggestedRewrite}`)} />
       <AuditList title="Missing evidence" items={report.missingEvidence} />
       <AuditList title="Publish risks" items={report.publishRisks} />
+    </div>
+  );
+}
+
+function ExternalEvidenceSummary({ evidence }: { evidence?: BlogAuditExternalEvidenceSummary }) {
+  if (!evidence) {
+    return null;
+  }
+
+  return (
+    <div className="audit-evidence-summary" data-status={evidence.status}>
+      <div className="audit-evidence-copy">
+        <span>External evidence</span>
+        <strong>{formatExternalEvidenceStatus(evidence.status)}</strong>
+        <p>{evidence.message}</p>
+      </div>
+      <div className="audit-evidence-meta">
+        <span>{evidence.checkedClaims} checked</span>
+        <span>{evidence.supportedClaims} supported</span>
+        {evidence.evidenceUrls.length ? <SourceLinks urls={evidence.evidenceUrls} /> : null}
+      </div>
     </div>
   );
 }
@@ -1657,6 +1756,10 @@ function formatRecommendation(value: BlogAuditReport["recommendation"]) {
   return value.replace(/_/g, " ");
 }
 
+function formatExternalEvidenceStatus(value: BlogAuditExternalEvidenceStatus) {
+  return value.replace(/_/g, " ");
+}
+
 function IntegrationsView({
   activeProvider,
   latestByProvider,
@@ -1797,11 +1900,20 @@ function CompetitiveView({
   const latestAnalysis = competitiveAnalyses[0];
   const latestEvidenceCount = latestAnalysis?.crawl_evidence?.reduce((total, site) => total + site.pages.length, 0) || 0;
   const latestSourceCount = latestAnalysis?.crawl_evidence?.filter((site) => site.status === "success" || site.status === "partial").length || 0;
+  const hasReports = competitiveAnalyses.length > 0;
+  const rerunClientName = latestAnalysis?.client_name || activeClient?.name || "";
+  const rerunWebsiteUrl = latestAnalysis?.website_url || "";
 
   return (
     <div className="competitive-workspace">
+      <reactive-dot-ribbon
+        aria-hidden="true"
+        className="competitive-background-ribbon"
+        source="/dots-pattern.webp"
+      />
+
       <section className="panel competitive-hero" aria-labelledby="competitive-title">
-        <div className="section-heading">
+        <div className="section-heading competitive-hero-copy">
           <div>
             <span className="eyebrow">Competitive workspace</span>
             <h3 id="competitive-title">Evidence-backed competitor reports</h3>
@@ -1828,29 +1940,42 @@ function CompetitiveView({
         </div>
       </section>
 
-      <section className="panel competitive-brief-panel" data-tour="competitive-analysis" aria-labelledby="competitive-brief-title">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">Research brief</span>
-            <h3 id="competitive-brief-title">Start with the company.</h3>
-            <p>The system will infer the website, market, competitors, and search topics before collecting evidence.</p>
-          </div>
-        </div>
-        <form className="competitive-form" onSubmit={onGenerateCompetitiveAnalysis}>
-          <Field name="clientName" label="Company name" placeholder={activeClient?.name || "Acme Health"} required />
-          <button className="button button-primary" data-tour="generate-competitive-analysis" type="submit" disabled={analyzing}>
-            {analyzing ? "Filling brief and collecting evidence..." : "Generate report"}
-          </button>
+      {hasReports ? (
+        <form hidden id="competitive-report-form" onSubmit={onGenerateCompetitiveAnalysis}>
+          <input name="clientName" readOnly value={rerunClientName} />
+          <input name="websiteUrl" readOnly value={rerunWebsiteUrl} />
         </form>
-      </section>
+      ) : (
+        <section className="panel competitive-brief-panel" data-tour="competitive-analysis" aria-labelledby="competitive-brief-title">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Research brief</span>
+              <h3 id="competitive-brief-title">Start with the company.</h3>
+              <p>The system will infer the website, market, competitors, and search topics before collecting evidence.</p>
+            </div>
+          </div>
+          <form className="competitive-form" id="competitive-report-form" onSubmit={onGenerateCompetitiveAnalysis}>
+            <Field name="clientName" label="Company name" placeholder={activeClient?.name || "Acme Health"} required />
+          </form>
+        </section>
+      )}
 
-      <section className="panel competitive-results-panel">
+      <section className={`panel competitive-results-panel${hasReports ? " competitive-results-panel-wide" : ""}`}>
         <div className="section-heading">
           <div>
             <span className="eyebrow">Output</span>
             <h3>Reports and evidence</h3>
             <p>Each report keeps the answer, the source trail, and the editable draft in one place.</p>
           </div>
+          <button
+            className="button button-primary"
+            data-tour="generate-competitive-analysis"
+            disabled={analyzing}
+            form="competitive-report-form"
+            type="submit"
+          >
+            {analyzing ? "Generating..." : "Generate report"}
+          </button>
         </div>
         <div className="analysis-results" aria-live="polite">
           {competitiveAnalyses.length ? (
@@ -1939,6 +2064,14 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
   const reportDraft = analysis.report_draft || [];
   const successfulSites = crawlEvidence.filter((site) => site.status === "success" || site.status === "partial");
   const reviewedPageCount = crawlEvidence.reduce((total, site) => total + site.pages.length, 0);
+  const [confidenceModalOpen, setConfidenceModalOpen] = useState(false);
+  const confidenceReasons = buildConfidenceReasons({
+    analysis,
+    missingPatternCount: missingPatterns.length,
+    reportDraftCount: reportDraft.length,
+    reviewedPageCount,
+    successfulSiteCount: successfulSites.length,
+  });
 
   return (
     <article className="analysis-card">
@@ -1950,7 +2083,21 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
             {analysis.market ? ` - ${analysis.market}` : ""}
           </p>
         </div>
-        <span>{analysis.confidence_score}% confidence</span>
+        <div className="confidence-chip">
+          <span>{analysis.confidence_score}% confidence</span>
+          <button
+            aria-label="Explain confidence score"
+            className="confidence-why-button"
+            onClick={() => setConfidenceModalOpen(true)}
+            type="button"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="8.5" />
+              <path d="M12 10.8v5" />
+              <path d="M12 7.8h.01" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <p>{analysis.summary}</p>
@@ -2062,8 +2209,125 @@ function CompetitiveAnalysisCard({ analysis }: { analysis: CompetitiveAnalysis }
         <span>{analysis.target_keywords.length} keywords supplied</span>
         <time dateTime={analysis.created_at}>{new Date(analysis.created_at).toLocaleString()}</time>
       </footer>
+
+      {confidenceModalOpen ? (
+        <ConfidenceReasonModal
+          analysis={analysis}
+          reasons={confidenceReasons}
+          onClose={() => setConfidenceModalOpen(false)}
+        />
+      ) : null}
     </article>
   );
+}
+
+function ConfidenceReasonModal({
+  analysis,
+  onClose,
+  reasons,
+}: {
+  analysis: CompetitiveAnalysis;
+  onClose: () => void;
+  reasons: string[];
+}) {
+  return (
+    <div className="modal-backdrop" onClick={onClose} role="presentation">
+      <section
+        aria-labelledby={`confidence-title-${analysis.id}`}
+        aria-modal="true"
+        className="confidence-modal"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="card-top">
+          <div>
+            <span className="eyebrow">Confidence reason</span>
+            <h3 id={`confidence-title-${analysis.id}`}>{analysis.confidence_score}% confidence</h3>
+          </div>
+          <button aria-label="Close confidence explanation" className="modal-close-button" onClick={onClose} type="button">
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M6 6l12 12" />
+              <path d="M18 6 6 18" />
+            </svg>
+          </button>
+        </div>
+        <p>
+          This score summarizes how much usable evidence the system could inspect. It is not approval to publish without
+          human review.
+        </p>
+        <ul>
+          {reasons.map((reason) => (
+            <li key={reason}>{reason}</li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
+function buildConfidenceReasons({
+  analysis,
+  missingPatternCount,
+  reportDraftCount,
+  reviewedPageCount,
+  successfulSiteCount,
+}: {
+  analysis: CompetitiveAnalysis;
+  missingPatternCount: number;
+  reportDraftCount: number;
+  reviewedPageCount: number;
+  successfulSiteCount: number;
+}) {
+  const reasons = [
+    confidenceLevelReason(analysis.confidence_score),
+    successfulSiteCount
+      ? `The crawler reviewed ${successfulSiteCount} crawlable source ${successfulSiteCount === 1 ? "site" : "sites"} and ${reviewedPageCount} public ${reviewedPageCount === 1 ? "page" : "pages"}.`
+      : "The crawler did not confirm any crawlable source sites, so the score should be treated cautiously.",
+    analysis.competitors.length
+      ? `The comparison used ${analysis.competitors.length} competitor ${analysis.competitors.length === 1 ? "entry" : "entries"} for market context.`
+      : "No competitor list was available, so the system had less comparison context.",
+  ];
+
+  if (missingPatternCount) {
+    reasons.push(
+      `${missingPatternCount} feature ${missingPatternCount === 1 ? "gap was" : "gaps were"} identified from competitor-visible patterns.`
+    );
+  }
+
+  if (reportDraftCount) {
+    reasons.push(
+      `${reportDraftCount} draft ${reportDraftCount === 1 ? "section was" : "sections were"} generated with source links where available.`
+    );
+  }
+
+  if (analysis.assumptions.length) {
+    reasons.push(
+      `${analysis.assumptions.length} explicit ${analysis.assumptions.length === 1 ? "assumption still needs" : "assumptions still need"} human validation.`
+    );
+  }
+
+  if (!analysis.website_url) {
+    reasons.push("No verified client website URL was available, which lowers confidence.");
+  }
+
+  reasons.push("Private data, logged-in pages, and uncrawlable content may still change the conclusion.");
+  return reasons;
+}
+
+function confidenceLevelReason(score: number) {
+  if (score >= 85) {
+    return "High confidence: the report has broad crawl coverage and relatively few unresolved assumptions.";
+  }
+
+  if (score >= 70) {
+    return "Moderate confidence: the report has useful public evidence, but some claims still need human validation.";
+  }
+
+  if (score >= 50) {
+    return "Limited confidence: the report has partial evidence and should be treated as directional.";
+  }
+
+  return "Low confidence: the report lacks enough verified source coverage for strong conclusions.";
 }
 
 function SourceLinks({ urls }: { urls: string[] }) {
