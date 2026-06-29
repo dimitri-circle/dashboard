@@ -41,6 +41,8 @@ For Vercel, add the same values under Project Settings → Environment Variables
 - `SEO_APP_EMAIL` (dashboard login email, defaults to `dimitri@circleclick.com`)
 - `SEO_APP_PASSWORD` (recommended dashboard login password; falls back to `CRON_SECRET` if omitted)
 - `SEO_APP_SESSION_TOKEN` (recommended random token stored in the login cookie; falls back to `CRON_SECRET` if omitted)
+- `WEBSITE_WATCH_GITHUB_OWNER`, `WEBSITE_WATCH_GITHUB_REPO`, `WEBSITE_WATCH_GITHUB_WORKFLOW`, `WEBSITE_WATCH_GITHUB_REF`, and `WEBSITE_WATCH_GITHUB_TOKEN` (optional future deep-audit workflow dispatch settings)
+- `SLACK_WEBHOOK_URL` (optional future deep-audit or alert delivery target)
 
 Apply the database schema before using the dashboard:
 
@@ -84,6 +86,13 @@ For temporary controlled deployments, set `SEO_ALLOWED_CLIENT_IDS` to a comma-se
 ## Guided Tutorial
 
 The dashboard includes a built-in product tour powered by React Joyride. It highlights the overview, sidebar, client switcher, focused Tool Setup entry point, tool page picker, competitive analysis, and insight feed. The implementation uses configured steps and a dark overlay so users can learn the workflow in place. The tutorial copy now explains that connector setup is separated by tool instead of showing every setup form on one screen.
+
+## Website Watch
+
+The dashboard includes Website Watch for two levels of site review:
+
+- Surface Check runs immediately inside the authenticated dashboard backend. It fetches public same-origin pages, checks response status, titles, meta descriptions, canonical tags, robots metadata, H1s, expected text, image alt text, `robots.txt`, `sitemap.xml`, and a small set of internal links. It rejects local/private targets and limits page/link counts so the route cannot be used as a broad scanner.
+- Deep Audit is a setup worksheet for the heavier browser path. Use it when a site requires Vercel protection bypass, basic auth, a test login, or a custom access header. Store secrets in GitHub or Vercel, not in public client code. The actual browser runner should execute in GitHub Actions or a worker when those credentials are configured.
 
 ## Competitive Analysis
 

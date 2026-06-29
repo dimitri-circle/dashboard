@@ -5,8 +5,9 @@ import { Joyride, STATUS, type EventData, type Step, type TooltipRenderProps } f
 
 type Provider = "ga4" | "gtm" | "hotjar" | "openai" | "mcp";
 type Status = "disconnected" | "connected" | "error";
-type View = "clients" | "overview" | "brain" | "integrations" | "analysis" | "insights";
-type NavIconName = "clients" | "overview" | "brain" | "tools" | "analysis" | "insights" | "menu" | "close" | "signout";
+type View = "clients" | "overview" | "brain" | "watch" | "integrations" | "analysis" | "insights";
+type NavIconName = "clients" | "overview" | "brain" | "watch" | "tools" | "analysis" | "insights" | "menu" | "close" | "signout";
+type DeepAuditAccess = "public" | "vercel" | "basic" | "login" | "custom";
 
 type Client = {
   id: string;
@@ -110,6 +111,42 @@ type BlogAuditReport = {
   publishRisks: string[];
 };
 
+type WebsiteSurfaceIssue = {
+  severity: "critical" | "high" | "medium" | "low";
+  title: string;
+  detail: string;
+  url?: string;
+};
+
+type WebsiteSurfacePageResult = {
+  url: string;
+  finalUrl: string;
+  status: number | null;
+  ok: boolean;
+  title: string | null;
+  metaDescription: string | null;
+  h1Count: number;
+  missingAltCount: number;
+  internalLinksFound: number;
+  issues: WebsiteSurfaceIssue[];
+};
+
+type WebsiteSurfaceResult = {
+  siteUrl: string;
+  checkedAt: string;
+  status: "healthy" | "warning" | "failed";
+  summary: {
+    pagesChecked: number;
+    linksChecked: number;
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  pages: WebsiteSurfacePageResult[];
+  issues: WebsiteSurfaceIssue[];
+};
+
 const providerLabels: Record<Provider, string> = {
   ga4: "GA4",
   gtm: "GTM",
@@ -147,6 +184,7 @@ const navItems: Array<{ id: View; label: string; description: string; icon: NavI
   { id: "clients", label: "Clients", description: "Choose workspace", icon: "clients" },
   { id: "overview", label: "Overview", description: "Health and report coverage", icon: "overview" },
   { id: "brain", label: "Br(AI)N", description: "Vast blog audit", icon: "brain" },
+  { id: "watch", label: "Website Watch", description: "Surface checks and audit setup", icon: "watch" },
   { id: "integrations", label: "Tool Setup", description: "Connect keys and metadata", icon: "tools" },
   { id: "analysis", label: "Competitive Analysis", description: "Generate market briefs", icon: "analysis" },
   { id: "insights", label: "Insights", description: "Review AI recommendations", icon: "insights" },
@@ -191,6 +229,12 @@ const tourSteps: Step[] = [
     target: "[data-tour='nav-integrations']",
     title: "Open focused setup pages",
     content: "Tool Setup now breaks GA4, GTM, Hotjar, OpenAI, and MCP into separate pages so users can connect one tool at a time.",
+    placement: "right",
+  },
+  {
+    target: "[data-tour='nav-watch']",
+    title: "Watch public pages",
+    content: "Run fast surface checks from the dashboard, then prepare deeper browser audits when protected access is needed.",
     placement: "right",
   },
   {
@@ -279,6 +323,8 @@ export function SeoDashboard() {
   const [syncingGa4, setSyncingGa4] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [surfaceChecking, setSurfaceChecking] = useState(false);
+  const [surfaceResult, setSurfaceResult] = useState<WebsiteSurfaceResult | null>(null);
   const [tourRunning, setTourRunning] = useState(false);
   const [activeProvider, setActiveProvider] = useState<Provider>("ga4");
   const [navPinned, setNavPinned] = useState(false);
@@ -497,6 +543,27 @@ export function SeoDashboard() {
     }
   }
 
+  async function runWebsiteSurfaceCheck(payload: { siteUrl: string; pages: string; expectedText: string }) {
+    try {
+      setSurfaceChecking(true);
+      const body = await api<{ result: WebsiteSurfaceResult }>(clientId, "/api/seo/website-watch/surface", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setSurfaceResult(body.result);
+      const issueCount =
+        body.result.summary.critical + body.result.summary.high + body.result.summary.medium + body.result.summary.low;
+      setNotice({
+        type: body.result.status === "failed" ? "error" : body.result.status === "warning" ? "info" : "success",
+        message: `Surface check completed with ${issueCount} issue${issueCount === 1 ? "" : "s"}.`,
+      });
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to run surface check." });
+    } finally {
+      setSurfaceChecking(false);
+    }
+  }
+
   function handleTourCallback(data: EventData) {
     if (data.status === STATUS.FINISHED || data.status === STATUS.SKIPPED) {
       setTourRunning(false);
@@ -571,6 +638,8 @@ export function SeoDashboard() {
                   data-tour={
                     item.id === "brain"
                       ? "nav-brain"
+                      : item.id === "watch"
+                        ? "nav-watch"
                       : item.id === "integrations"
                         ? "nav-integrations"
                         : item.id === "analysis"
@@ -584,7 +653,10 @@ export function SeoDashboard() {
                   aria-label={item.label}
                 >
                   <NavIcon name={item.icon} />
-                  <strong className="nav-label">{item.label}</strong>
+                  <span className="nav-label nav-item-copy">
+                    <strong>{item.label}</strong>
+                    <small>{item.description}</small>
+                  </span>
                 </button>
                 {item.id === "integrations" && view === "integrations" ? (
                   <div className="provider-subnav" data-tour="tool-provider-nav" aria-label="Tool setup pages">
@@ -665,6 +737,16 @@ export function SeoDashboard() {
 
             {view === "brain" ? <BrainView activeClient={activeClient} clientId={clientId} /> : null}
 
+            {view === "watch" ? (
+              <WebsiteWatchView
+                activeClient={activeClient}
+                latestSiteUrl={competitiveAnalyses.find((analysis) => analysis.website_url)?.website_url || ""}
+                onRunSurfaceCheck={runWebsiteSurfaceCheck}
+                surfaceChecking={surfaceChecking}
+                surfaceResult={surfaceResult}
+              />
+            ) : null}
+
             {view === "integrations" ? (
               <IntegrationsView
                 activeProvider={activeProvider}
@@ -736,6 +818,14 @@ function NavIcon({ name }: { name: NavIconName }) {
           <path {...common} d="M9 14h6" />
         </>
       ) : null}
+      {name === "watch" ? (
+        <>
+          <path {...common} d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z" />
+          <path {...common} d="M12 8v4l2.6 2" />
+          <path {...common} d="M4 4l2.2 2.2" />
+          <path {...common} d="M20 4l-2.2 2.2" />
+        </>
+      ) : null}
       {name === "tools" ? (
         <>
           <path {...common} d="M14.5 6.5 17.5 3 21 6.5 17.5 10l-3-3.5Z" />
@@ -788,6 +878,7 @@ function NavIcon({ name }: { name: NavIconName }) {
 function viewTitle(view: View, provider: Provider) {
   if (view === "clients") return "Clients";
   if (view === "brain") return "Br(AI)N";
+  if (view === "watch") return "Website Watch";
   if (view === "integrations") return providerDetails[provider].title;
   if (view === "analysis") return "Competitive Analysis";
   if (view === "insights") return "Insights";
@@ -797,6 +888,7 @@ function viewTitle(view: View, provider: Provider) {
 function viewDescription(view: View, clientName: string, provider: Provider) {
   if (view === "clients") return "Choose or create the active client workspace.";
   if (view === "brain") return `${clientName}: audit Vast drafts for truth, evidence, and brand fit.`;
+  if (view === "watch") return `${clientName}: fast surface checks and deeper audit setup.`;
   if (view === "integrations") return `${clientName}: ${providerDetails[provider].description}`;
   if (view === "analysis") return `Generate competitive briefs for ${clientName}.`;
   if (view === "insights") return `Review AI recommendations for ${clientName}.`;
@@ -1233,6 +1325,311 @@ function AuditReportView({ report }: { report: BlogAuditReport }) {
 function ScoreBlock({ label, tone, value }: { label: string; tone?: string; value: string }) {
   return (
     <div className="audit-score" data-tone={tone}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+const deepAuditGuidance: Record<
+  DeepAuditAccess,
+  {
+    label: string;
+    summary: string;
+    fields: Array<{ label: string; placeholder: string; secret?: boolean }>;
+    secrets: string[];
+    steps: string[];
+  }
+> = {
+  public: {
+    label: "Public site",
+    summary: "Use this when the important pages are reachable without a login or deployment gate.",
+    fields: [],
+    secrets: ["SLACK_WEBHOOK_URL", "WEBSITE_WATCH_GITHUB_TOKEN"],
+    steps: [
+      "Create a GitHub workflow for the browser audit.",
+      "Add the Slack webhook as a GitHub secret.",
+      "Run Playwright and Lighthouse against the public URL.",
+    ],
+  },
+  vercel: {
+    label: "Vercel protected",
+    summary: "Use this for preview or production URLs behind Vercel deployment protection.",
+    fields: [
+      { label: "Protected URL", placeholder: "https://preview.example.com" },
+      { label: "Bypass token or signed access value", placeholder: "Stored as a GitHub/Vercel secret", secret: true },
+    ],
+    secrets: ["VERCEL_PROTECTION_BYPASS", "SLACK_WEBHOOK_URL", "WEBSITE_WATCH_GITHUB_TOKEN"],
+    steps: [
+      "Create or retrieve the Vercel automation bypass value.",
+      "Store it as a GitHub secret, not a public dashboard value.",
+      "Send the bypass value as a request header during the deep audit.",
+    ],
+  },
+  basic: {
+    label: "Basic auth",
+    summary: "Use this when staging is protected by a username and password prompt.",
+    fields: [
+      { label: "Username", placeholder: "Stored as BASIC_AUTH_USERNAME" },
+      { label: "Password", placeholder: "Stored as BASIC_AUTH_PASSWORD", secret: true },
+    ],
+    secrets: ["BASIC_AUTH_USERNAME", "BASIC_AUTH_PASSWORD", "SLACK_WEBHOOK_URL"],
+    steps: [
+      "Create a low-privilege audit-only credential.",
+      "Store username and password as GitHub secrets.",
+      "Have Playwright pass HTTP credentials when opening the site.",
+    ],
+  },
+  login: {
+    label: "Test login",
+    summary: "Use this when the audit must sign into an app before checking pages.",
+    fields: [
+      { label: "Login URL", placeholder: "https://app.example.com/login" },
+      { label: "Test account email", placeholder: "Stored as WATCHDOG_TEST_EMAIL" },
+      { label: "Test account password", placeholder: "Stored as WATCHDOG_TEST_PASSWORD", secret: true },
+    ],
+    secrets: ["WATCHDOG_TEST_EMAIL", "WATCHDOG_TEST_PASSWORD", "SLACK_WEBHOOK_URL"],
+    steps: [
+      "Create a test account with the smallest required permissions.",
+      "Store credentials as GitHub secrets.",
+      "Make the deep audit sign in, save session state, then run page checks.",
+    ],
+  },
+  custom: {
+    label: "Custom header",
+    summary: "Use this when the site accepts an internal audit header or signed token.",
+    fields: [
+      { label: "Header name", placeholder: "x-watchdog-access" },
+      { label: "Header value", placeholder: "Stored as WATCHDOG_ACCESS_HEADER_VALUE", secret: true },
+    ],
+    secrets: ["WATCHDOG_ACCESS_HEADER_NAME", "WATCHDOG_ACCESS_HEADER_VALUE", "SLACK_WEBHOOK_URL"],
+    steps: [
+      "Define one reviewed access header on the target app.",
+      "Store the header name and value as GitHub secrets.",
+      "Have Playwright include the header on every deep audit request.",
+    ],
+  },
+};
+
+function WebsiteWatchView({
+  activeClient,
+  latestSiteUrl,
+  onRunSurfaceCheck,
+  surfaceChecking,
+  surfaceResult,
+}: {
+  activeClient?: Client;
+  latestSiteUrl: string;
+  onRunSurfaceCheck: (payload: { siteUrl: string; pages: string; expectedText: string }) => void;
+  surfaceChecking: boolean;
+  surfaceResult: WebsiteSurfaceResult | null;
+}) {
+  const [accessMethod, setAccessMethod] = useState<DeepAuditAccess>("public");
+  const guidance = deepAuditGuidance[accessMethod];
+
+  function handleSurfaceSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    onRunSurfaceCheck({
+      siteUrl: String(formData.get("siteUrl") || ""),
+      pages: String(formData.get("pages") || ""),
+      expectedText: String(formData.get("expectedText") || ""),
+    });
+  }
+
+  return (
+    <div className="website-watch">
+      <section className="panel watch-hero" aria-labelledby="website-watch-title">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Website monitoring</span>
+            <h3 id="website-watch-title">Fast checks first. Deep audits when access is ready.</h3>
+            <p>
+              Surface Check reads public pages for obvious breakage. Deep Audit is the browser-level path for protected
+              pages, screenshots, Lighthouse, and logged-in flows.
+            </p>
+          </div>
+        </div>
+        <div className="watch-mode-grid" aria-label="Check types">
+          <div>
+            <span>Surface Check</span>
+            <strong>Runs now</strong>
+            <p>HTTP, metadata, headings, expected text, sitemap, robots, and internal links.</p>
+          </div>
+          <div>
+            <span>Deep Audit</span>
+            <strong>Setup guided</strong>
+            <p>Browser rendering, protected access, screenshots, Lighthouse, and Slack reports.</p>
+          </div>
+        </div>
+      </section>
+
+      <div className="watch-layout">
+        <section className="panel watch-run-panel" aria-labelledby="surface-check-title">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Surface check</span>
+              <h3 id="surface-check-title">Review public pages</h3>
+              <p>Use one public origin. Page paths stay on the same domain for safety.</p>
+            </div>
+          </div>
+
+          <form className="watch-form" onSubmit={handleSurfaceSubmit}>
+            <label>
+              Site URL
+              <input name="siteUrl" type="url" placeholder="https://example.com" defaultValue={latestSiteUrl} required />
+            </label>
+            <label>
+              Key pages
+              <textarea name="pages" defaultValue={"/\n/pricing\n/services\n/blog\n/contact"} rows={6} />
+            </label>
+            <label>
+              Expected text
+              <textarea name="expectedText" defaultValue={activeClient?.name || ""} rows={3} />
+            </label>
+            <button className="button button-primary" type="submit" disabled={surfaceChecking}>
+              {surfaceChecking ? "Checking pages..." : "Run Surface Check"}
+            </button>
+          </form>
+        </section>
+
+        <section className="panel deep-audit-panel" aria-labelledby="deep-audit-title">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Deep audit</span>
+              <h3 id="deep-audit-title">Prepare protected access</h3>
+              <p>Choose the access shape. Secrets should live in GitHub or Vercel, never in public client code.</p>
+            </div>
+          </div>
+
+          <div className="access-methods" aria-label="Access method">
+            {(Object.keys(deepAuditGuidance) as DeepAuditAccess[]).map((method) => (
+              <button
+                className="access-method"
+                data-active={accessMethod === method}
+                key={method}
+                type="button"
+                onClick={() => setAccessMethod(method)}
+              >
+                {deepAuditGuidance[method].label}
+              </button>
+            ))}
+          </div>
+
+          <div className="deep-audit-guidance">
+            <p>{guidance.summary}</p>
+            {guidance.fields.length ? (
+              <div className="access-field-grid">
+                {guidance.fields.map((field) => (
+                  <label key={field.label}>
+                    {field.label}
+                    <input type={field.secret ? "password" : "text"} placeholder={field.placeholder} autoComplete="off" />
+                  </label>
+                ))}
+              </div>
+            ) : null}
+            <p className="deep-audit-note">
+              Setup worksheet only. Store real secrets in GitHub or Vercel before enabling the deep audit runner.
+            </p>
+            <div className="secret-list" aria-label="Required secret names">
+              {guidance.secrets.map((secret) => (
+                <code key={secret}>{secret}</code>
+              ))}
+            </div>
+            <ol className="setup-list">
+              {guidance.steps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+            <button className="button" type="button" disabled>
+              Deep Audit runner not connected yet
+            </button>
+          </div>
+        </section>
+      </div>
+
+      {surfaceResult ? <WebsiteSurfaceResults result={surfaceResult} /> : null}
+    </div>
+  );
+}
+
+function WebsiteSurfaceResults({ result }: { result: WebsiteSurfaceResult }) {
+  const topIssues = result.issues.slice(0, 8);
+
+  return (
+    <section className="panel surface-results" aria-labelledby="surface-results-title">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">Latest result</span>
+          <h3 id="surface-results-title">{surfaceStatusLabel(result.status)}</h3>
+          <p>
+            Checked {result.summary.pagesChecked} pages and {result.summary.linksChecked} internal links at{" "}
+            {new Date(result.checkedAt).toLocaleString()}.
+          </p>
+        </div>
+        <span className="surface-status" data-status={result.status}>
+          {result.status}
+        </span>
+      </div>
+
+      <div className="surface-score-grid" aria-label="Issue counts">
+        <SurfaceScore label="Critical" value={result.summary.critical} severity="critical" />
+        <SurfaceScore label="High" value={result.summary.high} severity="high" />
+        <SurfaceScore label="Medium" value={result.summary.medium} severity="medium" />
+        <SurfaceScore label="Low" value={result.summary.low} severity="low" />
+      </div>
+
+      <div className="surface-result-grid">
+        <div className="surface-page-list">
+          <h4>Pages checked</h4>
+          {result.pages.map((page) => (
+            <div className="surface-page-row" data-ok={page.ok} key={page.url}>
+              <div>
+                <strong>{page.title || page.url}</strong>
+                <span>{page.finalUrl}</span>
+              </div>
+              <small>{page.status || "Error"}</small>
+            </div>
+          ))}
+        </div>
+
+        <div className="surface-issue-list">
+          <h4>Top issues</h4>
+          {topIssues.length ? (
+            topIssues.map((issue) => (
+              <article className="surface-issue" data-severity={issue.severity} key={`${issue.title}-${issue.url}-${issue.detail}`}>
+                <span>{issue.severity}</span>
+                <strong>{issue.title}</strong>
+                <p>{issue.detail}</p>
+                {issue.url ? <small>{issue.url}</small> : null}
+              </article>
+            ))
+          ) : (
+            <div className="empty-state">No surface issues were found in this run.</div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function surfaceStatusLabel(status: WebsiteSurfaceResult["status"]) {
+  if (status === "healthy") return "Surface looks healthy";
+  if (status === "failed") return "Critical surface issue found";
+  return "Surface needs review";
+}
+
+function SurfaceScore({
+  label,
+  severity,
+  value,
+}: {
+  label: string;
+  severity: WebsiteSurfaceIssue["severity"];
+  value: number;
+}) {
+  return (
+    <div className="surface-score" data-severity={severity}>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>

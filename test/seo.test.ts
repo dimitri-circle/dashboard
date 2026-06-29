@@ -188,10 +188,12 @@ test("blog audit uses one performant external evidence search for unsupported cl
     );
 
     assert.equal(requestCount, 1);
-    assert.equal(requestBody?.tool_choice, "required");
-    assert.equal(requestBody?.tools?.[0]?.type, "web_search");
-    assert.equal(requestBody?.tools?.[0]?.search_context_size, "low");
-    assert.ok(String(requestBody?.input || "").length < 2200);
+    assert.ok(requestBody);
+    const capturedRequestBody = requestBody as Record<string, any>;
+    assert.equal(capturedRequestBody.tool_choice, "required");
+    assert.equal(capturedRequestBody.tools?.[0]?.type, "web_search");
+    assert.equal(capturedRequestBody.tools?.[0]?.search_context_size, "low");
+    assert.ok(String(capturedRequestBody.input || "").length < 2200);
     assert.equal(report.claims[0].status, "PASS");
     assert.equal(report.claims[0].evidence[0], "https://www.nvidia.com/en-us/about-nvidia/corporate-timeline/");
     assert.match(report.claims[0].reason, /External evidence check/);
@@ -213,9 +215,10 @@ test("blog audit form accepts ZIP uploads with draft files", async () => {
   );
   zip.file("__MACOSX/._ignored.txt", "ignored");
   const zipBuffer = await zip.generateAsync({ type: "uint8array" });
+  const zipArrayBuffer = zipBuffer.buffer.slice(zipBuffer.byteOffset, zipBuffer.byteOffset + zipBuffer.byteLength) as ArrayBuffer;
   const form = new FormData();
 
-  form.set("file", new File([zipBuffer], "vast-blog-draft.zip", { type: "application/zip" }));
+  form.set("file", new File([zipArrayBuffer], "vast-blog-draft.zip", { type: "application/zip" }));
   form.set("content", "This pasted fallback should not replace the uploaded file.");
 
   const payload = await readBlogAuditFormPayload(form);
