@@ -17,6 +17,12 @@ type ToastNoticeState = {
   phase: "open" | "closing";
 };
 
+type PageHeroStat = {
+  label: string;
+  value: string;
+  helper?: string;
+};
+
 type Client = {
   id: string;
   name: string;
@@ -985,6 +991,60 @@ function ClientBadge({ name }: { name: string }) {
   );
 }
 
+function PageWorkspace({
+  children,
+  className = "",
+  tourId,
+}: {
+  children: ReactNode;
+  className?: string;
+  tourId?: string;
+}) {
+  return (
+    <div className={`page-workspace ${className}`} data-tour={tourId}>
+      <reactive-dot-ribbon
+        aria-hidden="true"
+        className="workspace-background-ribbon"
+        source="/dots-pattern.webp"
+      />
+      {children}
+    </div>
+  );
+}
+
+function PageHero({
+  description,
+  eyebrow,
+  stats,
+  title,
+}: {
+  description: string;
+  eyebrow: string;
+  stats?: PageHeroStat[];
+  title: string;
+}) {
+  return (
+    <section className="panel page-hero" aria-label={title}>
+      <div className="page-hero-copy">
+        <span className="eyebrow">{eyebrow}</span>
+        <h3>{title}</h3>
+        <p>{description}</p>
+      </div>
+      {stats?.length ? (
+        <div className="page-proof-grid">
+          {stats.map((stat) => (
+            <div key={`${stat.label}-${stat.value}`}>
+              <strong>{stat.value}</strong>
+              <span>{stat.label}</span>
+              {stat.helper ? <small>{stat.helper}</small> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function ToastNotice({ toast }: { toast: ToastNoticeState | null }) {
   if (!toast) {
     return null;
@@ -1022,7 +1082,18 @@ function ClientsView({
   const showForm = !hasClients || mode === "create";
 
   return (
-    <section className="client-page" aria-labelledby="client-selection-title">
+    <PageWorkspace className="client-workspace">
+      <PageHero
+        eyebrow="Workspace control"
+        title="Choose the client before anything runs."
+        description="Every connector, audit, report, and insight is scoped to the active client workspace."
+        stats={[
+          { label: "saved clients", value: loading ? "..." : String(clients.length) },
+          { label: "active id", value: clientId },
+        ]}
+      />
+
+      <section className="client-page" aria-labelledby="client-selection-title">
       <div className="dashboard-client-selection" data-tour="client-switcher">
         <div className="dashboard-client-topline">
           <div>
@@ -1073,7 +1144,8 @@ function ClientsView({
 
         {!loading && showForm ? <p className="client-selection-empty">Client id is assigned automatically.</p> : null}
       </div>
-    </section>
+      </section>
+    </PageWorkspace>
   );
 }
 
@@ -1097,7 +1169,18 @@ function OverviewView({
   const ga4Summary = getGa4Summary(metricSnapshots);
 
   return (
-    <div className="overview" data-tour="app-overview">
+    <PageWorkspace className="overview" tourId="app-overview">
+      <PageHero
+        eyebrow="Operating overview"
+        title="Readiness, coverage, and traffic in one pass."
+        description="Start here to understand whether the workspace has enough connected data to generate useful reports."
+        stats={[
+          { label: "setup readiness", value: `${readiness}%` },
+          { label: "connected tools", value: `${connectedCount}/5`, helper: `${savedToolCount} saved` },
+          { label: "GA4 users", value: formatNumber(ga4Summary.activeUsers), helper: "last synced window" },
+        ]}
+      />
+
       <section className="overview-grid" data-tour="overview-graphs" aria-label="Overview charts">
         <GraphCard label="Setup readiness" value={`${readiness}%`} helper="OpenAI plus connector coverage" percent={readiness} />
         <GraphCard label="Connected tools" value={`${connectedCount}/5`} helper={`${savedToolCount} saved connectors`} percent={connectedCount * 20} />
@@ -1145,7 +1228,7 @@ function OverviewView({
           <div className="empty-state">Connect GA4 with credentials, then sync metrics to populate these graphs.</div>
         )}
       </section>
-    </div>
+    </PageWorkspace>
   );
 }
 
@@ -1283,27 +1366,16 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
   }
 
   return (
-    <div className="brain-workspace">
-      <section className="panel brain-hero" aria-labelledby="brain-workspace-title">
-        <div>
-          <span className="eyebrow">Vast Blog Audit</span>
-          <h3 id="brain-workspace-title">Truth before publishing.</h3>
-          <p>
-            Br(AI)N checks draft claims against Vast docs, site knowledge, live pricing, brand sources, and approved
-            social feeds.
-          </p>
-        </div>
-        <div className="brain-guardrails" aria-label="Publishing guardrails">
-          <div>
-            <strong>{activeClient?.name || "Client"}</strong>
-            <span>workspace</span>
-          </div>
-          <div>
-            <strong>Audit only</strong>
-            <span>human approval required</span>
-          </div>
-        </div>
-      </section>
+    <PageWorkspace className="brain-workspace">
+      <PageHero
+        eyebrow="Vast Blog Audit"
+        title="Truth before publishing."
+        description="Br(AI)N checks draft claims against Vast docs, site knowledge, live pricing, brand sources, and approved social feeds."
+        stats={[
+          { label: "workspace", value: activeClient?.name || "Client" },
+          { label: "mode", value: "Audit only", helper: "human approval required" },
+        ]}
+      />
 
       <section className="panel blog-audit-panel" aria-labelledby="blog-audit-form-title">
         <div className="section-heading">
@@ -1362,7 +1434,7 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
 
         {auditReport ? <AuditReportView report={auditReport} /> : <div className="empty-state">Run an audit to see truth, brand, evidence, and publish risk.</div>}
       </section>
-    </div>
+    </PageWorkspace>
   );
 }
 
@@ -1552,31 +1624,17 @@ function WebsiteWatchView({
   }
 
   return (
-    <div className="website-watch">
-      <section className="panel watch-hero" aria-labelledby="website-watch-title">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">Website monitoring</span>
-            <h3 id="website-watch-title">Fast checks first. Deep audits when access is ready.</h3>
-            <p>
-              Surface Check reads public pages for obvious breakage. Deep Audit is the browser-level path for protected
-              pages, screenshots, Lighthouse, and logged-in flows.
-            </p>
-          </div>
-        </div>
-        <div className="watch-mode-grid" aria-label="Check types">
-          <div>
-            <span>Surface Check</span>
-            <strong>Runs now</strong>
-            <p>HTTP, metadata, headings, expected text, sitemap, robots, and internal links.</p>
-          </div>
-          <div>
-            <span>Deep Audit</span>
-            <strong>Setup guided</strong>
-            <p>Browser rendering, protected access, screenshots, Lighthouse, and Slack reports.</p>
-          </div>
-        </div>
-      </section>
+    <PageWorkspace className="website-watch">
+      <PageHero
+        eyebrow="Website monitoring"
+        title="Fast checks first. Deep audits when access is ready."
+        description="Surface Check reads public pages for obvious breakage. Deep Audit is the browser-level path for protected pages, screenshots, Lighthouse, and logged-in flows."
+        stats={[
+          { label: "Surface Check", value: "Runs now", helper: "public page review" },
+          { label: "Deep Audit", value: "Setup guided", helper: "protected browser path" },
+          { label: "latest status", value: surfaceResult ? surfaceStatusLabel(surfaceResult.status) : "Not run" },
+        ]}
+      />
 
       <div className="watch-layout">
         <section className="panel watch-run-panel" aria-labelledby="surface-check-title">
@@ -1663,7 +1721,7 @@ function WebsiteWatchView({
       </div>
 
       {surfaceResult ? <WebsiteSurfaceResults result={surfaceResult} /> : null}
-    </div>
+    </PageWorkspace>
   );
 }
 
@@ -1793,10 +1851,22 @@ function IntegrationsView({
   const activeIntegration = latestByProvider[activeProvider];
 
   return (
-    <section className="panel" data-tour="integration-hub" aria-labelledby="integrations-title">
+    <PageWorkspace className="integrations-workspace" tourId="integration-hub">
+      <PageHero
+        eyebrow="Tool setup"
+        title="Connect one tool at a time."
+        description="Choose one tool, save its setup data, then test it. Secrets are encrypted and never returned."
+        stats={[
+          { label: "active page", value: providerLabels[activeProvider] },
+          { label: "saved tools", value: String(Object.values(latestByProvider).filter(Boolean).length) },
+          { label: "status", value: statusLabel(activeIntegration?.status) },
+        ]}
+      />
+
+      <section className="panel integrations-panel" aria-labelledby="integrations-title">
       <div className="section-heading">
         <h3 id="integrations-title">Tool Setup Pages</h3>
-        <p>Choose one tool, save its setup data, then test it. Secrets are encrypted and never returned.</p>
+        <p>Move across the setup pages without losing the active client or connection status.</p>
       </div>
 
       <div className="status-row tool-page-picker" data-tour="status-row" aria-label="Connection status">
@@ -1897,7 +1967,8 @@ function IntegrationsView({
           ) : null}
         </div>
       </div>
-    </section>
+      </section>
+    </PageWorkspace>
   );
 }
 
@@ -1929,40 +2000,17 @@ function CompetitiveView({
   }, [competitiveAnalyses.length]);
 
   return (
-    <div className="competitive-workspace">
-      <reactive-dot-ribbon
-        aria-hidden="true"
-        className="competitive-background-ribbon"
-        source="/dots-pattern.webp"
+    <PageWorkspace className="competitive-workspace">
+      <PageHero
+        eyebrow="Competitive workspace"
+        title="Evidence-backed competitor reports"
+        description="Enter a company name. OpenAI fills the research brief, the crawler verifies public pages where it can, and the report separates observed facts from assumptions."
+        stats={[
+          { label: "saved reports", value: String(competitiveAnalyses.length) },
+          { label: "latest sources crawled", value: String(latestSourceCount) },
+          { label: "latest pages reviewed", value: String(latestEvidenceCount) },
+        ]}
       />
-
-      <section className="panel competitive-hero" aria-labelledby="competitive-title">
-        <div className="section-heading competitive-hero-copy">
-          <div>
-            <span className="eyebrow">Competitive workspace</span>
-            <h3 id="competitive-title">Evidence-backed competitor reports</h3>
-            <p>
-              Enter a company name. OpenAI fills the research brief, the crawler verifies public pages where it can,
-              and the report separates observed facts from assumptions.
-            </p>
-          </div>
-        </div>
-
-        <div className="competitive-proof-grid">
-          <div>
-            <strong>{competitiveAnalyses.length}</strong>
-            <span>saved reports</span>
-          </div>
-          <div>
-            <strong>{latestSourceCount}</strong>
-            <span>latest sources crawled</span>
-          </div>
-          <div>
-            <strong>{latestEvidenceCount}</strong>
-            <span>latest pages reviewed</span>
-          </div>
-        </div>
-      </section>
 
       {hasReports ? (
         <form hidden id="competitive-report-form" onSubmit={onGenerateCompetitiveAnalysis}>
@@ -2032,7 +2080,7 @@ function CompetitiveView({
           />
         ) : null}
       </section>
-    </div>
+    </PageWorkspace>
   );
 }
 
@@ -2139,7 +2187,23 @@ function InsightsView({
   onGenerateInsights: () => void;
 }) {
   return (
-    <section className="panel" data-tour="insight-feed" aria-labelledby="insights-title">
+    <PageWorkspace className="insights-workspace" tourId="insight-feed">
+      <PageHero
+        eyebrow="Insight feed"
+        title="Prioritize the next SEO move."
+        description={
+          latestByProvider.openai
+            ? "Generate recommendations from the connected workspace signals and review confidence before acting."
+            : "Connect OpenAI plus analytics sources to turn saved signals into recommendation cards."
+        }
+        stats={[
+          { label: "saved insights", value: String(insights.length) },
+          { label: "OpenAI", value: latestByProvider.openai ? statusLabel(latestByProvider.openai.status) : "Not connected" },
+          { label: "action", value: generating ? "Generating" : "Ready" },
+        ]}
+      />
+
+      <section className="panel insights-panel" aria-labelledby="insights-title">
       <div className="section-heading">
         <div>
           <h3 id="insights-title">Insight Feed</h3>
@@ -2184,7 +2248,8 @@ function InsightsView({
           </article>
         ))}
       </div>
-    </section>
+      </section>
+    </PageWorkspace>
   );
 }
 
