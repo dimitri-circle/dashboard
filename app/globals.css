@@ -133,6 +133,8 @@ select {
 .page-workspace > .tool-page-layout,
 .page-workspace > .insights-layout,
 .page-workspace > .audit-output-column,
+.page-workspace > .dashboard-status-strip,
+.page-workspace > .page-command-panel,
 .page-workspace > .watch-status-strip,
 .page-workspace > .watch-mode-grid,
 .page-workspace > .watch-tool-stage {
@@ -1647,10 +1649,40 @@ select {
   line-height: 1.45;
 }
 
-.watch-status-strip {
+.watch-status-strip,
+.dashboard-status-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
+}
+
+.page-command-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 0.72fr) minmax(280px, 0.45fr);
+  gap: 18px;
+  align-items: center;
+}
+
+.page-command-copy {
+  min-width: 0;
+}
+
+.page-command-copy p {
+  max-width: 760px;
+  margin-top: 8px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.page-command-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.page-command-actions .button {
+  width: auto;
 }
 
 .watch-status-pill {
@@ -3745,6 +3777,8 @@ select {
   .watch-layout,
   .watch-command-panel,
   .watch-status-strip,
+  .dashboard-status-strip,
+  .page-command-panel,
   .watch-mode-grid,
   .baseline-settings-grid,
   .priority-add-row,

@@ -1385,6 +1385,21 @@ function ClientsView({
         ]}
       />
 
+      <div className="dashboard-status-strip" aria-label="Client workspace status">
+        <DashboardStatusPill
+          label="Active client"
+          value={activeClient?.name || (loading ? "Loading" : "None")}
+          state={activeClient ? "ready" : "idle"}
+        />
+        <DashboardStatusPill
+          label="Saved clients"
+          value={loading ? "Loading" : String(clients.length)}
+          state={clients.length ? "ready" : "missing"}
+        />
+        <DashboardStatusPill label="Reports" value="Scoped" state={activeClient ? "ready" : "idle"} />
+        <DashboardStatusPill label="Connectors" value="Isolated" state={activeClient ? "ready" : "idle"} />
+      </div>
+
       <section className="client-page client-module-grid" aria-labelledby="client-selection-title">
         <div className="dashboard-client-selection" data-tour="client-switcher">
           <div className="dashboard-client-topline">
@@ -1474,6 +1489,8 @@ function OverviewView({
   syncingGa4: boolean;
 }) {
   const ga4Summary = getGa4Summary(metricSnapshots);
+  const ga4SnapshotCount = metricSnapshots.filter((item) => item.provider === "ga4").length;
+  const openAiStatus = latestByProvider.openai?.status;
 
   return (
     <PageWorkspace className="overview" tourId="app-overview">
@@ -1487,6 +1504,42 @@ function OverviewView({
           { label: "GA4 users", value: formatNumber(ga4Summary.activeUsers), helper: "last synced window" },
         ]}
       />
+
+      <div className="dashboard-status-strip" aria-label="Overview workspace status">
+        <DashboardStatusPill
+          label="Readiness"
+          value={`${readiness}%`}
+          state={readiness >= 70 ? "ready" : readiness > 0 ? "idle" : "missing"}
+        />
+        <DashboardStatusPill
+          label="Connected tools"
+          value={`${connectedCount}/5`}
+          state={connectedCount ? "ready" : "missing"}
+        />
+        <DashboardStatusPill
+          label="OpenAI"
+          value={openAiStatus ? statusLabel(openAiStatus) : "Not connected"}
+          state={openAiStatus === "connected" ? "ready" : openAiStatus === "error" ? "missing" : "idle"}
+        />
+        <DashboardStatusPill
+          label="GA4 snapshots"
+          value={String(ga4SnapshotCount)}
+          state={ga4SnapshotCount ? "ready" : "idle"}
+        />
+      </div>
+
+      <section className="panel page-command-panel" aria-labelledby="overview-command-title">
+        <div className="page-command-copy">
+          <span className="eyebrow">Workspace command</span>
+          <h3 id="overview-command-title">Check coverage, then refresh analytics.</h3>
+          <p>Use this page to confirm the workspace has enough signal before running audits, reports, or recommendations.</p>
+        </div>
+        <div className="page-command-actions">
+          <button className="button button-primary" type="button" disabled={syncingGa4} onClick={onSyncGa4}>
+            {syncingGa4 ? "Syncing..." : "Sync GA4"}
+          </button>
+        </div>
+      </section>
 
       <section className="overview-grid" data-tour="overview-graphs" aria-label="Overview charts">
         <GraphCard label="Setup readiness" value={`${readiness}%`} helper="OpenAI plus connector coverage" percent={readiness} />
@@ -1716,6 +1769,21 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
           </div>
         </div>
       </section>
+
+      <div className="dashboard-status-strip" aria-label="Br(AI)N audit status">
+        <DashboardStatusPill label="Workspace" value={activeClient?.name || "Client"} state={activeClient ? "ready" : "idle"} />
+        <DashboardStatusPill label="Mode" value="Audit only" state="ready" />
+        <DashboardStatusPill
+          label="Current report"
+          value={auditing ? "Running" : auditReport ? "Ready" : "Not run"}
+          state={auditReport ? "ready" : auditing ? "idle" : "missing"}
+        />
+        <DashboardStatusPill
+          label="History"
+          value={`${auditHistory.length} saved`}
+          state={auditHistory.length ? "ready" : "idle"}
+        />
+      </div>
 
       {!auditReport ? (
         <section className="panel blog-audit-panel" aria-labelledby="blog-audit-form-title">
@@ -2411,7 +2479,7 @@ function WebsiteWatchView({
   );
 }
 
-function WatchStatusPill({
+function DashboardStatusPill({
   label,
   state,
   value,
@@ -2427,6 +2495,8 @@ function WatchStatusPill({
     </div>
   );
 }
+
+const WatchStatusPill = DashboardStatusPill;
 
 function WatchModeCard({
   active,
@@ -2761,6 +2831,8 @@ function IntegrationsView({
   onTestProvider: (provider: Provider) => void;
 }) {
   const activeIntegration = latestByProvider[activeProvider];
+  const savedToolCount = Object.values(latestByProvider).filter(Boolean).length;
+  const connectedToolCount = Object.values(latestByProvider).filter((integration) => integration?.status === "connected").length;
 
   return (
     <PageWorkspace className="integrations-workspace" tourId="integration-hub">
@@ -2770,10 +2842,29 @@ function IntegrationsView({
         description="Choose one tool, save its setup data, then test it. Secrets are encrypted and never returned."
         stats={[
           { label: "active page", value: providerLabels[activeProvider] },
-          { label: "saved tools", value: String(Object.values(latestByProvider).filter(Boolean).length) },
+          { label: "saved tools", value: String(savedToolCount) },
           { label: "status", value: statusLabel(activeIntegration?.status) },
         ]}
       />
+
+      <div className="dashboard-status-strip" aria-label="Tool setup status">
+        <DashboardStatusPill label="Active tool" value={providerLabels[activeProvider]} state="ready" />
+        <DashboardStatusPill
+          label="Tool status"
+          value={statusLabel(activeIntegration?.status)}
+          state={activeIntegration?.status === "connected" ? "ready" : activeIntegration?.status === "error" ? "missing" : "idle"}
+        />
+        <DashboardStatusPill
+          label="Connected"
+          value={`${connectedToolCount}/5`}
+          state={connectedToolCount ? "ready" : "missing"}
+        />
+        <DashboardStatusPill
+          label="Saved tools"
+          value={String(savedToolCount)}
+          state={savedToolCount ? "ready" : "idle"}
+        />
+      </div>
 
       <section className="panel integrations-panel" aria-labelledby="integrations-title">
         <div className="section-heading">
@@ -2923,6 +3014,29 @@ function CompetitiveView({
           { label: "latest pages reviewed", value: String(latestEvidenceCount) },
         ]}
       />
+
+      <div className="dashboard-status-strip" aria-label="Competitive analysis status">
+        <DashboardStatusPill
+          label="Reports"
+          value={String(competitiveAnalyses.length)}
+          state={competitiveAnalyses.length ? "ready" : "missing"}
+        />
+        <DashboardStatusPill
+          label="Latest sources"
+          value={String(latestSourceCount)}
+          state={latestSourceCount ? "ready" : "idle"}
+        />
+        <DashboardStatusPill
+          label="Pages reviewed"
+          value={String(latestEvidenceCount)}
+          state={latestEvidenceCount ? "ready" : "idle"}
+        />
+        <DashboardStatusPill
+          label="Runner"
+          value={analyzing ? "Generating" : "Ready"}
+          state={analyzing ? "idle" : "ready"}
+        />
+      </div>
 
       {hasReports ? (
         <form hidden id="competitive-report-form" onSubmit={onGenerateCompetitiveAnalysis}>
@@ -3098,6 +3212,9 @@ function InsightsView({
   latestByProvider: Partial<Record<Provider, Integration>>;
   onGenerateInsights: () => void;
 }) {
+  const savedSignalCount = Object.values(latestByProvider).filter(Boolean).length;
+  const openAiStatus = latestByProvider.openai?.status;
+
   return (
     <PageWorkspace className="insights-workspace" tourId="insight-feed">
       <PageHero
@@ -3114,6 +3231,29 @@ function InsightsView({
           { label: "action", value: generating ? "Generating" : "Ready" },
         ]}
       />
+
+      <div className="dashboard-status-strip" aria-label="Insight feed status">
+        <DashboardStatusPill
+          label="OpenAI"
+          value={openAiStatus ? statusLabel(openAiStatus) : "Not connected"}
+          state={openAiStatus === "connected" ? "ready" : openAiStatus === "error" ? "missing" : "idle"}
+        />
+        <DashboardStatusPill
+          label="Saved insights"
+          value={String(insights.length)}
+          state={insights.length ? "ready" : "idle"}
+        />
+        <DashboardStatusPill
+          label="Signal sources"
+          value={String(savedSignalCount)}
+          state={savedSignalCount ? "ready" : "missing"}
+        />
+        <DashboardStatusPill
+          label="Runner"
+          value={generating ? "Generating" : "Ready"}
+          state={generating ? "idle" : "ready"}
+        />
+      </div>
 
       <div className="insights-layout">
         <section className="panel insight-command-panel" aria-labelledby="insight-command-title">
