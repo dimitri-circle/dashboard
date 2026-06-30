@@ -2,8 +2,17 @@ import crypto, { randomUUID } from "node:crypto";
 import { load } from "cheerio";
 import { decryptSecret, encryptSecret } from "./crypto";
 import { ensureSeoStorage, getSeoCollections } from "./db";
+import {
+  normalizeSeoChangeTrackerSite,
+  runSeoChangeTracker,
+  type SeoChangeTrackerBaseline,
+  type SeoChangeTrackerInput,
+  type SeoChangeTrackerResult,
+} from "./seo-change-tracker";
+import { notifySeoWatchSlack } from "./slack";
 import type {
   SeoClient,
+  SeoChangeRun,
   SeoCompetitiveAnalysis,
   SeoCompetitiveCrawlPage,
   SeoCompetitiveCrawlSite,
@@ -15,6 +24,7 @@ import type {
   SeoMetricSnapshot,
   SeoPriority,
   SeoProvider,
+  SeoWatchBaseline,
 } from "./types";
 import { DEFAULT_CLIENT_ID, normalizeClientId, type SeoTenantScope } from "./tenant";
 
@@ -40,6 +50,7 @@ const CRAWL_TIMEOUT_MS = 6000;
 const MAX_CRAWL_BYTES = 650_000;
 const MAX_CRAWL_PAGES_PER_SITE = 6;
 const MAX_COMPETITOR_SITES = 8;
+const SEO_CHANGE_RUN_LIMIT = 8;
 
 type IntegrationPayload = {
   integrationId?: string;
@@ -1983,6 +1994,136 @@ export async function listMetricSnapshots(scope: SeoTenantScope) {
   const { metricSnapshots } = await getSeoCollections();
   const rows = await metricSnapshots.find({ user_id: scope.userId }).sort({ captured_at: -1 }).limit(100).toArray();
   return rows.map(({ _id: _mongoId, ...row }) => row);
+}
+
+function cleanSeoChangeRun(row: SeoChangeRun) {
+  const { _id: _mongoId, ...cleaned } = row;
+  return cleaned;
+}
+
+function cleanSeoWatchBaseline(row: SeoWatchBaseline) {
+  const { _id: _mongoId, ...cleaned } = row;
+  return cleaned;
+}
+
+function baselineFromRow(row: SeoWatchBaseline | null): SeoChangeTrackerBaseline | null {
+  if (!row) return null;
+  return row.baseline_json as unknown as SeoChangeTrackerBaseline;
+}
+
+export async function getSeoChangeTrackerState(scope: SeoTenantScope, rawSiteUrl?: string | null) {
+  const { watchBaselines, changeRuns } = await getSeoCollections();
+  const site = rawSiteUrl ? normalizeSeoChangeTrackerSite(rawSiteUrl) : null;
+  const baselineRows = site
+    ? await watchBaselines.find({ user_id: scope.userId, site_url: site.siteUrl }).limit(1).toArray()
+    : await watchBaselines.find({ user_id: scope.userId }).sort({ updated_at: -1 }).limit(1).toArray();
+  const baselineRow = baselineRows[0] || null;
+  const runFilter: Record<string, string> = { user_id: scope.userId };
+  if (site) {
+    runFilter.site_url = site.siteUrl;
+  }
+  const runs = await changeRuns.find(runFilter).sort({ checked_at: -1 }).limit(SEO_CHANGE_RUN_LIMIT).toArray();
+
+  return {
+    baseline: baselineFromRow(baselineRow),
+    baselineRow: baselineRow ? cleanSeoWatchBaseline(baselineRow) : null,
+    runs: runs.map(cleanSeoChangeRun),
+  };
+}
+
+export async function runPersistedSeoChangeTracker(scope: SeoTenantScope, input: SeoChangeTrackerInput) {
+  const { watchBaselines, changeRuns } = await getSeoCollections();
+  const site = normalizeSeoChangeTrackerSite(input.siteUrl);
+  const existingBaseline = await watchBaselines.findOne({ user_id: scope.userId, site_url: site.siteUrl });
+  const previousBaseline = baselineFromRow(existingBaseline);
+  const result: SeoChangeTrackerResult = await runSeoChangeTracker({
+    ...input,
+    siteUrl: site.siteUrl,
+    baseline: previousBaseline,
+  });
+  const checkedAt = result.checkedAt;
+  const baselineRow: SeoWatchBaseline = {
+    id: existingBaseline?.id || randomUUID(),
+    user_id: scope.userId,
+    site_url: site.siteUrl,
+    site_origin: site.siteOrigin,
+    baseline_json: result.baseline as unknown as Record<string, unknown>,
+    page_count: result.baseline.pages.length,
+    captured_at: result.baseline.capturedAt,
+    created_at: existingBaseline?.created_at || checkedAt,
+    updated_at: checkedAt,
+  };
+
+  if (existingBaseline) {
+    await watchBaselines.replaceOne({ id: existingBaseline.id, user_id: scope.userId }, baselineRow);
+  } else {
+    await watchBaselines.insertOne(baselineRow);
+  }
+
+  const run: SeoChangeRun = {
+    id: randomUUID(),
+    user_id: scope.userId,
+    baseline_id: baselineRow.id,
+    site_url: site.siteUrl,
+    site_origin: site.siteOrigin,
+    status: result.status,
+    summary_json: result.summary as unknown as Record<string, unknown>,
+    changes_json: result.changes,
+    pages_json: result.pages,
+    previous_captured_at: existingBaseline?.captured_at || null,
+    checked_at: checkedAt,
+    created_at: checkedAt,
+  };
+  await changeRuns.insertOne(run);
+  await recordAuditEvent({
+    scope,
+    action: "website_watch.seo_change_scanned",
+    entityType: "sync",
+    entityId: run.id,
+    metadata: {
+      site_url: site.siteUrl,
+      status: result.status,
+      changed_pages: result.summary.changedPages,
+      changes: result.changes.length,
+      previous_captured_at: run.previous_captured_at,
+    },
+  });
+
+  const slackAlert = await notifySeoWatchSlack({ scope, result });
+  if (slackAlert.status !== "skipped") {
+    await recordAuditEvent({
+      scope,
+      action: slackAlert.status === "sent" ? "website_watch.slack_alert_sent" : "website_watch.slack_alert_failed",
+      entityType: "sync",
+      entityId: run.id,
+      metadata: {
+        site_url: site.siteUrl,
+        tracker_status: result.status,
+        slack_status: slackAlert.status,
+        error: slackAlert.status === "failed" ? slackAlert.error : null,
+      },
+    }).catch(() => undefined);
+  }
+
+  return {
+    result,
+    baseline: baselineFromRow(baselineRow),
+    run: cleanSeoChangeRun(run),
+  };
+}
+
+export async function resetSeoWatchBaseline(scope: SeoTenantScope, rawSiteUrl: string) {
+  const { watchBaselines } = await getSeoCollections();
+  const site = normalizeSeoChangeTrackerSite(rawSiteUrl);
+  const deleted = await watchBaselines.deleteMany({ user_id: scope.userId, site_url: site.siteUrl });
+  await recordAuditEvent({
+    scope,
+    action: "website_watch.seo_baseline_reset",
+    entityType: "sync",
+    entityId: null,
+    metadata: { site_url: site.siteUrl, deleted_count: deleted.deletedCount },
+  });
+  return { ok: true, deletedCount: deleted.deletedCount };
 }
 
 export async function listCompetitiveAnalyses(scope: SeoTenantScope) {

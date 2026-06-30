@@ -235,6 +235,18 @@ type SeoChangeTrackerResult = {
   baseline: SeoChangeTrackerBaseline;
 };
 
+type SeoChangeRun = {
+  id: string;
+  site_url: string;
+  site_origin: string;
+  status: SeoChangeTrackerResult["status"];
+  summary_json: SeoChangeTrackerResult["summary"];
+  changes_json: SeoChangeRecord[];
+  previous_captured_at: string | null;
+  checked_at: string;
+  created_at: string;
+};
+
 const providerLabels: Record<Provider, string> = {
   ga4: "GA4",
   gtm: "GTM",
@@ -424,6 +436,7 @@ export function SeoDashboard() {
   const [seoTracking, setSeoTracking] = useState(false);
   const [seoTrackerBaseline, setSeoTrackerBaseline] = useState<SeoChangeTrackerBaseline | null>(null);
   const [seoTrackerResult, setSeoTrackerResult] = useState<SeoChangeTrackerResult | null>(null);
+  const [seoChangeRuns, setSeoChangeRuns] = useState<SeoChangeRun[]>([]);
   const [tourRunning, setTourRunning] = useState(false);
   const [activeProvider, setActiveProvider] = useState<Provider>("ga4");
   const [activeWatchTool, setActiveWatchTool] = useState<WebsiteWatchTool>("surface");
@@ -485,6 +498,9 @@ export function SeoDashboard() {
         setInsights([]);
         setCompetitiveAnalyses([]);
         setMetricSnapshots([]);
+        setSeoTrackerBaseline(null);
+        setSeoTrackerResult(null);
+        setSeoChangeRuns([]);
         setNotice(null);
         return;
       }
@@ -495,16 +511,22 @@ export function SeoDashboard() {
         setClientId(resolvedClientId);
       }
 
-      const [integrationBody, insightBody, competitiveBody, metricBody] = await Promise.all([
+      const [integrationBody, insightBody, competitiveBody, metricBody, watchBody] = await Promise.all([
         api<{ integrations: Integration[] }>(resolvedClientId, "/api/seo/integrations"),
         api<{ insights: Insight[] }>(resolvedClientId, "/api/seo/insights"),
         api<{ analyses: CompetitiveAnalysis[] }>(resolvedClientId, "/api/seo/competitive-analysis"),
         api<{ metricSnapshots: MetricSnapshot[] }>(resolvedClientId, "/api/seo/metrics"),
+        api<{ baseline: SeoChangeTrackerBaseline | null; runs: SeoChangeRun[] }>(
+          resolvedClientId,
+          "/api/seo/website-watch/seo-change-tracker"
+        ).catch(() => ({ baseline: null, runs: [] })),
       ]);
       setIntegrations(integrationBody.integrations);
       setInsights(insightBody.insights);
       setCompetitiveAnalyses(competitiveBody.analyses);
       setMetricSnapshots(metricBody.metricSnapshots);
+      setSeoTrackerBaseline(watchBody.baseline);
+      setSeoChangeRuns(watchBody.runs);
       if (!integrationBody.integrations.some((item) => item.provider === "openai")) {
         setNotice({ type: "info", message: "Connect a ChatGPT/OpenAI token to unlock AI-generated analysis." });
       }
@@ -542,6 +564,10 @@ export function SeoDashboard() {
     setInsights([]);
     setMetricSnapshots([]);
     setCompetitiveAnalyses([]);
+    setSurfaceResult(null);
+    setSeoTrackerBaseline(null);
+    setSeoTrackerResult(null);
+    setSeoChangeRuns([]);
     setNotice({ type: "info", message: `Viewing client workspace: ${nextClient?.name || nextClientId}` });
     loadDashboard(nextClientId);
   }
@@ -703,15 +729,17 @@ export function SeoDashboard() {
   async function runSeoChangeTracker(payload: { siteUrl: string; pages: string }) {
     try {
       setSeoTracking(true);
-      const body = await api<{ result: SeoChangeTrackerResult }>(clientId, "/api/seo/website-watch/seo-change-tracker", {
+      const body = await api<{
+        result: SeoChangeTrackerResult;
+        baseline: SeoChangeTrackerBaseline | null;
+        run: SeoChangeRun;
+      }>(clientId, "/api/seo/website-watch/seo-change-tracker", {
         method: "POST",
-        body: JSON.stringify({
-          ...payload,
-          baseline: seoTrackerBaseline,
-        }),
+        body: JSON.stringify(payload),
       });
       setSeoTrackerResult(body.result);
-      setSeoTrackerBaseline(body.result.baseline);
+      setSeoTrackerBaseline(body.baseline || body.result.baseline);
+      setSeoChangeRuns((current) => [body.run, ...current.filter((run) => run.id !== body.run.id)].slice(0, 8));
       setNotice({
         type: body.result.status === "changed" ? "info" : "success",
         message:
@@ -723,6 +751,28 @@ export function SeoDashboard() {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to run SEO change tracker." });
     } finally {
       setSeoTracking(false);
+    }
+  }
+
+  async function resetSeoTrackerBaseline() {
+    const siteUrl = seoTrackerBaseline?.siteUrl || seoTrackerResult?.siteUrl;
+    if (!siteUrl) {
+      setSeoTrackerBaseline(null);
+      setSeoTrackerResult(null);
+      return;
+    }
+
+    try {
+      await api<{ ok: true; deletedCount: number }>(
+        clientId,
+        `/api/seo/website-watch/seo-change-tracker?siteUrl=${encodeURIComponent(siteUrl)}`,
+        { method: "DELETE" }
+      );
+      setSeoTrackerBaseline(null);
+      setSeoTrackerResult(null);
+      setNotice({ type: "success", message: "SEO baseline reset. The next tracker run will capture a fresh baseline." });
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to reset SEO baseline." });
     }
   }
 
@@ -931,12 +981,10 @@ export function SeoDashboard() {
                 activeTool={activeWatchTool}
                 activeClient={activeClient}
                 latestSiteUrl={competitiveAnalyses.find((analysis) => analysis.website_url)?.website_url || ""}
-                onResetSeoTrackerBaseline={() => {
-                  setSeoTrackerBaseline(null);
-                  setSeoTrackerResult(null);
-                }}
+                onResetSeoTrackerBaseline={resetSeoTrackerBaseline}
                 onRunSeoChangeTracker={runSeoChangeTracker}
                 onRunSurfaceCheck={runWebsiteSurfaceCheck}
+                seoChangeRuns={seoChangeRuns}
                 seoTrackerBaseline={seoTrackerBaseline}
                 seoTrackerResult={seoTrackerResult}
                 seoTracking={seoTracking}
@@ -1857,6 +1905,7 @@ function WebsiteWatchView({
   onResetSeoTrackerBaseline,
   onRunSeoChangeTracker,
   onRunSurfaceCheck,
+  seoChangeRuns,
   seoTrackerBaseline,
   seoTrackerResult,
   seoTracking,
@@ -1869,6 +1918,7 @@ function WebsiteWatchView({
   onResetSeoTrackerBaseline: () => void;
   onRunSeoChangeTracker: (payload: { siteUrl: string; pages: string }) => void;
   onRunSurfaceCheck: (payload: { siteUrl: string; pages: string; expectedText: string }) => void;
+  seoChangeRuns: SeoChangeRun[];
   seoTrackerBaseline: SeoChangeTrackerBaseline | null;
   seoTrackerResult: SeoChangeTrackerResult | null;
   seoTracking: boolean;
@@ -1946,42 +1996,49 @@ function WebsiteWatchView({
         ) : null}
 
         {activeTool === "tracker" ? (
-          <section className="panel watch-run-panel seo-tracker-panel" aria-labelledby="seo-tracker-title">
-            <div className="section-heading">
-              <div>
-                <span className="eyebrow">SEO tracker</span>
-                <h3 id="seo-tracker-title">Track public metadata and copy changes</h3>
-                <p>Run once to capture a baseline. Run again to compare public titles, descriptions, canonicals, robots tags, H1s, Open Graph, and body copy.</p>
+          <>
+            <section className="panel watch-run-panel seo-tracker-panel" aria-labelledby="seo-tracker-title">
+              <div className="section-heading">
+                <div>
+                  <span className="eyebrow">SEO tracker</span>
+                  <h3 id="seo-tracker-title">Track public metadata and copy changes</h3>
+                  <p>Run once to capture a baseline. The crawler uses the sitemap when available, then falls back to homepage navigation, and compares public titles, descriptions, canonicals, robots tags, H1s, Open Graph, and body copy.</p>
+                </div>
+                {seoTrackerBaseline ? (
+                  <button className="button" type="button" onClick={onResetSeoTrackerBaseline}>
+                    Reset baseline
+                  </button>
+                ) : null}
               </div>
-              {seoTrackerBaseline ? (
-                <button className="button" type="button" onClick={onResetSeoTrackerBaseline}>
-                  Reset baseline
-                </button>
-              ) : null}
-            </div>
 
-            <form className="watch-form" onSubmit={handleTrackerSubmit}>
-              <label>
-                Site URL
-                <input name="siteUrl" type="url" placeholder="https://example.com" defaultValue={latestSiteUrl} required />
-              </label>
-              <label>
-                Key pages
-                <textarea name="pages" defaultValue={"/\n/pricing\n/services\n/blog\n/contact"} rows={6} />
-              </label>
-              <div className="tracker-baseline-note" data-ready={Boolean(seoTrackerBaseline)}>
-                <strong>{seoTrackerBaseline ? "Baseline active" : "No baseline yet"}</strong>
-                <span>
-                  {seoTrackerBaseline
-                    ? `Last captured ${new Date(seoTrackerBaseline.capturedAt).toLocaleString()} from ${seoTrackerBaseline.pages.length} page${seoTrackerBaseline.pages.length === 1 ? "" : "s"}.`
-                    : "The first crawl captures the comparison point. Credentialed Sanity/CMS checks belong in Deep Audit."}
-                </span>
-              </div>
-              <button className="button button-primary" type="submit" disabled={seoTracking}>
-                {seoTracking ? "Scanning SEO changes..." : seoTrackerBaseline ? "Scan for SEO Changes" : "Capture SEO Baseline"}
-              </button>
-            </form>
-          </section>
+              <form className="watch-form" onSubmit={handleTrackerSubmit}>
+                <label>
+                  Site URL
+                  <input name="siteUrl" type="url" placeholder="https://example.com" defaultValue={latestSiteUrl} required />
+                </label>
+                <label>
+                  Priority pages, optional
+                  <textarea
+                    name="pages"
+                    placeholder={"/\n/pricing\n/services\n/blog\n/contact"}
+                    rows={6}
+                  />
+                </label>
+                <div className="tracker-baseline-note" data-ready={Boolean(seoTrackerBaseline)}>
+                  <strong>{seoTrackerBaseline ? "Baseline active" : "No baseline yet"}</strong>
+                  <span>
+                    {seoTrackerBaseline
+                      ? `Last captured ${new Date(seoTrackerBaseline.capturedAt).toLocaleString()} from ${seoTrackerBaseline.pages.length} page${seoTrackerBaseline.pages.length === 1 ? "" : "s"}.`
+                      : "The first crawl captures the comparison point. Credentialed Sanity/CMS checks belong in Deep Audit."}
+                  </span>
+                </div>
+                <button className="button button-primary" type="submit" disabled={seoTracking}>
+                  {seoTracking ? "Scanning SEO changes..." : seoTrackerBaseline ? "Scan for SEO Changes" : "Capture SEO Baseline"}
+                </button>
+              </form>
+            </section>
+            <SeoChangeRunHistory runs={seoChangeRuns} />
+          </>
         ) : null}
 
         {activeTool === "deep" ? (
@@ -2058,6 +2115,52 @@ function WebsiteWatchView({
       {activeTool === "surface" && surfaceResult ? <WebsiteSurfaceResults result={surfaceResult} /> : null}
       {activeTool === "tracker" && seoTrackerResult ? <SeoChangeTrackerResults result={seoTrackerResult} /> : null}
     </PageWorkspace>
+  );
+}
+
+function SeoChangeRunHistory({ runs }: { runs: SeoChangeRun[] }) {
+  return (
+    <section className="panel seo-run-history" aria-labelledby="seo-run-history-title">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">Saved history</span>
+          <h3 id="seo-run-history-title">Recent SEO tracker runs</h3>
+          <p>Stored per client and site URL. Each new scan compares against the latest saved baseline.</p>
+        </div>
+      </div>
+
+      {runs.length ? (
+        <div className="seo-run-list">
+          {runs.map((run) => {
+            const changeCount = Array.isArray(run.changes_json) ? run.changes_json.length : 0;
+            return (
+              <article className="seo-run-row" data-status={run.status} key={run.id}>
+                <div>
+                  <strong>{seoChangeStatusLabel(run.status)}</strong>
+                  <span>{run.site_url}</span>
+                </div>
+                <dl>
+                  <div>
+                    <dt>Checked</dt>
+                    <dd>{new Date(run.checked_at).toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt>Changed pages</dt>
+                    <dd>{run.summary_json.changedPages}</dd>
+                  </div>
+                  <div>
+                    <dt>Changes</dt>
+                    <dd>{changeCount}</dd>
+                  </div>
+                </dl>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="empty-state">No saved SEO tracker runs yet.</div>
+      )}
+    </section>
   );
 }
 

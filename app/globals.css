@@ -1628,6 +1628,7 @@ select {
 .deep-audit-note,
 .setup-list,
 .tracker-baseline-note span,
+.seo-run-row span,
 .surface-results p,
 .surface-page-row span,
 .surface-issue small,
@@ -1687,7 +1688,8 @@ select {
 }
 
 .watch-run-panel,
-.deep-audit-panel {
+.deep-audit-panel,
+.seo-run-history {
   display: grid;
   gap: 16px;
 }
@@ -1721,6 +1723,71 @@ select {
 
 .tracker-baseline-note strong {
   font-size: 0.9rem;
+}
+
+.seo-run-list {
+  display: grid;
+  gap: 10px;
+}
+
+.seo-run-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.75fr);
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.seo-run-row[data-status="changed"] {
+  border-color: rgba(122, 77, 18, 0.22);
+}
+
+.seo-run-row strong,
+.seo-run-row span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seo-run-row dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.seo-run-row div,
+.seo-run-row dl div {
+  min-width: 0;
+}
+
+.seo-run-row dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 820;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.seo-run-row dd {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .seo-run-row,
+  .seo-run-row dl {
+    grid-template-columns: 1fr;
+  }
 }
 
 .watch-form label,

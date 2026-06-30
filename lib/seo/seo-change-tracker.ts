@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { load } from "cheerio";
-import { normalizeSurfacePages, validatePublicWebsiteUrl, type WebsiteSurfaceSeverity } from "./website-surface";
+import { validatePublicWebsiteUrl, type WebsiteSurfaceSeverity } from "./website-surface";
 
 export type SeoChangeKind =
   | "status"
@@ -67,7 +67,7 @@ export type SeoChangeTrackerResult = {
   baseline: SeoChangeTrackerBaseline;
 };
 
-type SeoChangeTrackerInput = {
+export type SeoChangeTrackerInput = {
   siteUrl: string;
   pages?: string[];
   baseline?: SeoChangeTrackerBaseline | null;
@@ -75,7 +75,13 @@ type SeoChangeTrackerInput = {
 
 const MAX_HTML_BYTES = 1_200_000;
 const FETCH_TIMEOUT_MS = 8_000;
+const MAX_TRACKED_PAGES = 16;
+const MAX_SITEMAPS_TO_READ = 6;
 const USER_AGENT = "CircleClick SEO Change Tracker/1.0";
+const HTML_ACCEPT = "text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.5";
+const XML_ACCEPT = "application/xml,text/xml,text/plain;q=0.8,*/*;q=0.5";
+const NON_PAGE_EXTENSION_PATTERN =
+  /\.(?:avif|css|csv|doc|docx|gif|ico|jpeg|jpg|js|json|mp3|mp4|mov|pdf|png|rss|svg|txt|webm|webp|xls|xlsx|xml|zip)$/i;
 
 function splitList(value: unknown) {
   if (Array.isArray(value)) {
@@ -116,7 +122,15 @@ export function normalizeSeoChangeTrackerInput(body: unknown): SeoChangeTrackerI
   };
 }
 
-async function fetchWithTimeout(url: string) {
+export function normalizeSeoChangeTrackerSite(rawSiteUrl: string) {
+  const baseUrl = validatePublicWebsiteUrl(rawSiteUrl);
+  return {
+    siteUrl: baseUrl.toString(),
+    siteOrigin: baseUrl.origin,
+  };
+}
+
+async function fetchWithTimeout(url: string, accept = HTML_ACCEPT) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
@@ -126,7 +140,7 @@ async function fetchWithTimeout(url: string) {
       redirect: "follow",
       signal: controller.signal,
       headers: {
-        accept: "text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.5",
+        accept,
         "user-agent": USER_AGENT,
       },
     });
@@ -184,6 +198,196 @@ function absoluteUrl(rawUrl: string, baseUrl: string) {
   } catch {
     return rawUrl.trim();
   }
+}
+
+function normalizeSameOriginUrl(rawUrl: string, baseUrl: URL, { allowNonPage = false } = {}) {
+  const trimmed = rawUrl.trim();
+  if (!trimmed || trimmed.startsWith("#") || /^(mailto|tel|javascript):/i.test(trimmed)) {
+    return null;
+  }
+
+  try {
+    const url = new URL(trimmed, baseUrl);
+    if (url.origin !== baseUrl.origin || (url.protocol !== "http:" && url.protocol !== "https:")) {
+      return null;
+    }
+
+    url.hash = "";
+    if (!allowNonPage && NON_PAGE_EXTENSION_PATTERN.test(url.pathname)) {
+      return null;
+    }
+
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function addUniqueUrl(urls: string[], seen: Set<string>, url: string | null) {
+  if (!url || seen.has(url) || urls.length >= MAX_TRACKED_PAGES) {
+    return;
+  }
+
+  seen.add(url);
+  urls.push(url);
+}
+
+function normalizePriorityPageUrls(baseUrl: URL, pages: string[] = []) {
+  const urls: string[] = [];
+  const seen = new Set<string>();
+
+  addUniqueUrl(urls, seen, baseUrl.toString());
+  for (const page of pages) {
+    addUniqueUrl(urls, seen, normalizeSameOriginUrl(page, baseUrl));
+  }
+
+  return urls;
+}
+
+function extractSitemapLocations(xml: string, baseUrl: URL) {
+  const $ = load(xml, { xmlMode: true });
+  const pageUrls: string[] = [];
+  const sitemapUrls: string[] = [];
+  const pageSeen = new Set<string>();
+  const sitemapSeen = new Set<string>();
+
+  $("url > loc").each((_, element) => {
+    addUniqueUrl(pageUrls, pageSeen, normalizeSameOriginUrl(String($(element).text() || ""), baseUrl));
+  });
+
+  $("sitemap > loc").each((_, element) => {
+    addUniqueUrl(
+      sitemapUrls,
+      sitemapSeen,
+      normalizeSameOriginUrl(String($(element).text() || ""), baseUrl, { allowNonPage: true })
+    );
+  });
+
+  return { pageUrls, sitemapUrls };
+}
+
+async function fetchSitemapPageUrls(sitemapUrl: string, baseUrl: URL, visited = new Set<string>()): Promise<string[]> {
+  if (visited.has(sitemapUrl) || visited.size >= MAX_SITEMAPS_TO_READ) {
+    return [];
+  }
+
+  visited.add(sitemapUrl);
+
+  try {
+    const response = await fetchWithTimeout(sitemapUrl, XML_ACCEPT);
+    if (!response.ok) return [];
+
+    const xml = await readTextWithLimit(response);
+    if (!/<(?:urlset|sitemapindex|url|sitemap)\b/i.test(xml)) {
+      return [];
+    }
+
+    const { pageUrls, sitemapUrls } = extractSitemapLocations(xml, baseUrl);
+    if (pageUrls.length) {
+      return pageUrls;
+    }
+
+    const nestedUrls: string[] = [];
+    const nestedSeen = new Set<string>();
+    for (const nestedSitemap of sitemapUrls.slice(0, MAX_SITEMAPS_TO_READ)) {
+      const pages = await fetchSitemapPageUrls(nestedSitemap, baseUrl, visited);
+      for (const page of pages) {
+        addUniqueUrl(nestedUrls, nestedSeen, page);
+      }
+      if (nestedUrls.length >= MAX_TRACKED_PAGES) break;
+    }
+
+    return nestedUrls;
+  } catch {
+    return [];
+  }
+}
+
+async function findSitemapCandidates(baseUrl: URL) {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  try {
+    const robotsUrl = new URL("/robots.txt", baseUrl).toString();
+    const response = await fetchWithTimeout(robotsUrl, "text/plain,*/*;q=0.5");
+    if (response.ok) {
+      const robots = await readTextWithLimit(response);
+      for (const line of robots.split(/\r?\n/)) {
+        const match = line.match(/^\s*sitemap:\s*(.+?)\s*$/i);
+        if (match) {
+          addUniqueUrl(candidates, seen, normalizeSameOriginUrl(match[1], baseUrl, { allowNonPage: true }));
+        }
+      }
+    }
+  } catch {
+    // Sitemap discovery falls back to common sitemap paths.
+  }
+
+  addUniqueUrl(candidates, seen, normalizeSameOriginUrl("/sitemap.xml", baseUrl, { allowNonPage: true }));
+  addUniqueUrl(candidates, seen, normalizeSameOriginUrl("/sitemap_index.xml", baseUrl, { allowNonPage: true }));
+
+  return candidates;
+}
+
+async function discoverSitemapPageUrls(baseUrl: URL) {
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  const sitemapCandidates = await findSitemapCandidates(baseUrl);
+
+  for (const sitemapUrl of sitemapCandidates) {
+    const pages = await fetchSitemapPageUrls(sitemapUrl, baseUrl);
+    for (const page of pages) {
+      addUniqueUrl(urls, seen, page);
+    }
+    if (urls.length >= MAX_TRACKED_PAGES) break;
+  }
+
+  return urls;
+}
+
+async function discoverNavigationPageUrls(baseUrl: URL) {
+  try {
+    const response = await fetchWithTimeout(baseUrl.toString());
+    if (!response.ok) return [];
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("html") && !contentType.includes("text/plain")) {
+      return [];
+    }
+
+    const html = await readTextWithLimit(response);
+    const $ = load(html);
+    const urls: string[] = [];
+    const seen = new Set<string>();
+
+    $("nav a[href], header a[href], [role='navigation'] a[href]").each((_, element) => {
+      addUniqueUrl(urls, seen, normalizeSameOriginUrl(String($(element).attr("href") || ""), baseUrl));
+    });
+
+    if (!urls.length) {
+      $("a[href]").each((_, element) => {
+        addUniqueUrl(urls, seen, normalizeSameOriginUrl(String($(element).attr("href") || ""), baseUrl));
+      });
+    }
+
+    return urls;
+  } catch {
+    return [];
+  }
+}
+
+async function discoverSeoChangeTrackerPageUrls(baseUrl: URL, pages: string[] = []) {
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  const priorityUrls = normalizePriorityPageUrls(baseUrl, pages);
+  const sitemapUrls = await discoverSitemapPageUrls(baseUrl);
+  const discoveredUrls = sitemapUrls.length ? sitemapUrls : await discoverNavigationPageUrls(baseUrl);
+
+  for (const url of [...priorityUrls, ...discoveredUrls]) {
+    addUniqueUrl(urls, seen, url);
+  }
+
+  return urls;
 }
 
 async function crawlSeoSnapshot(url: string): Promise<SeoPageSnapshot> {
@@ -336,7 +540,7 @@ function countChanges(changes: SeoChangeRecord[], severity: WebsiteSurfaceSeveri
 
 export async function runSeoChangeTracker(input: SeoChangeTrackerInput): Promise<SeoChangeTrackerResult> {
   const baseUrl = validatePublicWebsiteUrl(input.siteUrl);
-  const pageUrls = normalizeSurfacePages(baseUrl.toString(), input.pages);
+  const pageUrls = await discoverSeoChangeTrackerPageUrls(baseUrl, input.pages);
   const currentPages = await Promise.all(pageUrls.map((pageUrl) => crawlSeoSnapshot(pageUrl)));
   const baselineUrl = input.baseline ? validatePublicWebsiteUrl(input.baseline.siteUrl) : null;
   const canCompare = baselineUrl ? baselineUrl.origin === baseUrl.origin : false;

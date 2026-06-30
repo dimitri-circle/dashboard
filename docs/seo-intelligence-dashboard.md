@@ -42,7 +42,8 @@ For Vercel, add the same values under Project Settings → Environment Variables
 - `SEO_APP_PASSWORD` (recommended dashboard login password; falls back to `CRON_SECRET` if omitted)
 - `SEO_APP_SESSION_TOKEN` (recommended random token stored in the login cookie; falls back to `CRON_SECRET` if omitted)
 - `WEBSITE_WATCH_GITHUB_OWNER`, `WEBSITE_WATCH_GITHUB_REPO`, `WEBSITE_WATCH_GITHUB_WORKFLOW`, `WEBSITE_WATCH_GITHUB_REF`, and `WEBSITE_WATCH_GITHUB_TOKEN` (optional future deep-audit workflow dispatch settings)
-- `SLACK_WEBHOOK_URL` (optional future deep-audit or alert delivery target)
+- `SLACK_WEBHOOK_URL` (optional shared deep-audit or alert delivery target)
+- `SEO_WATCH_SLACK_WEBHOOK_URL` (optional SEO Watch-specific Slack incoming webhook; falls back to `SLACK_WEBHOOK_URL`)
 
 Apply the database schema before using the dashboard:
 
@@ -93,6 +94,7 @@ The dashboard includes Website Watch for two levels of site review:
 
 - Surface Check runs immediately inside the authenticated dashboard backend. It fetches public same-origin pages, checks response status, titles, meta descriptions, canonical tags, robots metadata, H1s, expected text, image alt text, `robots.txt`, `sitemap.xml`, and a small set of internal links. It rejects local/private targets and limits page/link counts so the route cannot be used as a broad scanner.
 - Deep Audit is a setup worksheet for the heavier browser path. Use it when a site requires Vercel protection bypass, basic auth, a test login, or a custom access header. Store secrets in GitHub or Vercel, not in public client code. The actual browser runner should execute in GitHub Actions or a worker when those credentials are configured.
+- SEO Change Tracker stores the latest baseline per client and site URL in `seo_watch_baselines`, stores each scan in `seo_change_runs`, and compares every new public crawl against the latest saved baseline. It uses sitemap URLs first, falls back to homepage navigation when a sitemap is unavailable, and lets users add optional priority paths that must be included. When a baseline is first created or a later scan detects changes, the backend posts a Slack incoming-webhook alert if `SEO_WATCH_SLACK_WEBHOOK_URL` or `SLACK_WEBHOOK_URL` is configured. Unchanged scans stay in the dashboard history without creating Slack noise.
 
 ## Competitive Analysis
 

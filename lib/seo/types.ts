@@ -68,6 +68,35 @@ export type SeoMetricSnapshot = {
   created_at: string;
 };
 
+export type SeoWatchBaseline = {
+  _id?: string;
+  id: string;
+  user_id: string;
+  site_url: string;
+  site_origin: string;
+  baseline_json: Record<string, unknown>;
+  page_count: number;
+  captured_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SeoChangeRun = {
+  _id?: string;
+  id: string;
+  user_id: string;
+  baseline_id: string | null;
+  site_url: string;
+  site_origin: string;
+  status: "baseline" | "unchanged" | "changed" | "failed";
+  summary_json: Record<string, unknown>;
+  changes_json: unknown[];
+  pages_json: unknown[];
+  previous_captured_at: string | null;
+  checked_at: string;
+  created_at: string;
+};
+
 export type SeoCompetitiveFeatureEvidence = {
   feature: string;
   label: string;

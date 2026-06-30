@@ -2,11 +2,13 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type {
   SeoAuditEvent,
   SeoAppUser,
+  SeoChangeRun,
   SeoClient,
   SeoCompetitiveAnalysis,
   SeoInsight,
   SeoIntegration,
   SeoMetricSnapshot,
+  SeoWatchBaseline,
 } from "./types";
 
 type RowWithId = { id: string; _id?: string };
@@ -15,9 +17,11 @@ type SeoTableName =
   | "seo_app_users"
   | "seo_clients"
   | "seo_competitive_analyses"
+  | "seo_change_runs"
   | "seo_insights"
   | "seo_integrations"
-  | "seo_metric_snapshots";
+  | "seo_metric_snapshots"
+  | "seo_watch_baselines";
 
 type FilterValue = string | number | boolean | null | { $ne?: unknown; $in?: unknown[] };
 type Filter = Record<string, FilterValue>;
@@ -257,6 +261,8 @@ export async function getSeoCollections(): Promise<{
   integrations: SupabaseCollection<SeoIntegration>;
   insights: SupabaseCollection<SeoInsight>;
   metricSnapshots: SupabaseCollection<SeoMetricSnapshot>;
+  watchBaselines: SupabaseCollection<SeoWatchBaseline>;
+  changeRuns: SupabaseCollection<SeoChangeRun>;
   competitiveAnalyses: SupabaseCollection<SeoCompetitiveAnalysis>;
   clients: SupabaseCollection<SeoClient>;
   auditEvents: SupabaseCollection<SeoAuditEvent>;
@@ -266,6 +272,8 @@ export async function getSeoCollections(): Promise<{
     integrations: new SupabaseCollection<SeoIntegration>("seo_integrations"),
     insights: new SupabaseCollection<SeoInsight>("seo_insights"),
     metricSnapshots: new SupabaseCollection<SeoMetricSnapshot>("seo_metric_snapshots"),
+    watchBaselines: new SupabaseCollection<SeoWatchBaseline>("seo_watch_baselines"),
+    changeRuns: new SupabaseCollection<SeoChangeRun>("seo_change_runs"),
     competitiveAnalyses: new SupabaseCollection<SeoCompetitiveAnalysis>("seo_competitive_analyses"),
     clients: new SupabaseCollection<SeoClient>("seo_clients"),
     auditEvents: new SupabaseCollection<SeoAuditEvent>("seo_audit_events"),
