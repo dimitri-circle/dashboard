@@ -8,6 +8,7 @@ type Provider = "ga4" | "gtm" | "hotjar" | "openai" | "mcp";
 type Status = "disconnected" | "connected" | "error";
 type View = "clients" | "overview" | "brain" | "watch" | "integrations" | "analysis" | "insights";
 type NavIconName = "clients" | "overview" | "brain" | "watch" | "tools" | "analysis" | "insights" | "menu" | "close" | "signout";
+type WebsiteWatchTool = "surface" | "deep";
 type DeepAuditAccess = "public" | "vercel" | "basic" | "login" | "custom";
 type ToastNoticeState = {
   id: number;
@@ -214,6 +215,11 @@ const navItems: Array<{ id: View; label: string; description: string; icon: NavI
   { id: "insights", label: "Insights", description: "Review AI recommendations", icon: "insights" },
 ];
 
+const websiteWatchTools: Array<{ id: WebsiteWatchTool; label: string; description: string }> = [
+  { id: "surface", label: "Surface Check", description: "Public page review" },
+  { id: "deep", label: "Deep Audit", description: "Protected access setup" },
+];
+
 const DEFAULT_CLIENT_ID = "demo-client";
 const CLIENT_STORAGE_KEY = "seo-intelligence-client-id";
 const COMPETITIVE_REPORTS_PER_PAGE = 1;
@@ -353,6 +359,7 @@ export function SeoDashboard() {
   const [surfaceResult, setSurfaceResult] = useState<WebsiteSurfaceResult | null>(null);
   const [tourRunning, setTourRunning] = useState(false);
   const [activeProvider, setActiveProvider] = useState<Provider>("ga4");
+  const [activeWatchTool, setActiveWatchTool] = useState<WebsiteWatchTool>("surface");
   const [navPinned, setNavPinned] = useState(false);
 
   const activeClient = clients.find((client) => client.id === clientId);
@@ -740,6 +747,25 @@ export function SeoDashboard() {
                     ))}
                   </div>
                 ) : null}
+                {item.id === "watch" && view === "watch" ? (
+                  <div className="provider-subnav watch-subnav" aria-label="Website Watch tools">
+                    {websiteWatchTools.map((tool) => (
+                      <button
+                        className="provider-subnav-item watch-subnav-item"
+                        data-active={activeWatchTool === tool.id}
+                        key={tool.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveWatchTool(tool.id);
+                          handleNavSelect("watch");
+                        }}
+                      >
+                        <span>{tool.label}</span>
+                        <small>{tool.description}</small>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ))}
           </nav>
@@ -809,6 +835,7 @@ export function SeoDashboard() {
 
             {view === "watch" ? (
               <WebsiteWatchView
+                activeTool={activeWatchTool}
                 activeClient={activeClient}
                 latestSiteUrl={competitiveAnalyses.find((analysis) => analysis.website_url)?.website_url || ""}
                 onRunSurfaceCheck={runWebsiteSurfaceCheck}
@@ -1400,15 +1427,24 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
 
   return (
     <PageWorkspace className="brain-workspace">
-      <PageHero
-        eyebrow="Vast Blog Audit"
-        title="Truth before publishing."
-        description="Br(AI)N checks draft claims against Vast docs, site knowledge, live pricing, brand sources, and approved social feeds."
-        stats={[
-          { label: "workspace", value: activeClient?.name || "Client" },
-          { label: "mode", value: "Audit only", helper: "human approval required" },
-        ]}
-      />
+      <section className="panel brain-brief-panel" aria-label="Vast Blog Audit">
+        <div className="brain-brief-copy">
+          <span className="eyebrow">Vast Blog Audit</span>
+          <h3>Truth before publishing.</h3>
+          <p>Checks draft claims against Vast docs, site knowledge, live pricing, brand sources, and approved social feeds.</p>
+        </div>
+        <div className="brain-brief-meta" aria-label="Audit context">
+          <div>
+            <span>Workspace</span>
+            <strong>{activeClient?.name || "Client"}</strong>
+          </div>
+          <div>
+            <span>Mode</span>
+            <strong>Audit only</strong>
+            <small>Human approval required</small>
+          </div>
+        </div>
+      </section>
 
       <section className="panel blog-audit-panel" aria-labelledby="blog-audit-form-title">
         <div className="section-heading">
@@ -1631,12 +1667,14 @@ const deepAuditGuidance: Record<
 };
 
 function WebsiteWatchView({
+  activeTool,
   activeClient,
   latestSiteUrl,
   onRunSurfaceCheck,
   surfaceChecking,
   surfaceResult,
 }: {
+  activeTool: WebsiteWatchTool;
   activeClient?: Client;
   latestSiteUrl: string;
   onRunSurfaceCheck: (payload: { siteUrl: string; pages: string; expectedText: string }) => void;
@@ -1669,91 +1707,95 @@ function WebsiteWatchView({
         ]}
       />
 
-      <div className="watch-layout">
-        <section className="panel watch-run-panel" aria-labelledby="surface-check-title">
-          <div className="section-heading">
-            <div>
-              <span className="eyebrow">Surface check</span>
-              <h3 id="surface-check-title">Review public pages</h3>
-              <p>Use one public origin. Page paths stay on the same domain for safety.</p>
+      <div className="watch-tool-stage">
+        {activeTool === "surface" ? (
+          <section className="panel watch-run-panel" aria-labelledby="surface-check-title">
+            <div className="section-heading">
+              <div>
+                <span className="eyebrow">Surface check</span>
+                <h3 id="surface-check-title">Review public pages</h3>
+                <p>Use one public origin. Page paths stay on the same domain for safety.</p>
+              </div>
             </div>
-          </div>
 
-          <form className="watch-form" onSubmit={handleSurfaceSubmit}>
-            <label>
-              Site URL
-              <input name="siteUrl" type="url" placeholder="https://example.com" defaultValue={latestSiteUrl} required />
-            </label>
-            <label>
-              Key pages
-              <textarea name="pages" defaultValue={"/\n/pricing\n/services\n/blog\n/contact"} rows={6} />
-            </label>
-            <label>
-              Expected text
-              <textarea name="expectedText" defaultValue={activeClient?.name || ""} rows={3} />
-            </label>
-            <button className="button button-primary" type="submit" disabled={surfaceChecking}>
-              {surfaceChecking ? "Checking pages..." : "Run Surface Check"}
-            </button>
-          </form>
-        </section>
-
-        <section className="panel deep-audit-panel" aria-labelledby="deep-audit-title">
-          <div className="section-heading">
-            <div>
-              <span className="eyebrow">Deep audit</span>
-              <h3 id="deep-audit-title">Prepare protected access</h3>
-              <p>Choose the access shape. Secrets should live in GitHub or Vercel, never in public client code.</p>
-            </div>
-          </div>
-
-          <div className="access-methods" aria-label="Access method">
-            {(Object.keys(deepAuditGuidance) as DeepAuditAccess[]).map((method) => (
-              <button
-                className="access-method"
-                data-active={accessMethod === method}
-                key={method}
-                type="button"
-                onClick={() => setAccessMethod(method)}
-              >
-                {deepAuditGuidance[method].label}
+            <form className="watch-form" onSubmit={handleSurfaceSubmit}>
+              <label>
+                Site URL
+                <input name="siteUrl" type="url" placeholder="https://example.com" defaultValue={latestSiteUrl} required />
+              </label>
+              <label>
+                Key pages
+                <textarea name="pages" defaultValue={"/\n/pricing\n/services\n/blog\n/contact"} rows={6} />
+              </label>
+              <label>
+                Expected text
+                <textarea name="expectedText" defaultValue={activeClient?.name || ""} rows={3} />
+              </label>
+              <button className="button button-primary" type="submit" disabled={surfaceChecking}>
+                {surfaceChecking ? "Checking pages..." : "Run Surface Check"}
               </button>
-            ))}
-          </div>
+            </form>
+          </section>
+        ) : null}
 
-          <div className="deep-audit-guidance">
-            <p>{guidance.summary}</p>
-            {guidance.fields.length ? (
-              <div className="access-field-grid">
-                {guidance.fields.map((field) => (
-                  <label key={field.label}>
-                    {field.label}
-                    <input type={field.secret ? "password" : "text"} placeholder={field.placeholder} autoComplete="off" />
-                  </label>
+        {activeTool === "deep" ? (
+          <section className="panel deep-audit-panel" aria-labelledby="deep-audit-title">
+            <div className="section-heading">
+              <div>
+                <span className="eyebrow">Deep audit</span>
+                <h3 id="deep-audit-title">Prepare protected access</h3>
+                <p>Choose the access shape. Secrets should live in GitHub or Vercel, never in public client code.</p>
+              </div>
+            </div>
+
+            <div className="access-methods" aria-label="Access method">
+              {(Object.keys(deepAuditGuidance) as DeepAuditAccess[]).map((method) => (
+                <button
+                  className="access-method"
+                  data-active={accessMethod === method}
+                  key={method}
+                  type="button"
+                  onClick={() => setAccessMethod(method)}
+                >
+                  {deepAuditGuidance[method].label}
+                </button>
+              ))}
+            </div>
+
+            <div className="deep-audit-guidance">
+              <p>{guidance.summary}</p>
+              {guidance.fields.length ? (
+                <div className="access-field-grid">
+                  {guidance.fields.map((field) => (
+                    <label key={field.label}>
+                      {field.label}
+                      <input type={field.secret ? "password" : "text"} placeholder={field.placeholder} autoComplete="off" />
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+              <p className="deep-audit-note">
+                Setup worksheet only. Store real secrets in GitHub or Vercel before enabling the deep audit runner.
+              </p>
+              <div className="secret-list" aria-label="Required secret names">
+                {guidance.secrets.map((secret) => (
+                  <code key={secret}>{secret}</code>
                 ))}
               </div>
-            ) : null}
-            <p className="deep-audit-note">
-              Setup worksheet only. Store real secrets in GitHub or Vercel before enabling the deep audit runner.
-            </p>
-            <div className="secret-list" aria-label="Required secret names">
-              {guidance.secrets.map((secret) => (
-                <code key={secret}>{secret}</code>
-              ))}
+              <ol className="setup-list">
+                {guidance.steps.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+              <button className="button" type="button" disabled>
+                Deep Audit runner not connected yet
+              </button>
             </div>
-            <ol className="setup-list">
-              {guidance.steps.map((step) => (
-                <li key={step}>{step}</li>
-              ))}
-            </ol>
-            <button className="button" type="button" disabled>
-              Deep Audit runner not connected yet
-            </button>
-          </div>
-        </section>
+          </section>
+        ) : null}
       </div>
 
-      {surfaceResult ? <WebsiteSurfaceResults result={surfaceResult} /> : null}
+      {activeTool === "surface" && surfaceResult ? <WebsiteSurfaceResults result={surfaceResult} /> : null}
     </PageWorkspace>
   );
 }

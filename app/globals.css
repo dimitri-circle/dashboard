@@ -131,7 +131,8 @@ select {
 .page-workspace > .panel,
 .page-workspace > .client-page,
 .page-workspace > .tool-page-layout,
-.page-workspace > .insights-layout {
+.page-workspace > .insights-layout,
+.page-workspace > .watch-tool-stage {
   position: relative;
   z-index: 1;
 }
@@ -511,6 +512,30 @@ select {
 .provider-subnav-item[data-active="true"] {
   border-color: rgba(17, 18, 20, 0.32);
   background: rgba(17, 18, 20, 0.08);
+}
+
+.watch-subnav-item {
+  display: grid;
+  gap: 2px;
+  min-height: 48px;
+  padding: 8px 10px;
+}
+
+.watch-subnav-item span,
+.watch-subnav-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-subnav-item small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.watch-subnav-item[data-active="true"] small {
+  color: rgba(17, 18, 20, 0.62);
 }
 
 .active-client {
@@ -1039,6 +1064,74 @@ select {
   align-items: start;
 }
 
+.brain-brief-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.48fr);
+  gap: clamp(18px, 3vw, 36px);
+  align-items: center;
+  padding: clamp(18px, 2.4vw, 26px);
+}
+
+.brain-brief-copy {
+  display: grid;
+  gap: 10px;
+  max-width: 760px;
+}
+
+.brain-brief-copy h3 {
+  margin: 0;
+  font-size: clamp(1.25rem, 1.9vw, 1.62rem);
+  font-weight: 850;
+  line-height: 1.08;
+}
+
+.brain-brief-copy p {
+  max-width: 70ch;
+  color: var(--muted);
+  font-size: 0.98rem;
+  line-height: 1.55;
+}
+
+.brain-brief-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.brain-brief-meta div {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  min-height: 82px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.brain-brief-meta span,
+.brain-brief-meta small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+
+.brain-brief-meta strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: clamp(1.12rem, 1.8vw, 1.35rem);
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .brain-hero {
   grid-column: 1 / -1;
   display: grid;
@@ -1150,18 +1243,44 @@ select {
 
 .audit-upload-card {
   position: relative;
-  min-height: 168px;
-  place-items: center;
+  min-height: 94px;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-areas:
+    "icon eyebrow"
+    "icon title"
+    "icon helper";
+  align-items: center;
+  column-gap: 14px;
+  row-gap: 4px;
   border: 1px dashed rgba(20, 92, 66, 0.26);
   border-radius: 8px;
-  padding: 28px;
+  padding: 16px;
   background: rgba(245, 252, 249, 0.58);
-  text-align: center;
+  text-align: left;
   cursor: pointer;
   transition:
     border-color 160ms ease,
     background 160ms ease,
     box-shadow 160ms ease;
+}
+
+.audit-upload-card::before {
+  content: "";
+  grid-area: icon;
+  width: 46px;
+  height: 46px;
+  border: 1px solid rgba(20, 92, 66, 0.2);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(20, 92, 66, 0.16) 0 13px, transparent 13px) top right / 18px 18px no-repeat,
+    linear-gradient(rgba(20, 92, 66, 0.34), rgba(20, 92, 66, 0.34)) 12px 26px / 22px 2px no-repeat,
+    linear-gradient(rgba(20, 92, 66, 0.22), rgba(20, 92, 66, 0.22)) 12px 32px / 18px 2px no-repeat,
+    rgba(255, 255, 255, 0.72);
+}
+
+.audit-upload-card .eyebrow {
+  grid-area: eyebrow;
 }
 
 .audit-upload-card:hover,
@@ -1179,18 +1298,20 @@ select {
 }
 
 .audit-upload-card strong {
+  grid-area: title;
   max-width: 100%;
   overflow: hidden;
   color: var(--ink);
-  font-size: clamp(1.45rem, 2.4vw, 2rem);
-  line-height: 1.05;
+  font-size: clamp(1.08rem, 1.6vw, 1.28rem);
+  line-height: 1.12;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .audit-upload-card small {
+  grid-area: helper;
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-weight: 650;
   line-height: 1.45;
 }
@@ -1454,6 +1575,12 @@ select {
   grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.1fr);
   gap: 16px;
   align-items: start;
+}
+
+.watch-tool-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
 }
 
 .watch-run-panel,
@@ -2749,6 +2876,8 @@ select {
 
 @media (max-width: 980px) {
   .brain-workspace,
+  .brain-brief-panel,
+  .brain-brief-meta,
   .brain-hero,
   .competitive-workspace,
   .competitive-hero,
