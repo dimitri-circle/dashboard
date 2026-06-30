@@ -1571,56 +1571,58 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
         </div>
       </section>
 
-      <section className="panel blog-audit-panel" aria-labelledby="blog-audit-form-title">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">Draft input</span>
-            <h3 id="blog-audit-form-title">Upload or paste a blog draft.</h3>
-          </div>
-        </div>
-
-        <form className="blog-audit-form" ref={auditFormRef} onSubmit={runAudit}>
-          <label className="audit-upload-card">
-            <input
-              name="file"
-              type="file"
-              accept=".md,.markdown,.mdx,.txt,.html,.htm,.csv,.docx,.zip,text/markdown,text/plain,text/html,text/csv,application/zip,application/x-zip-compressed,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              onChange={(event) => setSelectedFileName(event.currentTarget.files?.[0]?.name || null)}
-            />
-            <span className="eyebrow">Upload draft or ZIP</span>
-            <strong>{selectedFileName || "Choose a file"}</strong>
-            <small>Markdown, text, HTML, CSV, DOCX, and ZIP files are supported.</small>
-          </label>
-
-          <div className="audit-input-divider" aria-hidden="true">
-            <span>or paste it</span>
+      {!auditReport ? (
+        <section className="panel blog-audit-panel" aria-labelledby="blog-audit-form-title">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Draft input</span>
+              <h3 id="blog-audit-form-title">Upload or paste a blog draft.</h3>
+            </div>
           </div>
 
-          <label className="audit-paste-field">
-            Paste draft
-            <textarea
-              name="content"
-              placeholder="Paste the draft here."
-              ref={auditTextareaRef}
-              rows={14}
-            />
-          </label>
-          <div className="actions">
-            <button className="button button-primary" type="submit" disabled={auditing}>
-              {auditing ? "Auditing..." : "Audit Draft"}
-            </button>
-          </div>
-        </form>
+          <form className="blog-audit-form" ref={auditFormRef} onSubmit={runAudit}>
+            <label className="audit-upload-card">
+              <input
+                name="file"
+                type="file"
+                accept=".md,.markdown,.mdx,.txt,.html,.htm,.csv,.docx,.zip,text/markdown,text/plain,text/html,text/csv,application/zip,application/x-zip-compressed,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={(event) => setSelectedFileName(event.currentTarget.files?.[0]?.name || null)}
+              />
+              <span className="eyebrow">Upload draft or ZIP</span>
+              <strong>{selectedFileName || "Choose a file"}</strong>
+              <small>Markdown, text, HTML, CSV, DOCX, and ZIP files are supported.</small>
+            </label>
 
-        {auditError ? (
-          <div className="alert" data-type="error" role="status">
-            {auditError}
-          </div>
-        ) : null}
-      </section>
+            <div className="audit-input-divider" aria-hidden="true">
+              <span>or paste it</span>
+            </div>
+
+            <label className="audit-paste-field">
+              Paste draft
+              <textarea
+                name="content"
+                placeholder="Paste the draft here."
+                ref={auditTextareaRef}
+                rows={14}
+              />
+            </label>
+            <div className="actions">
+              <button className="button button-primary" type="submit" disabled={auditing}>
+                {auditing ? "Auditing..." : "Audit Draft"}
+              </button>
+            </div>
+          </form>
+
+          {auditError ? (
+            <div className="alert" data-type="error" role="status">
+              {auditError}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       {auditReport || auditHistory.length ? (
-        <div className="audit-output-column">
+        <div className="audit-output-column" data-mode={auditReport ? "report" : "history"}>
           {auditReport ? (
             <section className="panel audit-report-panel" aria-labelledby="blog-audit-report-title">
               <div className="section-heading">

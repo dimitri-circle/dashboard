@@ -1352,6 +1352,10 @@ select {
   min-width: 0;
 }
 
+.audit-output-column[data-mode="report"] {
+  grid-column: 1 / -1;
+}
+
 .audit-report-panel .section-heading,
 .audit-history-panel .section-heading {
   margin-bottom: 16px;
