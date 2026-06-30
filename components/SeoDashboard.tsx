@@ -1,14 +1,14 @@
 "use client";
 
 import { CircleClickLogo } from "@/components/CircleClickLogo";
-import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Joyride, STATUS, type EventData, type Step, type TooltipRenderProps } from "react-joyride";
 
 type Provider = "ga4" | "gtm" | "hotjar" | "openai" | "mcp";
 type Status = "disconnected" | "connected" | "error";
 type View = "clients" | "overview" | "brain" | "watch" | "integrations" | "analysis" | "insights";
 type NavIconName = "clients" | "overview" | "brain" | "watch" | "tools" | "analysis" | "insights" | "menu" | "close" | "signout";
-type WebsiteWatchTool = "surface" | "deep";
+type WebsiteWatchTool = "surface" | "tracker" | "deep";
 type DeepAuditAccess = "public" | "vercel" | "basic" | "login" | "custom";
 type ToastNoticeState = {
   id: number;
@@ -136,6 +136,13 @@ type BlogAuditReport = {
   externalEvidence?: BlogAuditExternalEvidenceSummary;
 };
 
+type BlogAuditHistoryItem = {
+  id: string;
+  createdAt: string;
+  sourceLabel: string;
+  report: BlogAuditReport;
+};
+
 type WebsiteSurfaceIssue = {
   severity: "critical" | "high" | "medium" | "low";
   title: string;
@@ -170,6 +177,62 @@ type WebsiteSurfaceResult = {
   };
   pages: WebsiteSurfacePageResult[];
   issues: WebsiteSurfaceIssue[];
+};
+
+type SeoChangeKind = "status" | "title" | "metaDescription" | "canonical" | "robots" | "h1" | "openGraph" | "copy" | "page";
+
+type SeoPageSnapshot = {
+  url: string;
+  finalUrl: string;
+  status: number | null;
+  ok: boolean;
+  title: string | null;
+  metaDescription: string | null;
+  canonical: string | null;
+  robots: string | null;
+  h1: string | null;
+  ogTitle: string | null;
+  ogDescription: string | null;
+  wordCount: number;
+  copyHash: string;
+  copySample: string;
+};
+
+type SeoChangeRecord = {
+  kind: SeoChangeKind;
+  severity: WebsiteSurfaceIssue["severity"];
+  label: string;
+  detail: string;
+  before: string | null;
+  after: string | null;
+  url: string;
+};
+
+type SeoChangeTrackerBaseline = {
+  version: 1;
+  siteUrl: string;
+  capturedAt: string;
+  pages: SeoPageSnapshot[];
+};
+
+type SeoChangeTrackerResult = {
+  siteUrl: string;
+  checkedAt: string;
+  status: "baseline" | "unchanged" | "changed" | "failed";
+  summary: {
+    pagesChecked: number;
+    changedPages: number;
+    metadataChanges: number;
+    copyChanges: number;
+    technicalChanges: number;
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  pages: Array<SeoPageSnapshot & { changes: SeoChangeRecord[] }>;
+  changes: SeoChangeRecord[];
+  baseline: SeoChangeTrackerBaseline;
 };
 
 const providerLabels: Record<Provider, string> = {
@@ -217,6 +280,7 @@ const navItems: Array<{ id: View; label: string; description: string; icon: NavI
 
 const websiteWatchTools: Array<{ id: WebsiteWatchTool; label: string; description: string }> = [
   { id: "surface", label: "Surface Check", description: "Public page review" },
+  { id: "tracker", label: "SEO Tracker", description: "Metadata and copy changes" },
   { id: "deep", label: "Deep Audit", description: "Protected access setup" },
 ];
 
@@ -357,6 +421,9 @@ export function SeoDashboard() {
   const [analyzing, setAnalyzing] = useState(false);
   const [surfaceChecking, setSurfaceChecking] = useState(false);
   const [surfaceResult, setSurfaceResult] = useState<WebsiteSurfaceResult | null>(null);
+  const [seoTracking, setSeoTracking] = useState(false);
+  const [seoTrackerBaseline, setSeoTrackerBaseline] = useState<SeoChangeTrackerBaseline | null>(null);
+  const [seoTrackerResult, setSeoTrackerResult] = useState<SeoChangeTrackerResult | null>(null);
   const [tourRunning, setTourRunning] = useState(false);
   const [activeProvider, setActiveProvider] = useState<Provider>("ga4");
   const [activeWatchTool, setActiveWatchTool] = useState<WebsiteWatchTool>("surface");
@@ -633,6 +700,32 @@ export function SeoDashboard() {
     }
   }
 
+  async function runSeoChangeTracker(payload: { siteUrl: string; pages: string }) {
+    try {
+      setSeoTracking(true);
+      const body = await api<{ result: SeoChangeTrackerResult }>(clientId, "/api/seo/website-watch/seo-change-tracker", {
+        method: "POST",
+        body: JSON.stringify({
+          ...payload,
+          baseline: seoTrackerBaseline,
+        }),
+      });
+      setSeoTrackerResult(body.result);
+      setSeoTrackerBaseline(body.result.baseline);
+      setNotice({
+        type: body.result.status === "changed" ? "info" : "success",
+        message:
+          body.result.status === "baseline"
+            ? `SEO change baseline captured for ${body.result.summary.pagesChecked} page${body.result.summary.pagesChecked === 1 ? "" : "s"}.`
+            : `SEO tracker scanned ${body.result.summary.pagesChecked} page${body.result.summary.pagesChecked === 1 ? "" : "s"} and found ${body.result.summary.changedPages} changed page${body.result.summary.changedPages === 1 ? "" : "s"}.`,
+      });
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to run SEO change tracker." });
+    } finally {
+      setSeoTracking(false);
+    }
+  }
+
   function handleTourCallback(data: EventData) {
     if (data.status === STATUS.FINISHED || data.status === STATUS.SKIPPED) {
       setTourRunning(false);
@@ -838,7 +931,15 @@ export function SeoDashboard() {
                 activeTool={activeWatchTool}
                 activeClient={activeClient}
                 latestSiteUrl={competitiveAnalyses.find((analysis) => analysis.website_url)?.website_url || ""}
+                onResetSeoTrackerBaseline={() => {
+                  setSeoTrackerBaseline(null);
+                  setSeoTrackerResult(null);
+                }}
+                onRunSeoChangeTracker={runSeoChangeTracker}
                 onRunSurfaceCheck={runWebsiteSurfaceCheck}
+                seoTrackerBaseline={seoTrackerBaseline}
+                seoTrackerResult={seoTrackerResult}
+                seoTracking={seoTracking}
                 surfaceChecking={surfaceChecking}
                 surfaceResult={surfaceResult}
               />
@@ -1386,23 +1487,30 @@ function GraphCard({ helper, label, percent, value }: { helper: string; label: s
 
 function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId: string }) {
   const [auditReport, setAuditReport] = useState<BlogAuditReport | null>(null);
+  const [auditHistory, setAuditHistory] = useState<BlogAuditHistoryItem[]>([]);
   const [auditing, setAuditing] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
+  const auditFormRef = useRef<HTMLFormElement | null>(null);
+  const auditTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   async function runAudit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const formData = new FormData(form);
     const file = formData.get("file") as File | null;
+    const hasFile = file instanceof File && file.size > 0;
+    const pastedContent = String(formData.get("content") || "");
+    const sourceLabel = hasFile ? file.name : inferDraftLabel(pastedContent);
 
-    if (file && file.size === 0) {
+    if (!hasFile) {
       formData.delete("file");
     }
 
     try {
       setAuditing(true);
       setAuditError(null);
+      setAuditReport(null);
       const response = await fetch("/api/blog-audit", {
         method: "POST",
         headers: {
@@ -1417,12 +1525,29 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
         throw new Error(body.error || "Unable to audit blog draft.");
       }
 
-      setAuditReport(body as BlogAuditReport);
+      const nextReport = body as BlogAuditReport;
+      const historyItem: BlogAuditHistoryItem = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        createdAt: new Date().toISOString(),
+        sourceLabel,
+        report: nextReport,
+      };
+
+      setAuditReport(nextReport);
+      setAuditHistory((items) => [historyItem, ...items].slice(0, 8));
     } catch (error) {
       setAuditError(error instanceof Error ? error.message : "Unable to audit blog draft.");
     } finally {
       setAuditing(false);
     }
+  }
+
+  function startAnotherAudit() {
+    setAuditReport(null);
+    setAuditError(null);
+    setSelectedFileName(null);
+    auditFormRef.current?.reset();
+    window.setTimeout(() => auditTextareaRef.current?.focus(), 0);
   }
 
   return (
@@ -1454,7 +1579,7 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
           </div>
         </div>
 
-        <form className="blog-audit-form" onSubmit={runAudit}>
+        <form className="blog-audit-form" ref={auditFormRef} onSubmit={runAudit}>
           <label className="audit-upload-card">
             <input
               name="file"
@@ -1476,6 +1601,7 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
             <textarea
               name="content"
               placeholder="Paste the draft here."
+              ref={auditTextareaRef}
               rows={14}
             />
           </label>
@@ -1493,17 +1619,73 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
         ) : null}
       </section>
 
-      <section className="panel audit-report-panel" aria-labelledby="blog-audit-report-title">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">Structured report</span>
-            <h3 id="blog-audit-report-title">Audit result</h3>
-          </div>
-        </div>
+      {auditReport || auditHistory.length ? (
+        <div className="audit-output-column">
+          {auditReport ? (
+            <section className="panel audit-report-panel" aria-labelledby="blog-audit-report-title">
+              <div className="section-heading">
+                <div>
+                  <span className="eyebrow">Structured report</span>
+                  <h3 id="blog-audit-report-title">Audit result</h3>
+                </div>
+                <button className="button" type="button" onClick={startAnotherAudit}>
+                  New audit
+                </button>
+              </div>
 
-        {auditReport ? <AuditReportView report={auditReport} /> : <div className="empty-state">Run an audit to see truth, brand, evidence, and publish risk.</div>}
-      </section>
+              <AuditReportView report={auditReport} />
+            </section>
+          ) : null}
+
+          {auditHistory.length ? (
+            <AuditHistoryPanel activeReport={auditReport} items={auditHistory} onSelectReport={setAuditReport} />
+          ) : null}
+        </div>
+      ) : null}
     </PageWorkspace>
+  );
+}
+
+function AuditHistoryPanel({
+  activeReport,
+  items,
+  onSelectReport,
+}: {
+  activeReport: BlogAuditReport | null;
+  items: BlogAuditHistoryItem[];
+  onSelectReport: (report: BlogAuditReport) => void;
+}) {
+  return (
+    <section className="panel audit-history-panel" aria-labelledby="audit-history-title">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">Audit history</span>
+          <h3 id="audit-history-title">Previous reports</h3>
+        </div>
+      </div>
+
+      <div className="audit-history-list">
+        {items.map((item) => (
+          <button
+            className="audit-history-item"
+            data-active={activeReport === item.report}
+            key={item.id}
+            type="button"
+            onClick={() => onSelectReport(item.report)}
+          >
+            <span className="audit-history-copy">
+              <strong>{item.sourceLabel}</strong>
+              <small>{new Date(item.createdAt).toLocaleString()}</small>
+            </span>
+            <span className="audit-history-meta" aria-label="Report scores">
+              <span>{formatRecommendation(item.report.recommendation)}</span>
+              <span>{item.report.truthScore} truth</span>
+              <span>{item.report.claims.length} claims</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1670,14 +1852,24 @@ function WebsiteWatchView({
   activeTool,
   activeClient,
   latestSiteUrl,
+  onResetSeoTrackerBaseline,
+  onRunSeoChangeTracker,
   onRunSurfaceCheck,
+  seoTrackerBaseline,
+  seoTrackerResult,
+  seoTracking,
   surfaceChecking,
   surfaceResult,
 }: {
   activeTool: WebsiteWatchTool;
   activeClient?: Client;
   latestSiteUrl: string;
+  onResetSeoTrackerBaseline: () => void;
+  onRunSeoChangeTracker: (payload: { siteUrl: string; pages: string }) => void;
   onRunSurfaceCheck: (payload: { siteUrl: string; pages: string; expectedText: string }) => void;
+  seoTrackerBaseline: SeoChangeTrackerBaseline | null;
+  seoTrackerResult: SeoChangeTrackerResult | null;
+  seoTracking: boolean;
   surfaceChecking: boolean;
   surfaceResult: WebsiteSurfaceResult | null;
 }) {
@@ -1694,16 +1886,29 @@ function WebsiteWatchView({
     });
   }
 
+  function handleTrackerSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    onRunSeoChangeTracker({
+      siteUrl: String(formData.get("siteUrl") || ""),
+      pages: String(formData.get("pages") || ""),
+    });
+  }
+
   return (
     <PageWorkspace className="website-watch">
       <PageHero
         eyebrow="Website monitoring"
-        title="Fast checks first. Deep audits when access is ready."
-        description="Surface Check reads public pages for obvious breakage. Deep Audit is the browser-level path for protected pages, screenshots, Lighthouse, and logged-in flows."
+        title="Public crawls first. Deep audits when access is ready."
+        description="Surface Check finds obvious breakage. SEO Tracker watches public metadata and copy shifts. Deep Audit handles protected pages, Sanity, CMS, screenshots, Lighthouse, and logged-in flows."
         stats={[
           { label: "Surface Check", value: "Runs now", helper: "public page review" },
-          { label: "Deep Audit", value: "Setup guided", helper: "protected browser path" },
-          { label: "latest status", value: surfaceResult ? surfaceStatusLabel(surfaceResult.status) : "Not run" },
+          {
+            label: "SEO Tracker",
+            value: seoTrackerResult ? seoChangeStatusLabel(seoTrackerResult.status) : "Baseline ready",
+            helper: "metadata and copy crawl",
+          },
+          { label: "Deep Audit", value: "Setup guided", helper: "Sanity and protected sources" },
         ]}
       />
 
@@ -1738,13 +1943,52 @@ function WebsiteWatchView({
           </section>
         ) : null}
 
+        {activeTool === "tracker" ? (
+          <section className="panel watch-run-panel seo-tracker-panel" aria-labelledby="seo-tracker-title">
+            <div className="section-heading">
+              <div>
+                <span className="eyebrow">SEO tracker</span>
+                <h3 id="seo-tracker-title">Track public metadata and copy changes</h3>
+                <p>Run once to capture a baseline. Run again to compare public titles, descriptions, canonicals, robots tags, H1s, Open Graph, and body copy.</p>
+              </div>
+              {seoTrackerBaseline ? (
+                <button className="button" type="button" onClick={onResetSeoTrackerBaseline}>
+                  Reset baseline
+                </button>
+              ) : null}
+            </div>
+
+            <form className="watch-form" onSubmit={handleTrackerSubmit}>
+              <label>
+                Site URL
+                <input name="siteUrl" type="url" placeholder="https://example.com" defaultValue={latestSiteUrl} required />
+              </label>
+              <label>
+                Key pages
+                <textarea name="pages" defaultValue={"/\n/pricing\n/services\n/blog\n/contact"} rows={6} />
+              </label>
+              <div className="tracker-baseline-note" data-ready={Boolean(seoTrackerBaseline)}>
+                <strong>{seoTrackerBaseline ? "Baseline active" : "No baseline yet"}</strong>
+                <span>
+                  {seoTrackerBaseline
+                    ? `Last captured ${new Date(seoTrackerBaseline.capturedAt).toLocaleString()} from ${seoTrackerBaseline.pages.length} page${seoTrackerBaseline.pages.length === 1 ? "" : "s"}.`
+                    : "The first crawl captures the comparison point. Credentialed Sanity/CMS checks belong in Deep Audit."}
+                </span>
+              </div>
+              <button className="button button-primary" type="submit" disabled={seoTracking}>
+                {seoTracking ? "Scanning SEO changes..." : seoTrackerBaseline ? "Scan for SEO Changes" : "Capture SEO Baseline"}
+              </button>
+            </form>
+          </section>
+        ) : null}
+
         {activeTool === "deep" ? (
           <section className="panel deep-audit-panel" aria-labelledby="deep-audit-title">
             <div className="section-heading">
               <div>
                 <span className="eyebrow">Deep audit</span>
                 <h3 id="deep-audit-title">Prepare protected access</h3>
-                <p>Choose the access shape. Secrets should live in GitHub or Vercel, never in public client code.</p>
+                <p>Choose the access shape for protected pages, Sanity, CMS, and source-of-truth comparisons. Secrets should live in GitHub or Vercel, never in public client code.</p>
               </div>
             </div>
 
@@ -1775,8 +2019,22 @@ function WebsiteWatchView({
                 </div>
               ) : null}
               <p className="deep-audit-note">
-                Setup worksheet only. Store real secrets in GitHub or Vercel before enabling the deep audit runner.
+                Setup worksheet only. Store real secrets in GitHub or Vercel before enabling Sanity, CMS, repository, or logged-in source checks.
               </p>
+              <div className="credentialed-source-grid" aria-label="Credentialed source checks">
+                <div>
+                  <strong>Sanity</strong>
+                  <span>Read title, slug, meta fields, and portable text revisions with a read token.</span>
+                </div>
+                <div>
+                  <strong>CMS / repo</strong>
+                  <span>Compare crawl output to source-controlled copy, routes, and published content metadata.</span>
+                </div>
+                <div>
+                  <strong>Logged-in pages</strong>
+                  <span>Use browser sessions for protected previews, dashboards, and gated page variants.</span>
+                </div>
+              </div>
               <div className="secret-list" aria-label="Required secret names">
                 {guidance.secrets.map((secret) => (
                   <code key={secret}>{secret}</code>
@@ -1796,6 +2054,7 @@ function WebsiteWatchView({
       </div>
 
       {activeTool === "surface" && surfaceResult ? <WebsiteSurfaceResults result={surfaceResult} /> : null}
+      {activeTool === "tracker" && seoTrackerResult ? <SeoChangeTrackerResults result={seoTrackerResult} /> : null}
     </PageWorkspace>
   );
 }
@@ -1860,10 +2119,118 @@ function WebsiteSurfaceResults({ result }: { result: WebsiteSurfaceResult }) {
   );
 }
 
+function SeoChangeTrackerResults({ result }: { result: SeoChangeTrackerResult }) {
+  const topChanges = result.changes.slice(0, 12);
+
+  return (
+    <section className="panel seo-tracker-results" aria-labelledby="seo-tracker-results-title">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">Latest SEO crawl</span>
+          <h3 id="seo-tracker-results-title">{seoChangeStatusLabel(result.status)}</h3>
+          <p>
+            Checked {result.summary.pagesChecked} public page{result.summary.pagesChecked === 1 ? "" : "s"} at{" "}
+            {new Date(result.checkedAt).toLocaleString()}.
+          </p>
+        </div>
+        <span className="tracker-status" data-status={result.status}>
+          {result.status}
+        </span>
+      </div>
+
+      <div className="tracker-score-grid" aria-label="SEO change counts">
+        <div>
+          <span>Changed pages</span>
+          <strong>{result.summary.changedPages}</strong>
+        </div>
+        <div>
+          <span>Metadata</span>
+          <strong>{result.summary.metadataChanges}</strong>
+        </div>
+        <div>
+          <span>Copy</span>
+          <strong>{result.summary.copyChanges}</strong>
+        </div>
+        <div>
+          <span>Technical</span>
+          <strong>{result.summary.technicalChanges}</strong>
+        </div>
+      </div>
+
+      <div className="tracker-result-grid">
+        <div className="tracker-change-list">
+          <h4>Top changes</h4>
+          {topChanges.length ? (
+            topChanges.map((change) => (
+              <article className="tracker-change" data-severity={change.severity} key={`${change.url}-${change.kind}-${change.label}`}>
+                <div className="card-top">
+                  <span>{change.severity}</span>
+                  <small>{change.kind}</small>
+                </div>
+                <strong>{change.label}</strong>
+                <p>{change.detail}</p>
+                <dl>
+                  <div>
+                    <dt>Before</dt>
+                    <dd>{change.before || "blank"}</dd>
+                  </div>
+                  <div>
+                    <dt>After</dt>
+                    <dd>{change.after || "blank"}</dd>
+                  </div>
+                </dl>
+                <small>{change.url}</small>
+              </article>
+            ))
+          ) : (
+            <div className="empty-state">
+              {result.status === "baseline" ? "Baseline captured. Run the tracker again to compare future changes." : "No SEO changes were found against the current baseline."}
+            </div>
+          )}
+        </div>
+
+        <div className="tracker-page-list">
+          <h4>Tracked pages</h4>
+          {result.pages.map((page) => (
+            <article className="tracker-page-row" data-changed={page.changes.length > 0} key={page.url}>
+              <div>
+                <strong>{page.title || page.url}</strong>
+                <span>{page.finalUrl}</span>
+              </div>
+              <dl>
+                <div>
+                  <dt>Description</dt>
+                  <dd>{page.metaDescription || "Missing"}</dd>
+                </div>
+                <div>
+                  <dt>H1</dt>
+                  <dd>{page.h1 || "Missing"}</dd>
+                </div>
+                <div>
+                  <dt>Words</dt>
+                  <dd>{page.wordCount}</dd>
+                </div>
+              </dl>
+              <small>{page.changes.length} change{page.changes.length === 1 ? "" : "s"}</small>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function surfaceStatusLabel(status: WebsiteSurfaceResult["status"]) {
   if (status === "healthy") return "Surface looks healthy";
   if (status === "failed") return "Critical surface issue found";
   return "Surface needs review";
+}
+
+function seoChangeStatusLabel(status: SeoChangeTrackerResult["status"]) {
+  if (status === "baseline") return "Baseline captured";
+  if (status === "unchanged") return "No SEO changes found";
+  if (status === "failed") return "SEO crawl failed";
+  return "SEO changes found";
 }
 
 function SurfaceScore({
@@ -1902,6 +2269,16 @@ function AuditList({ title, items }: { title: string; items: string[] }) {
 
 function formatRecommendation(value: BlogAuditReport["recommendation"]) {
   return value.replace(/_/g, " ");
+}
+
+function inferDraftLabel(content: string) {
+  const firstLine = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+
+  if (!firstLine) return "Pasted draft";
+  return firstLine.replace(/^#+\s*/, "").slice(0, 72) || "Pasted draft";
 }
 
 function formatExternalEvidenceStatus(value: BlogAuditExternalEvidenceStatus) {
