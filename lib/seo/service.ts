@@ -2011,30 +2011,79 @@ function baselineFromRow(row: SeoWatchBaseline | null): SeoChangeTrackerBaseline
   return row.baseline_json as unknown as SeoChangeTrackerBaseline;
 }
 
-export async function getSeoChangeTrackerState(scope: SeoTenantScope, rawSiteUrl?: string | null) {
-  const { watchBaselines, changeRuns } = await getSeoCollections();
-  const site = rawSiteUrl ? normalizeSeoChangeTrackerSite(rawSiteUrl) : null;
-  const baselineRows = site
-    ? await watchBaselines.find({ user_id: scope.userId, site_url: site.siteUrl }).limit(1).toArray()
-    : await watchBaselines.find({ user_id: scope.userId }).sort({ updated_at: -1 }).limit(1).toArray();
-  const baselineRow = baselineRows[0] || null;
-  const runFilter: Record<string, string> = { user_id: scope.userId };
-  if (site) {
-    runFilter.site_url = site.siteUrl;
-  }
-  const runs = await changeRuns.find(runFilter).sort({ checked_at: -1 }).limit(SEO_CHANGE_RUN_LIMIT).toArray();
+const SEO_WATCH_STORAGE_NOT_READY_MESSAGE =
+  "SEO Watch storage tables are not installed yet. Apply supabase/migrations/20260630153849_seo_watch_persistence.sql to save baselines and run history.";
 
-  return {
-    baseline: baselineFromRow(baselineRow),
-    baselineRow: baselineRow ? cleanSeoWatchBaseline(baselineRow) : null,
-    runs: runs.map(cleanSeoChangeRun),
-  };
+function isSeoWatchStorageMissing(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return (
+    /Could not find the table|schema cache/i.test(message) &&
+    /seo_watch_baselines|seo_change_runs/i.test(message)
+  );
+}
+
+export async function getSeoChangeTrackerState(scope: SeoTenantScope, rawSiteUrl?: string | null) {
+  try {
+    const { watchBaselines, changeRuns } = await getSeoCollections();
+    const site = rawSiteUrl ? normalizeSeoChangeTrackerSite(rawSiteUrl) : null;
+    const baselineRows = site
+      ? await watchBaselines.find({ user_id: scope.userId, site_url: site.siteUrl }).limit(1).toArray()
+      : await watchBaselines.find({ user_id: scope.userId }).sort({ updated_at: -1 }).limit(1).toArray();
+    const baselineRow = baselineRows[0] || null;
+    const runFilter: Record<string, string> = { user_id: scope.userId };
+    if (site) {
+      runFilter.site_url = site.siteUrl;
+    }
+    const runs = await changeRuns.find(runFilter).sort({ checked_at: -1 }).limit(SEO_CHANGE_RUN_LIMIT).toArray();
+
+    return {
+      baseline: baselineFromRow(baselineRow),
+      baselineRow: baselineRow ? cleanSeoWatchBaseline(baselineRow) : null,
+      runs: runs.map(cleanSeoChangeRun),
+      storageReady: true,
+      storageError: null,
+    };
+  } catch (error) {
+    if (!isSeoWatchStorageMissing(error)) {
+      throw error;
+    }
+
+    return {
+      baseline: null,
+      baselineRow: null,
+      runs: [],
+      storageReady: false,
+      storageError: SEO_WATCH_STORAGE_NOT_READY_MESSAGE,
+    };
+  }
 }
 
 export async function runPersistedSeoChangeTracker(scope: SeoTenantScope, input: SeoChangeTrackerInput) {
   const { watchBaselines, changeRuns } = await getSeoCollections();
   const site = normalizeSeoChangeTrackerSite(input.siteUrl);
-  const existingBaseline = await watchBaselines.findOne({ user_id: scope.userId, site_url: site.siteUrl });
+  let existingBaseline: SeoWatchBaseline | null = null;
+  try {
+    existingBaseline = await watchBaselines.findOne({ user_id: scope.userId, site_url: site.siteUrl });
+  } catch (error) {
+    if (!isSeoWatchStorageMissing(error)) {
+      throw error;
+    }
+
+    const result = await runSeoChangeTracker({
+      ...input,
+      siteUrl: site.siteUrl,
+      baseline: null,
+    });
+
+    return {
+      result,
+      baseline: result.baseline,
+      run: null,
+      storageReady: false,
+      storageError: SEO_WATCH_STORAGE_NOT_READY_MESSAGE,
+    };
+  }
+
   const previousBaseline = baselineFromRow(existingBaseline);
   const result: SeoChangeTrackerResult = await runSeoChangeTracker({
     ...input,
@@ -2054,12 +2103,6 @@ export async function runPersistedSeoChangeTracker(scope: SeoTenantScope, input:
     updated_at: checkedAt,
   };
 
-  if (existingBaseline) {
-    await watchBaselines.replaceOne({ id: existingBaseline.id, user_id: scope.userId }, baselineRow);
-  } else {
-    await watchBaselines.insertOne(baselineRow);
-  }
-
   const run: SeoChangeRun = {
     id: randomUUID(),
     user_id: scope.userId,
@@ -2074,20 +2117,41 @@ export async function runPersistedSeoChangeTracker(scope: SeoTenantScope, input:
     checked_at: checkedAt,
     created_at: checkedAt,
   };
-  await changeRuns.insertOne(run);
-  await recordAuditEvent({
-    scope,
-    action: "website_watch.seo_change_scanned",
-    entityType: "sync",
-    entityId: run.id,
-    metadata: {
-      site_url: site.siteUrl,
-      status: result.status,
-      changed_pages: result.summary.changedPages,
-      changes: result.changes.length,
-      previous_captured_at: run.previous_captured_at,
-    },
-  });
+
+  try {
+    if (existingBaseline) {
+      await watchBaselines.replaceOne({ id: existingBaseline.id, user_id: scope.userId }, baselineRow);
+    } else {
+      await watchBaselines.insertOne(baselineRow);
+    }
+
+    await changeRuns.insertOne(run);
+    await recordAuditEvent({
+      scope,
+      action: "website_watch.seo_change_scanned",
+      entityType: "sync",
+      entityId: run.id,
+      metadata: {
+        site_url: site.siteUrl,
+        status: result.status,
+        changed_pages: result.summary.changedPages,
+        changes: result.changes.length,
+        previous_captured_at: run.previous_captured_at,
+      },
+    });
+  } catch (error) {
+    if (!isSeoWatchStorageMissing(error)) {
+      throw error;
+    }
+
+    return {
+      result,
+      baseline: result.baseline,
+      run: null,
+      storageReady: false,
+      storageError: SEO_WATCH_STORAGE_NOT_READY_MESSAGE,
+    };
+  }
 
   const slackAlert = await notifySeoWatchSlack({ scope, result });
   if (slackAlert.status !== "skipped") {
@@ -2109,13 +2173,30 @@ export async function runPersistedSeoChangeTracker(scope: SeoTenantScope, input:
     result,
     baseline: baselineFromRow(baselineRow),
     run: cleanSeoChangeRun(run),
+    storageReady: true,
+    storageError: null,
   };
 }
 
 export async function resetSeoWatchBaseline(scope: SeoTenantScope, rawSiteUrl: string) {
   const { watchBaselines } = await getSeoCollections();
   const site = normalizeSeoChangeTrackerSite(rawSiteUrl);
-  const deleted = await watchBaselines.deleteMany({ user_id: scope.userId, site_url: site.siteUrl });
+  let deleted: { deletedCount: number };
+  try {
+    deleted = await watchBaselines.deleteMany({ user_id: scope.userId, site_url: site.siteUrl });
+  } catch (error) {
+    if (!isSeoWatchStorageMissing(error)) {
+      throw error;
+    }
+
+    return {
+      ok: false,
+      deletedCount: 0,
+      storageReady: false,
+      storageError: SEO_WATCH_STORAGE_NOT_READY_MESSAGE,
+    };
+  }
+
   await recordAuditEvent({
     scope,
     action: "website_watch.seo_baseline_reset",
@@ -2123,7 +2204,7 @@ export async function resetSeoWatchBaseline(scope: SeoTenantScope, rawSiteUrl: s
     entityId: null,
     metadata: { site_url: site.siteUrl, deleted_count: deleted.deletedCount },
   });
-  return { ok: true, deletedCount: deleted.deletedCount };
+  return { ok: true, deletedCount: deleted.deletedCount, storageReady: true, storageError: null };
 }
 
 export async function listCompetitiveAnalyses(scope: SeoTenantScope) {

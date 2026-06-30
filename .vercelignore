@@ -1,0 +1,10 @@
+.git
+.next
+node_modules
+.env*
+output
+output-*.png
+reference-*.png
+reveal-check.png
+AGENTS.md
+docs/skills

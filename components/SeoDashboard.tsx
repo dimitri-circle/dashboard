@@ -247,6 +247,21 @@ type SeoChangeRun = {
   created_at: string;
 };
 
+type SeoChangeTrackerState = {
+  baseline: SeoChangeTrackerBaseline | null;
+  runs: SeoChangeRun[];
+  storageReady?: boolean;
+  storageError?: string | null;
+};
+
+type SeoChangeTrackerRunResponse = {
+  result: SeoChangeTrackerResult;
+  baseline: SeoChangeTrackerBaseline | null;
+  run: SeoChangeRun | null;
+  storageReady?: boolean;
+  storageError?: string | null;
+};
+
 const providerLabels: Record<Provider, string> = {
   ga4: "GA4",
   gtm: "GTM",
@@ -437,6 +452,8 @@ export function SeoDashboard() {
   const [seoTrackerBaseline, setSeoTrackerBaseline] = useState<SeoChangeTrackerBaseline | null>(null);
   const [seoTrackerResult, setSeoTrackerResult] = useState<SeoChangeTrackerResult | null>(null);
   const [seoChangeRuns, setSeoChangeRuns] = useState<SeoChangeRun[]>([]);
+  const [seoTrackerStorageReady, setSeoTrackerStorageReady] = useState(true);
+  const [seoTrackerStorageError, setSeoTrackerStorageError] = useState<string | null>(null);
   const [tourRunning, setTourRunning] = useState(false);
   const [activeProvider, setActiveProvider] = useState<Provider>("ga4");
   const [activeWatchTool, setActiveWatchTool] = useState<WebsiteWatchTool>("surface");
@@ -501,6 +518,8 @@ export function SeoDashboard() {
         setSeoTrackerBaseline(null);
         setSeoTrackerResult(null);
         setSeoChangeRuns([]);
+        setSeoTrackerStorageReady(true);
+        setSeoTrackerStorageError(null);
         setNotice(null);
         return;
       }
@@ -516,10 +535,12 @@ export function SeoDashboard() {
         api<{ insights: Insight[] }>(resolvedClientId, "/api/seo/insights"),
         api<{ analyses: CompetitiveAnalysis[] }>(resolvedClientId, "/api/seo/competitive-analysis"),
         api<{ metricSnapshots: MetricSnapshot[] }>(resolvedClientId, "/api/seo/metrics"),
-        api<{ baseline: SeoChangeTrackerBaseline | null; runs: SeoChangeRun[] }>(
-          resolvedClientId,
-          "/api/seo/website-watch/seo-change-tracker"
-        ).catch(() => ({ baseline: null, runs: [] })),
+        api<SeoChangeTrackerState>(resolvedClientId, "/api/seo/website-watch/seo-change-tracker").catch((error) => ({
+          baseline: null,
+          runs: [],
+          storageReady: false,
+          storageError: error instanceof Error ? error.message : "SEO Watch storage state could not be loaded.",
+        })),
       ]);
       setIntegrations(integrationBody.integrations);
       setInsights(insightBody.insights);
@@ -527,6 +548,8 @@ export function SeoDashboard() {
       setMetricSnapshots(metricBody.metricSnapshots);
       setSeoTrackerBaseline(watchBody.baseline);
       setSeoChangeRuns(watchBody.runs);
+      setSeoTrackerStorageReady(watchBody.storageReady !== false);
+      setSeoTrackerStorageError(watchBody.storageError || null);
       if (!integrationBody.integrations.some((item) => item.provider === "openai")) {
         setNotice({ type: "info", message: "Connect a ChatGPT/OpenAI token to unlock AI-generated analysis." });
       }
@@ -568,6 +591,8 @@ export function SeoDashboard() {
     setSeoTrackerBaseline(null);
     setSeoTrackerResult(null);
     setSeoChangeRuns([]);
+    setSeoTrackerStorageReady(true);
+    setSeoTrackerStorageError(null);
     setNotice({ type: "info", message: `Viewing client workspace: ${nextClient?.name || nextClientId}` });
     loadDashboard(nextClientId);
   }
@@ -729,21 +754,23 @@ export function SeoDashboard() {
   async function runSeoChangeTracker(payload: { siteUrl: string; pages: string }) {
     try {
       setSeoTracking(true);
-      const body = await api<{
-        result: SeoChangeTrackerResult;
-        baseline: SeoChangeTrackerBaseline | null;
-        run: SeoChangeRun;
-      }>(clientId, "/api/seo/website-watch/seo-change-tracker", {
+      const body = await api<SeoChangeTrackerRunResponse>(clientId, "/api/seo/website-watch/seo-change-tracker", {
         method: "POST",
         body: JSON.stringify(payload),
       });
       setSeoTrackerResult(body.result);
       setSeoTrackerBaseline(body.baseline || body.result.baseline);
-      setSeoChangeRuns((current) => [body.run, ...current.filter((run) => run.id !== body.run.id)].slice(0, 8));
+      setSeoTrackerStorageReady(body.storageReady !== false);
+      setSeoTrackerStorageError(body.storageError || null);
+      if (body.run) {
+        const persistedRun = body.run;
+        setSeoChangeRuns((current) => [persistedRun, ...current.filter((run) => run.id !== persistedRun.id)].slice(0, 8));
+      }
       setNotice({
-        type: body.result.status === "changed" ? "info" : "success",
-        message:
-          body.result.status === "baseline"
+        type: body.storageReady === false ? "info" : body.result.status === "changed" ? "info" : "success",
+        message: body.storageReady === false
+          ? body.storageError || "SEO tracker ran temporarily, but storage is not ready yet."
+          : body.result.status === "baseline"
             ? `SEO change baseline captured for ${body.result.summary.pagesChecked} page${body.result.summary.pagesChecked === 1 ? "" : "s"}.`
             : `SEO tracker scanned ${body.result.summary.pagesChecked} page${body.result.summary.pagesChecked === 1 ? "" : "s"} and found ${body.result.summary.changedPages} changed page${body.result.summary.changedPages === 1 ? "" : "s"}.`,
       });
@@ -762,15 +789,32 @@ export function SeoDashboard() {
       return;
     }
 
+    if (!seoTrackerStorageReady) {
+      setSeoTrackerBaseline(null);
+      setSeoTrackerResult(null);
+      setNotice({
+        type: "info",
+        message: "Temporary SEO tracker state cleared. Saved baseline reset will work after SEO Watch storage is installed.",
+      });
+      return;
+    }
+
     try {
-      await api<{ ok: true; deletedCount: number }>(
+      const body = await api<{ ok: boolean; deletedCount: number; storageReady?: boolean; storageError?: string | null }>(
         clientId,
         `/api/seo/website-watch/seo-change-tracker?siteUrl=${encodeURIComponent(siteUrl)}`,
         { method: "DELETE" }
       );
+      setSeoTrackerStorageReady(body.storageReady !== false);
+      setSeoTrackerStorageError(body.storageError || null);
       setSeoTrackerBaseline(null);
       setSeoTrackerResult(null);
-      setNotice({ type: "success", message: "SEO baseline reset. The next tracker run will capture a fresh baseline." });
+      setNotice({
+        type: body.storageReady === false ? "info" : "success",
+        message: body.storageReady === false
+          ? body.storageError || "SEO Watch storage is not ready yet."
+          : "SEO baseline reset. The next tracker run will capture a fresh baseline.",
+      });
     } catch (error) {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to reset SEO baseline." });
     }
@@ -985,6 +1029,8 @@ export function SeoDashboard() {
                 onRunSeoChangeTracker={runSeoChangeTracker}
                 onRunSurfaceCheck={runWebsiteSurfaceCheck}
                 seoChangeRuns={seoChangeRuns}
+                seoTrackerStorageError={seoTrackerStorageError}
+                seoTrackerStorageReady={seoTrackerStorageReady}
                 seoTrackerBaseline={seoTrackerBaseline}
                 seoTrackerResult={seoTrackerResult}
                 seoTracking={seoTracking}
@@ -1907,6 +1953,8 @@ function WebsiteWatchView({
   onRunSurfaceCheck,
   seoChangeRuns,
   seoTrackerBaseline,
+  seoTrackerStorageError,
+  seoTrackerStorageReady,
   seoTrackerResult,
   seoTracking,
   surfaceChecking,
@@ -1920,6 +1968,8 @@ function WebsiteWatchView({
   onRunSurfaceCheck: (payload: { siteUrl: string; pages: string; expectedText: string }) => void;
   seoChangeRuns: SeoChangeRun[];
   seoTrackerBaseline: SeoChangeTrackerBaseline | null;
+  seoTrackerStorageError: string | null;
+  seoTrackerStorageReady: boolean;
   seoTrackerResult: SeoChangeTrackerResult | null;
   seoTracking: boolean;
   surfaceChecking: boolean;
@@ -2006,7 +2056,7 @@ function WebsiteWatchView({
                 </div>
                 {seoTrackerBaseline ? (
                   <button className="button" type="button" onClick={onResetSeoTrackerBaseline}>
-                    Reset baseline
+                    {seoTrackerStorageReady ? "Reset baseline" : "Clear temporary baseline"}
                   </button>
                 ) : null}
               </div>
@@ -2024,20 +2074,28 @@ function WebsiteWatchView({
                     rows={6}
                   />
                 </label>
-                <div className="tracker-baseline-note" data-ready={Boolean(seoTrackerBaseline)}>
-                  <strong>{seoTrackerBaseline ? "Baseline active" : "No baseline yet"}</strong>
+                <div className="tracker-baseline-note" data-ready={Boolean(seoTrackerBaseline) && seoTrackerStorageReady}>
+                  <strong>{seoTrackerStorageReady ? (seoTrackerBaseline ? "Baseline active" : "No baseline yet") : "Storage setup needed"}</strong>
                   <span>
-                    {seoTrackerBaseline
+                    {!seoTrackerStorageReady
+                      ? seoTrackerStorageError || "Scans can run temporarily, but saved baselines and history need the SEO Watch storage migration."
+                      : seoTrackerBaseline
                       ? `Last captured ${new Date(seoTrackerBaseline.capturedAt).toLocaleString()} from ${seoTrackerBaseline.pages.length} page${seoTrackerBaseline.pages.length === 1 ? "" : "s"}.`
                       : "The first crawl captures the comparison point. Credentialed Sanity/CMS checks belong in Deep Audit."}
                   </span>
                 </div>
                 <button className="button button-primary" type="submit" disabled={seoTracking}>
-                  {seoTracking ? "Scanning SEO changes..." : seoTrackerBaseline ? "Scan for SEO Changes" : "Capture SEO Baseline"}
+                  {seoTracking
+                    ? "Scanning SEO changes..."
+                    : !seoTrackerStorageReady
+                      ? "Run Temporary SEO Scan"
+                      : seoTrackerBaseline
+                        ? "Scan for SEO Changes"
+                        : "Capture SEO Baseline"}
                 </button>
               </form>
             </section>
-            <SeoChangeRunHistory runs={seoChangeRuns} />
+            <SeoChangeRunHistory runs={seoChangeRuns} storageError={seoTrackerStorageError} storageReady={seoTrackerStorageReady} />
           </>
         ) : null}
 
@@ -2118,14 +2176,26 @@ function WebsiteWatchView({
   );
 }
 
-function SeoChangeRunHistory({ runs }: { runs: SeoChangeRun[] }) {
+function SeoChangeRunHistory({
+  runs,
+  storageError,
+  storageReady,
+}: {
+  runs: SeoChangeRun[];
+  storageError: string | null;
+  storageReady: boolean;
+}) {
   return (
     <section className="panel seo-run-history" aria-labelledby="seo-run-history-title">
       <div className="section-heading">
         <div>
           <span className="eyebrow">Saved history</span>
           <h3 id="seo-run-history-title">Recent SEO tracker runs</h3>
-          <p>Stored per client and site URL. Each new scan compares against the latest saved baseline.</p>
+          <p>
+            {storageReady
+              ? "Stored per client and site URL. Each new scan compares against the latest saved baseline."
+              : "Saved history will appear after the SEO Watch storage migration is applied."}
+          </p>
         </div>
       </div>
 
@@ -2158,7 +2228,7 @@ function SeoChangeRunHistory({ runs }: { runs: SeoChangeRun[] }) {
           })}
         </div>
       ) : (
-        <div className="empty-state">No saved SEO tracker runs yet.</div>
+        <div className="empty-state">{storageReady ? "No saved SEO tracker runs yet." : storageError || "SEO Watch storage is not ready yet."}</div>
       )}
     </section>
   );
