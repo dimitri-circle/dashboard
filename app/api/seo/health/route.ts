@@ -27,6 +27,8 @@ export async function GET() {
       supabase_status: supabaseStatus,
       encryption_key: Boolean(process.env.SEO_SECRET_ENCRYPTION_KEY),
       cron_secret: Boolean(process.env.CRON_SECRET),
+      openai_api_key: Boolean(process.env.OPENAI_API_KEY),
+      slack_webhook: Boolean(process.env.SEO_WATCH_SLACK_WEBHOOK_URL || process.env.SLACK_WEBHOOK_URL),
       openai_model: process.env.OPENAI_SEO_MODEL || "gpt-4o-mini",
       client_allow_list_enabled: Boolean(process.env.SEO_ALLOWED_CLIENT_IDS),
     },

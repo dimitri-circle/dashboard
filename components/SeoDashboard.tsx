@@ -262,6 +262,11 @@ type SeoChangeTrackerRunResponse = {
   storageError?: string | null;
 };
 
+type SeoHealthChecks = {
+  openai_api_key?: boolean;
+  slack_webhook?: boolean;
+};
+
 const providerLabels: Record<Provider, string> = {
   ga4: "GA4",
   gtm: "GTM",
@@ -307,13 +312,17 @@ const navItems: Array<{ id: View; label: string; description: string; icon: NavI
 
 const websiteWatchTools: Array<{ id: WebsiteWatchTool; label: string; description: string }> = [
   { id: "surface", label: "Surface Check", description: "Public page review" },
-  { id: "tracker", label: "SEO Tracker", description: "Metadata and copy changes" },
+  { id: "tracker", label: "Baseline Watch", description: "Public site changes" },
   { id: "deep", label: "Deep Audit", description: "Protected access setup" },
 ];
 
 const DEFAULT_CLIENT_ID = "demo-client";
 const CLIENT_STORAGE_KEY = "seo-intelligence-client-id";
 const COMPETITIVE_REPORTS_PER_PAGE = 1;
+const AI_SETUP_MESSAGE =
+  "AI analysis is off. Connect an OpenAI API key to generate summaries, severity ratings, and suggested fixes.";
+const DEFAULT_WATCH_SITE_URL = "https://vast.ai";
+const DEFAULT_PRIORITY_PAGES = ["/", "/pricing", "/services", "/blog", "/contact"];
 
 const tourSteps: Step[] = [
   {
@@ -432,6 +441,26 @@ function formPayload(form: HTMLFormElement, provider: Provider) {
   };
 }
 
+function normalizePriorityPageList(value: string) {
+  const seen = new Set<string>();
+  const paths: string[] = [];
+
+  for (const raw of value.split(/[\n,]+/)) {
+    const next = raw.trim();
+    if (!next) continue;
+    const path = next.startsWith("/") ? next : `/${next}`;
+    if (seen.has(path)) continue;
+    seen.add(path);
+    paths.push(path);
+  }
+
+  return paths;
+}
+
+function priorityPagesText(value: string) {
+  return normalizePriorityPageList(value).join("\n");
+}
+
 export function SeoDashboard() {
   const [view, setView] = useState<View>("clients");
   const [clientId, setClientId] = useState(DEFAULT_CLIENT_ID);
@@ -454,6 +483,7 @@ export function SeoDashboard() {
   const [seoChangeRuns, setSeoChangeRuns] = useState<SeoChangeRun[]>([]);
   const [seoTrackerStorageReady, setSeoTrackerStorageReady] = useState(true);
   const [seoTrackerStorageError, setSeoTrackerStorageError] = useState<string | null>(null);
+  const [seoHealthChecks, setSeoHealthChecks] = useState<SeoHealthChecks | null>(null);
   const [tourRunning, setTourRunning] = useState(false);
   const [activeProvider, setActiveProvider] = useState<Provider>("ga4");
   const [activeWatchTool, setActiveWatchTool] = useState<WebsiteWatchTool>("surface");
@@ -520,6 +550,7 @@ export function SeoDashboard() {
         setSeoChangeRuns([]);
         setSeoTrackerStorageReady(true);
         setSeoTrackerStorageError(null);
+        setSeoHealthChecks(null);
         setNotice(null);
         return;
       }
@@ -530,7 +561,7 @@ export function SeoDashboard() {
         setClientId(resolvedClientId);
       }
 
-      const [integrationBody, insightBody, competitiveBody, metricBody, watchBody] = await Promise.all([
+      const [integrationBody, insightBody, competitiveBody, metricBody, watchBody, healthBody] = await Promise.all([
         api<{ integrations: Integration[] }>(resolvedClientId, "/api/seo/integrations"),
         api<{ insights: Insight[] }>(resolvedClientId, "/api/seo/insights"),
         api<{ analyses: CompetitiveAnalysis[] }>(resolvedClientId, "/api/seo/competitive-analysis"),
@@ -541,6 +572,7 @@ export function SeoDashboard() {
           storageReady: false,
           storageError: error instanceof Error ? error.message : "SEO Watch storage state could not be loaded.",
         })),
+        api<{ checks: SeoHealthChecks }>(resolvedClientId, "/api/seo/health").catch((): { checks: SeoHealthChecks } => ({ checks: {} })),
       ]);
       setIntegrations(integrationBody.integrations);
       setInsights(insightBody.insights);
@@ -550,8 +582,9 @@ export function SeoDashboard() {
       setSeoChangeRuns(watchBody.runs);
       setSeoTrackerStorageReady(watchBody.storageReady !== false);
       setSeoTrackerStorageError(watchBody.storageError || null);
-      if (!integrationBody.integrations.some((item) => item.provider === "openai")) {
-        setNotice({ type: "info", message: "Connect a ChatGPT/OpenAI token to unlock AI-generated analysis." });
+      setSeoHealthChecks(healthBody.checks);
+      if (!integrationBody.integrations.some((item) => item.provider === "openai") && !healthBody.checks.openai_api_key) {
+        setNotice({ type: "info", message: AI_SETUP_MESSAGE });
       }
     } catch (error) {
       setNotice({
@@ -593,6 +626,7 @@ export function SeoDashboard() {
     setSeoChangeRuns([]);
     setSeoTrackerStorageReady(true);
     setSeoTrackerStorageError(null);
+    setSeoHealthChecks(null);
     setNotice({ type: "info", message: `Viewing client workspace: ${nextClient?.name || nextClientId}` });
     loadDashboard(nextClientId);
   }
@@ -769,10 +803,10 @@ export function SeoDashboard() {
       setNotice({
         type: body.storageReady === false ? "info" : body.result.status === "changed" ? "info" : "success",
         message: body.storageReady === false
-          ? body.storageError || "SEO tracker ran temporarily, but storage is not ready yet."
+          ? body.storageError || "Baseline Watch ran temporarily, but storage is not ready yet."
           : body.result.status === "baseline"
-            ? `SEO change baseline captured for ${body.result.summary.pagesChecked} page${body.result.summary.pagesChecked === 1 ? "" : "s"}.`
-            : `SEO tracker scanned ${body.result.summary.pagesChecked} page${body.result.summary.pagesChecked === 1 ? "" : "s"} and found ${body.result.summary.changedPages} changed page${body.result.summary.changedPages === 1 ? "" : "s"}.`,
+            ? `Public baseline captured for ${body.result.summary.pagesChecked} page${body.result.summary.pagesChecked === 1 ? "" : "s"}.`
+            : `Baseline Watch scanned ${body.result.summary.pagesChecked} page${body.result.summary.pagesChecked === 1 ? "" : "s"} and found ${body.result.summary.changedPages} changed page${body.result.summary.changedPages === 1 ? "" : "s"}.`,
       });
     } catch (error) {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to run SEO change tracker." });
@@ -794,7 +828,7 @@ export function SeoDashboard() {
       setSeoTrackerResult(null);
       setNotice({
         type: "info",
-        message: "Temporary SEO tracker state cleared. Saved baseline reset will work after SEO Watch storage is installed.",
+        message: "Temporary Baseline Watch state cleared. Saved baseline reset will work after Website Watch storage is installed.",
       });
       return;
     }
@@ -828,6 +862,15 @@ export function SeoDashboard() {
 
   function handleNavSelect(nextView: View) {
     setView(nextView);
+    if (window.matchMedia("(max-width: 880px)").matches) {
+      setNavPinned(false);
+    }
+  }
+
+  function openOpenAiSetup() {
+    setActiveProvider("openai");
+    setView("integrations");
+    setNotice(null);
     if (window.matchMedia("(max-width: 880px)").matches) {
       setNavPinned(false);
     }
@@ -973,9 +1016,14 @@ export function SeoDashboard() {
       <ToastNotice toast={toastNotice} />
 
       <div className="dashboard" aria-live="polite">
-        {notice ? (
+        {notice && !(view === "watch" && notice.message === AI_SETUP_MESSAGE) ? (
           <div className="alert" data-type={notice.type} role="status">
-            {notice.message}
+            <span>{notice.message}</span>
+            {notice.message === AI_SETUP_MESSAGE ? (
+              <button className="button button-compact" type="button" onClick={openOpenAiSetup}>
+                Connect API Key
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -1025,10 +1073,14 @@ export function SeoDashboard() {
                 activeTool={activeWatchTool}
                 activeClient={activeClient}
                 latestSiteUrl={competitiveAnalyses.find((analysis) => analysis.website_url)?.website_url || ""}
+                aiAnalysisConnected={Boolean(latestByProvider.openai || seoHealthChecks?.openai_api_key)}
                 onResetSeoTrackerBaseline={resetSeoTrackerBaseline}
                 onRunSeoChangeTracker={runSeoChangeTracker}
                 onRunSurfaceCheck={runWebsiteSurfaceCheck}
+                onSelectTool={setActiveWatchTool}
+                onConnectApiKey={openOpenAiSetup}
                 seoChangeRuns={seoChangeRuns}
+                slackConnected={Boolean(seoHealthChecks?.slack_webhook)}
                 seoTrackerStorageError={seoTrackerStorageError}
                 seoTrackerStorageReady={seoTrackerStorageReady}
                 seoTrackerBaseline={seoTrackerBaseline}
@@ -1947,11 +1999,15 @@ const deepAuditGuidance: Record<
 function WebsiteWatchView({
   activeTool,
   activeClient,
+  aiAnalysisConnected,
   latestSiteUrl,
+  onConnectApiKey,
   onResetSeoTrackerBaseline,
   onRunSeoChangeTracker,
   onRunSurfaceCheck,
+  onSelectTool,
   seoChangeRuns,
+  slackConnected,
   seoTrackerBaseline,
   seoTrackerStorageError,
   seoTrackerStorageReady,
@@ -1962,11 +2018,15 @@ function WebsiteWatchView({
 }: {
   activeTool: WebsiteWatchTool;
   activeClient?: Client;
+  aiAnalysisConnected: boolean;
   latestSiteUrl: string;
+  onConnectApiKey: () => void;
   onResetSeoTrackerBaseline: () => void;
   onRunSeoChangeTracker: (payload: { siteUrl: string; pages: string }) => void;
   onRunSurfaceCheck: (payload: { siteUrl: string; pages: string; expectedText: string }) => void;
+  onSelectTool: (tool: WebsiteWatchTool) => void;
   seoChangeRuns: SeoChangeRun[];
+  slackConnected: boolean;
   seoTrackerBaseline: SeoChangeTrackerBaseline | null;
   seoTrackerStorageError: string | null;
   seoTrackerStorageReady: boolean;
@@ -1976,14 +2036,29 @@ function WebsiteWatchView({
   surfaceResult: WebsiteSurfaceResult | null;
 }) {
   const [accessMethod, setAccessMethod] = useState<DeepAuditAccess>("public");
+  const [watchSiteUrl, setWatchSiteUrl] = useState(latestSiteUrl || DEFAULT_WATCH_SITE_URL);
+  const [priorityPages, setPriorityPages] = useState(DEFAULT_PRIORITY_PAGES.join("\n"));
+  const [customPriorityPage, setCustomPriorityPage] = useState("");
   const guidance = deepAuditGuidance[accessMethod];
+  const normalizedPriorityPages = priorityPagesText(priorityPages) || DEFAULT_PRIORITY_PAGES.join("\n");
+  const lastRunAt = seoChangeRuns[0]?.checked_at || seoTrackerResult?.checkedAt || surfaceResult?.checkedAt || null;
+  const baselineStatus = !seoTrackerStorageReady
+    ? "Setup needed"
+    : seoTrackerBaseline
+      ? "Captured"
+      : "Missing";
+
+  useEffect(() => {
+    if (!latestSiteUrl) return;
+    setWatchSiteUrl((current) => (current === DEFAULT_WATCH_SITE_URL ? latestSiteUrl : current));
+  }, [latestSiteUrl]);
 
   function handleSurfaceSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     onRunSurfaceCheck({
-      siteUrl: String(formData.get("siteUrl") || ""),
-      pages: String(formData.get("pages") || ""),
+      siteUrl: String(formData.get("siteUrl") || watchSiteUrl),
+      pages: priorityPagesText(String(formData.get("pages") || normalizedPriorityPages)),
       expectedText: String(formData.get("expectedText") || ""),
     });
   }
@@ -1992,27 +2067,124 @@ function WebsiteWatchView({
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     onRunSeoChangeTracker({
-      siteUrl: String(formData.get("siteUrl") || ""),
-      pages: String(formData.get("pages") || ""),
+      siteUrl: String(formData.get("siteUrl") || watchSiteUrl),
+      pages: priorityPagesText(String(formData.get("pages") || normalizedPriorityPages)),
     });
+  }
+
+  function runSurfaceFromCommand() {
+    onSelectTool("surface");
+    onRunSurfaceCheck({
+      siteUrl: watchSiteUrl,
+      pages: normalizedPriorityPages,
+      expectedText: activeClient?.name || "",
+    });
+  }
+
+  function runBaselineFromCommand() {
+    onSelectTool("tracker");
+    onRunSeoChangeTracker({
+      siteUrl: watchSiteUrl,
+      pages: normalizedPriorityPages,
+    });
+  }
+
+  function addPriorityPage(path: string) {
+    const nextPath = path.trim();
+    if (!nextPath) return;
+    setPriorityPages(priorityPagesText(`${priorityPages}\n${nextPath}`));
+    if (path === customPriorityPage) {
+      setCustomPriorityPage("");
+    }
   }
 
   return (
     <PageWorkspace className="website-watch">
+      {!aiAnalysisConnected ? (
+        <section className="panel watch-setup-banner" aria-label="AI setup">
+          <div>
+            <strong>AI analysis is off.</strong>
+            <span>Connect an OpenAI API key to generate summaries, severity ratings, and suggested fixes.</span>
+          </div>
+          <button className="button" type="button" onClick={onConnectApiKey}>
+            Connect API Key
+          </button>
+        </section>
+      ) : null}
+
       <PageHero
         eyebrow="Website monitoring"
-        title="Public crawls first. Deep audits when access is ready."
-        description="Surface Check finds obvious breakage. SEO Tracker watches public metadata and copy shifts. Deep Audit handles protected pages, Sanity, CMS, screenshots, Lighthouse, and logged-in flows."
-        stats={[
-          { label: "Surface Check", value: "Runs now", helper: "public page review" },
-          {
-            label: "SEO Tracker",
-            value: seoTrackerResult ? seoChangeStatusLabel(seoTrackerResult.status) : "Baseline ready",
-            helper: "metadata and copy crawl",
-          },
-          { label: "Deep Audit", value: "Setup guided", helper: "Sanity and protected sources" },
-        ]}
+        title="Check what changed or broke."
+        description="Run fast public checks, capture public baselines, and prepare deeper audits when authenticated access is ready."
       />
+
+      <div className="watch-status-strip" aria-label="Website Watch setup status">
+        <WatchStatusPill label="AI Analysis" value={aiAnalysisConnected ? "Connected" : "Off"} state={aiAnalysisConnected ? "ready" : "missing"} />
+        <WatchStatusPill label="Slack" value={slackConnected ? "Connected" : "Not Connected"} state={slackConnected ? "ready" : "missing"} />
+        <WatchStatusPill label="Baseline" value={baselineStatus} state={seoTrackerBaseline && seoTrackerStorageReady ? "ready" : "missing"} />
+        <WatchStatusPill label="Last Run" value={lastRunAt ? new Date(lastRunAt).toLocaleString() : "Never"} state={lastRunAt ? "ready" : "idle"} />
+      </div>
+
+      <section className="panel watch-command-panel" aria-labelledby="watch-command-title">
+        <div className="watch-command-copy">
+          <span className="eyebrow">Website Watch</span>
+          <h3 id="watch-command-title">Launch a public site check</h3>
+          <p>Run fast public checks, capture baselines, and send issue reports to Slack.</p>
+        </div>
+        <div className="watch-command-controls">
+          <label>
+            Site URL
+            <input
+              type="url"
+              value={watchSiteUrl}
+              onChange={(event) => setWatchSiteUrl(event.target.value)}
+              placeholder="https://example.com"
+              required
+            />
+          </label>
+          <div className="watch-command-actions">
+            <button className="button button-primary" type="button" onClick={runSurfaceFromCommand} disabled={surfaceChecking}>
+              {surfaceChecking ? "Checking..." : "Run Surface Check"}
+            </button>
+            <button className="button" type="button" onClick={runBaselineFromCommand} disabled={seoTracking}>
+              {seoTracking ? "Capturing..." : "Capture Baseline"}
+            </button>
+            <button className="button" type="button" disabled title="Scheduling needs the next backend runner connection.">
+              Schedule Watch
+            </button>
+          </div>
+          <p>Surface Check scans public pages now. Baseline Watch compares future crawls against today&apos;s version.</p>
+        </div>
+      </section>
+
+      <div className="watch-mode-grid" aria-label="Website Watch modes">
+        <WatchModeCard
+          active={activeTool === "surface"}
+          title="Surface Check"
+          subtitle="Fast public crawl"
+          description="Find obvious breakage on public pages."
+          cta={surfaceChecking ? "Running..." : "Run now"}
+          onClick={runSurfaceFromCommand}
+          disabled={surfaceChecking}
+        />
+        <WatchModeCard
+          active={activeTool === "tracker"}
+          title="Baseline Watch"
+          subtitle="Track public changes"
+          description="Capture today's page state and compare future changes."
+          cta={seoTracking ? "Capturing..." : "Capture baseline"}
+          onClick={runBaselineFromCommand}
+          disabled={seoTracking}
+        />
+        <WatchModeCard
+          active={activeTool === "deep"}
+          title="Deep Audit"
+          subtitle="Authenticated QA setup"
+          description="Protected pages, CMS, screenshots, Lighthouse, repo checks, and logged-in flows."
+          cta="Set up deep audit"
+          onClick={() => onSelectTool("deep")}
+        />
+      </div>
 
       <div className="watch-tool-stage">
         {activeTool === "surface" ? (
@@ -2028,11 +2200,24 @@ function WebsiteWatchView({
             <form className="watch-form" onSubmit={handleSurfaceSubmit}>
               <label>
                 Site URL
-                <input name="siteUrl" type="url" placeholder="https://example.com" defaultValue={latestSiteUrl} required />
+                <input
+                  name="siteUrl"
+                  type="url"
+                  placeholder="https://example.com"
+                  value={watchSiteUrl}
+                  onChange={(event) => setWatchSiteUrl(event.target.value)}
+                  required
+                />
               </label>
               <label>
                 Key pages
-                <textarea name="pages" defaultValue={"/\n/pricing\n/services\n/blog\n/contact"} rows={6} />
+                <textarea
+                  name="pages"
+                  value={priorityPages}
+                  onBlur={(event) => setPriorityPages(priorityPagesText(event.target.value))}
+                  onChange={(event) => setPriorityPages(event.target.value)}
+                  rows={6}
+                />
               </label>
               <label>
                 Expected text
@@ -2050,9 +2235,9 @@ function WebsiteWatchView({
             <section className="panel watch-run-panel seo-tracker-panel" aria-labelledby="seo-tracker-title">
               <div className="section-heading">
                 <div>
-                  <span className="eyebrow">SEO tracker</span>
-                  <h3 id="seo-tracker-title">Track public metadata and copy changes</h3>
-                  <p>Run once to capture a baseline. The crawler uses the sitemap when available, then falls back to homepage navigation, and compares public titles, descriptions, canonicals, robots tags, H1s, Open Graph, and body copy.</p>
+                  <span className="eyebrow">Public Site Baseline</span>
+                  <h3 id="seo-tracker-title">Capture today&apos;s public pages</h3>
+                  <p>Capture today&apos;s public pages so future changes, breakage, and copy shifts are easy to detect.</p>
                 </div>
                 {seoTrackerBaseline ? (
                   <button className="button" type="button" onClick={onResetSeoTrackerBaseline}>
@@ -2064,16 +2249,66 @@ function WebsiteWatchView({
               <form className="watch-form" onSubmit={handleTrackerSubmit}>
                 <label>
                   Site URL
-                  <input name="siteUrl" type="url" placeholder="https://example.com" defaultValue={latestSiteUrl} required />
+                  <input
+                    name="siteUrl"
+                    type="url"
+                    placeholder="https://example.com"
+                    value={watchSiteUrl}
+                    onChange={(event) => setWatchSiteUrl(event.target.value)}
+                    required
+                  />
                 </label>
                 <label>
-                  Priority pages, optional
+                  Priority pages
+                  <span className="field-helper">Choose common paths or paste one path per line.</span>
+                  <div className="priority-chip-row" aria-label="Common priority pages">
+                    {DEFAULT_PRIORITY_PAGES.map((path) => (
+                      <button className="priority-chip" type="button" key={path} onClick={() => addPriorityPage(path)}>
+                        {path}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="priority-add-row">
+                    <input
+                      type="text"
+                      value={customPriorityPage}
+                      onChange={(event) => setCustomPriorityPage(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          addPriorityPage(customPriorityPage);
+                        }
+                      }}
+                      placeholder="/new-page"
+                    />
+                    <button className="button" type="button" onClick={() => addPriorityPage(customPriorityPage)}>
+                      Add page
+                    </button>
+                  </div>
+                  <span className="field-helper">Or paste paths below:</span>
                   <textarea
                     name="pages"
                     placeholder={"/\n/pricing\n/services\n/blog\n/contact"}
+                    value={priorityPages}
+                    onBlur={(event) => setPriorityPages(priorityPagesText(event.target.value))}
+                    onChange={(event) => setPriorityPages(event.target.value)}
                     rows={6}
                   />
                 </label>
+                <div className="baseline-settings-grid" aria-label="Baseline settings">
+                  <div>
+                    <span>Send results to</span>
+                    <strong>{slackConnected ? "Slack connected" : "Slack not connected"}</strong>
+                  </div>
+                  <div>
+                    <span>AI summary</span>
+                    <strong>{aiAnalysisConnected ? "Enabled" : "Off"}</strong>
+                  </div>
+                  <div>
+                    <span>Crawl options</span>
+                    <strong>Sitemap first, then homepage links</strong>
+                  </div>
+                </div>
                 <div className="tracker-baseline-note" data-ready={Boolean(seoTrackerBaseline) && seoTrackerStorageReady}>
                   <strong>{seoTrackerStorageReady ? (seoTrackerBaseline ? "Baseline active" : "No baseline yet") : "Storage setup needed"}</strong>
                   <span>
@@ -2081,7 +2316,7 @@ function WebsiteWatchView({
                       ? seoTrackerStorageError || "Scans can run temporarily, but saved baselines and history need the SEO Watch storage migration."
                       : seoTrackerBaseline
                       ? `Last captured ${new Date(seoTrackerBaseline.capturedAt).toLocaleString()} from ${seoTrackerBaseline.pages.length} page${seoTrackerBaseline.pages.length === 1 ? "" : "s"}.`
-                      : "The first crawl captures the comparison point. Credentialed Sanity/CMS checks belong in Deep Audit."}
+                      : "No baseline captured yet. Capture a public baseline to create the comparison point for future checks."}
                   </span>
                 </div>
                 <button className="button button-primary" type="submit" disabled={seoTracking}>
@@ -2091,7 +2326,7 @@ function WebsiteWatchView({
                       ? "Run Temporary SEO Scan"
                       : seoTrackerBaseline
                         ? "Scan for SEO Changes"
-                        : "Capture SEO Baseline"}
+                        : "Capture Public Baseline"}
                 </button>
               </form>
             </section>
@@ -2176,6 +2411,54 @@ function WebsiteWatchView({
   );
 }
 
+function WatchStatusPill({
+  label,
+  state,
+  value,
+}: {
+  label: string;
+  state: "ready" | "missing" | "idle";
+  value: string;
+}) {
+  return (
+    <div className="watch-status-pill" data-state={state}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function WatchModeCard({
+  active,
+  cta,
+  description,
+  disabled,
+  onClick,
+  subtitle,
+  title,
+}: {
+  active: boolean;
+  cta: string;
+  description: string;
+  disabled?: boolean;
+  onClick: () => void;
+  subtitle: string;
+  title: string;
+}) {
+  return (
+    <article className="watch-mode-card" data-active={active}>
+      <div>
+        <span>{subtitle}</span>
+        <h3>{title}</h3>
+        <p>{description}</p>
+      </div>
+      <button className="button" type="button" onClick={onClick} disabled={disabled}>
+        {cta}
+      </button>
+    </article>
+  );
+}
+
 function SeoChangeRunHistory({
   runs,
   storageError,
@@ -2190,7 +2473,7 @@ function SeoChangeRunHistory({
       <div className="section-heading">
         <div>
           <span className="eyebrow">Saved history</span>
-          <h3 id="seo-run-history-title">Recent SEO tracker runs</h3>
+          <h3 id="seo-run-history-title">Recent baseline runs</h3>
           <p>
             {storageReady
               ? "Stored per client and site URL. Each new scan compares against the latest saved baseline."
@@ -2228,7 +2511,9 @@ function SeoChangeRunHistory({
           })}
         </div>
       ) : (
-        <div className="empty-state">{storageReady ? "No saved SEO tracker runs yet." : storageError || "SEO Watch storage is not ready yet."}</div>
+        <div className="empty-state">
+          {storageReady ? "No runs yet. Run a Surface Check or capture a baseline to see results here." : storageError || "SEO Watch storage is not ready yet."}
+        </div>
       )}
     </section>
   );
