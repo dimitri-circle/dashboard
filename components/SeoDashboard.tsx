@@ -421,6 +421,24 @@ const featureDetails: Record<FeatureKey, { label: string; description: string; a
   },
 };
 
+const featurePresets: Array<{ id: string; label: string; flags: FeatureFlags }> = [
+  {
+    id: "content",
+    label: "Content only",
+    flags: { brain: true, overview: false, watch: false, integrations: false, analysis: false, insights: false },
+  },
+  {
+    id: "seo-core",
+    label: "SEO core",
+    flags: { brain: true, overview: true, watch: true, integrations: false, analysis: false, insights: false },
+  },
+  {
+    id: "full",
+    label: "Full dashboard",
+    flags: { brain: true, overview: true, watch: true, integrations: true, analysis: true, insights: true },
+  },
+];
+
 const appRoles: AppRole[] = ["admin", "operator", "viewer"];
 
 const roleDetails: Record<AppRole, { label: string; description: string }> = {
@@ -2015,16 +2033,12 @@ function AdminView({
           </div>
           <span className="badge">{clients.length} clients</span>
         </div>
-        <div className="admin-feature-grid">
-          {clients.map((client) => (
-            <ClientFeatureAdminCard
-              client={client}
-              key={client.id}
-              onSaveClientFeatures={onSaveClientFeatures}
-              saving={savingFeatures}
-            />
-          ))}
-        </div>
+        <ClientFeatureAccessMatrix
+          clients={clients}
+          duplicateGroups={duplicateGroups}
+          onSaveClientFeatures={onSaveClientFeatures}
+          saving={savingFeatures}
+        />
       </section>
     </PageWorkspace>
   );
@@ -2112,54 +2126,176 @@ function ManagedUserCard({
   );
 }
 
-function ClientFeatureAdminCard({
-  client,
+function sameFeatureFlags(left: FeatureFlags, right: FeatureFlags) {
+  return featureKeys.every((key) => left[key] === right[key]);
+}
+
+function featurePresetId(flags: FeatureFlags) {
+  return featurePresets.find((preset) => sameFeatureFlags(preset.flags, flags))?.id || "custom";
+}
+
+function enabledFeatureCount(flags: FeatureFlags) {
+  return featureKeys.filter((key) => flags[key]).length;
+}
+
+function changedFeatureCount(left: FeatureFlags, right: FeatureFlags) {
+  return featureKeys.filter((key) => left[key] !== right[key]).length;
+}
+
+function ClientFeatureAccessMatrix({
+  clients,
+  duplicateGroups,
   onSaveClientFeatures,
   saving,
 }: {
-  client: Client;
+  clients: Client[];
+  duplicateGroups: Client[][];
   onSaveClientFeatures: (clientId: string, featureFlags: FeatureFlags) => void;
   saving: boolean;
 }) {
-  const [flags, setFlags] = useState<FeatureFlags>(() => normalizeFeatureFlags(client.feature_flags_json));
+  const [draftFlagsById, setDraftFlagsById] = useState<Record<string, FeatureFlags>>({});
+  const duplicateIds = useMemo(() => new Set(duplicateGroups.flatMap((group) => group.map((client) => client.id))), [duplicateGroups]);
 
   useEffect(() => {
-    setFlags(normalizeFeatureFlags(client.feature_flags_json));
-  }, [client.feature_flags_json]);
+    setDraftFlagsById((current) =>
+      Object.fromEntries(
+        clients.map((client) => {
+          const savedFlags = normalizeFeatureFlags(client.feature_flags_json);
+          const currentFlags = current[client.id];
+          return [client.id, currentFlags && sameFeatureFlags(currentFlags, savedFlags) ? currentFlags : currentFlags || savedFlags];
+        })
+      )
+    );
+  }, [clients]);
+
+  const rows = clients.map((client) => {
+    const savedFlags = normalizeFeatureFlags(client.feature_flags_json);
+    const draftFlags = draftFlagsById[client.id] || savedFlags;
+    const changedCount = changedFeatureCount(savedFlags, draftFlags);
+    return { client, savedFlags, draftFlags, changedCount };
+  });
+  const dirtyRows = rows.filter((row) => row.changedCount > 0);
+
+  function updateClientFlag(clientId: string, key: FeatureKey, value: boolean) {
+    setDraftFlagsById((current) => ({
+      ...current,
+      [clientId]: {
+        ...(current[clientId] || normalizeFeatureFlags(clients.find((client) => client.id === clientId)?.feature_flags_json)),
+        [key]: value,
+      },
+    }));
+  }
+
+  function applyPreset(clientId: string, presetId: string) {
+    const preset = featurePresets.find((item) => item.id === presetId);
+    if (!preset) return;
+    setDraftFlagsById((current) => ({ ...current, [clientId]: { ...preset.flags } }));
+  }
+
+  function resetDrafts() {
+    setDraftFlagsById(Object.fromEntries(clients.map((client) => [client.id, normalizeFeatureFlags(client.feature_flags_json)])));
+  }
+
+  function saveAll() {
+    for (const row of dirtyRows) {
+      onSaveClientFeatures(row.client.id, row.draftFlags);
+    }
+  }
 
   return (
-    <form
-      className="admin-feature-card"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSaveClientFeatures(client.id, flags);
-      }}
-    >
-      <div className="card-top">
+    <div className="admin-feature-matrix">
+      <div className="admin-feature-toolbar">
         <div>
-          <h4>{client.name}</h4>
-          <span>{client.id}</span>
+          <strong>{dirtyRows.length ? `${dirtyRows.length} workspace${dirtyRows.length === 1 ? "" : "s"} changed` : "All access saved"}</strong>
+          <span>
+            {duplicateIds.size ? `${duplicateIds.size} duplicate workspaces need review.` : "Presets keep feature access consistent across clients."}
+          </span>
         </div>
-        <button className="button" type="submit" disabled={saving}>
-          Save
-        </button>
+        <div className="admin-feature-toolbar-actions">
+          <button className="button" type="button" onClick={resetDrafts} disabled={saving || !dirtyRows.length}>
+            Discard
+          </button>
+          <button className="button button-primary" type="button" onClick={saveAll} disabled={saving || !dirtyRows.length}>
+            Save All Changes
+          </button>
+        </div>
       </div>
-      <div className="admin-feature-list">
+
+      <div className="admin-feature-reference" aria-label="Feature reference">
         {featureKeys.map((key) => (
-          <label className="admin-feature-toggle" key={`${client.id}-${key}`}>
-            <input
-              type="checkbox"
-              checked={flags[key]}
-              onChange={(event) => setFlags((current) => ({ ...current, [key]: event.target.checked }))}
-            />
-            <span>
-              <strong>{featureDetails[key].label}</strong>
-              <small>{featureDetails[key].description}</small>
-            </span>
-          </label>
+          <div key={key}>
+            <strong>{featureDetails[key].label}</strong>
+            <span>{featureDetails[key].description}</span>
+          </div>
         ))}
       </div>
-    </form>
+
+      <div className="admin-feature-table-wrap">
+        <table className="admin-feature-table">
+          <thead>
+            <tr>
+              <th scope="col">Workspace</th>
+              <th scope="col">Preset</th>
+              {featureKeys.map((key) => (
+                <th key={key} scope="col" title={featureDetails[key].description}>
+                  {featureDetails[key].label}
+                </th>
+              ))}
+              <th scope="col">Status</th>
+              <th scope="col">Save</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ client, draftFlags, savedFlags, changedCount }) => (
+              <tr key={client.id} data-dirty={changedCount > 0} data-duplicate={duplicateIds.has(client.id)}>
+                <th scope="row">
+                  <strong>{client.name}</strong>
+                  <span>{client.id}</span>
+                </th>
+                <td>
+                  <select
+                    aria-label={`Preset for ${client.name}`}
+                    value={featurePresetId(draftFlags)}
+                    onChange={(event) => applyPreset(client.id, event.target.value)}
+                    disabled={saving}
+                  >
+                    <option value="custom">Custom</option>
+                    {featurePresets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.label}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                {featureKeys.map((key) => (
+                  <td key={`${client.id}-${key}`} data-changed={savedFlags[key] !== draftFlags[key]}>
+                    <label className="matrix-toggle" title={`${featureDetails[key].label}: ${featureDetails[key].description}`}>
+                      <input
+                        type="checkbox"
+                        checked={draftFlags[key]}
+                        onChange={(event) => updateClientFlag(client.id, key, event.target.checked)}
+                        disabled={saving}
+                      />
+                      <span>{draftFlags[key] ? "On" : "Off"}</span>
+                    </label>
+                  </td>
+                ))}
+                <td>
+                  <span className="matrix-status" data-state={changedCount ? "dirty" : duplicateIds.has(client.id) ? "warning" : "saved"}>
+                    {changedCount ? `${changedCount} change${changedCount === 1 ? "" : "s"}` : duplicateIds.has(client.id) ? "Duplicate" : `${enabledFeatureCount(draftFlags)} on`}
+                  </span>
+                </td>
+                <td>
+                  <button className="button button-compact" type="button" onClick={() => onSaveClientFeatures(client.id, draftFlags)} disabled={saving || !changedCount}>
+                    Save
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
