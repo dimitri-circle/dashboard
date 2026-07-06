@@ -6,9 +6,12 @@ import { Joyride, STATUS, type EventData, type Step, type TooltipRenderProps } f
 
 type Provider = "ga4" | "gtm" | "hotjar" | "openai" | "mcp";
 type Status = "disconnected" | "connected" | "error";
-type View = "clients" | "overview" | "brain" | "watch" | "integrations" | "analysis" | "insights";
-type NavIconName = "clients" | "overview" | "brain" | "watch" | "tools" | "analysis" | "insights" | "menu" | "close" | "signout";
-type WebsiteWatchTool = "surface" | "tracker" | "deep";
+type View = "clients" | "admin" | "overview" | "brain" | "watch" | "integrations" | "analysis" | "insights";
+type FeatureKey = "overview" | "brain" | "watch" | "integrations" | "analysis" | "insights";
+type FeatureFlags = Record<FeatureKey, boolean>;
+type AppRole = "admin" | "operator" | "viewer";
+type NavIconName = "clients" | "admin" | "overview" | "brain" | "watch" | "tools" | "analysis" | "insights" | "menu" | "close" | "signout";
+type WebsiteWatchTool = "surface" | "tracker" | "visitors" | "jobIndex" | "deep";
 type DeepAuditAccess = "public" | "vercel" | "basic" | "login" | "custom";
 type ToastNoticeState = {
   id: number;
@@ -28,6 +31,31 @@ type Client = {
   id: string;
   name: string;
   notes: string | null;
+  feature_flags_json?: Partial<FeatureFlags> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type ClientDedupeResult = {
+  duplicateGroups: number;
+  removed: Array<{ id: string; name: string; keptId: string }>;
+  skipped: Array<{ id: string; name: string; keptId: string; reason: string }>;
+};
+
+type CurrentUser = {
+  id: string;
+  email: string;
+  role: AppRole;
+  legacy?: boolean;
+};
+
+type ManagedUser = {
+  id: string;
+  email: string;
+  role: AppRole;
+  status: "active" | "disabled";
+  last_login_at: string | null;
+  disabled_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -267,6 +295,55 @@ type SeoHealthChecks = {
   slack_webhook?: boolean;
 };
 
+type VisitorIntelligenceEvent = {
+  id: string;
+  siteOrigin: string;
+  eventType: "request" | "pageview";
+  source: string;
+  occurredAt: string;
+  receivedAt: string;
+  pageUrl: string;
+  path: string;
+  method: string | null;
+  statusCode: number | null;
+  referrer: string | null;
+  userAgent: string | null;
+  country: string | null;
+  asn: string | null;
+  botName: string | null;
+  botCategory: "human" | "search" | "ai" | "seo" | "monitoring" | "scanner" | "automation" | "unknown";
+  botVerification: "verified" | "self_declared" | "failed" | "unknown" | "not_applicable";
+  automationScore: number;
+  classificationReasons: string[];
+};
+
+type VisitorIntelligenceSummary = {
+  storageReady?: boolean;
+  storageError?: string | null;
+  windowDays: number;
+  totalEvents: number;
+  requestEvents: number;
+  pageviewEvents: number;
+  botEvents: number;
+  humanEvents: number;
+  aiCrawlerEvents: number;
+  scannerEvents: number;
+  selfDeclaredBots: number;
+  verifiedBots: number;
+  topBots: Array<{ label: string; count: number }>;
+  categories: Array<{ label: string; count: number }>;
+  topPages: Array<{ label: string; count: number }>;
+  recentEvents: VisitorIntelligenceEvent[];
+  contract: {
+    endpointPath: string;
+    clientHeader: string;
+    secretHeader: string;
+    secretEnvVar: string;
+    maxEventsPerRequest: number;
+    mode: string;
+  };
+};
+
 const providerLabels: Record<Provider, string> = {
   ga4: "GA4",
   gtm: "GTM",
@@ -300,19 +377,83 @@ const providerDetails: Record<Provider, { title: string; description: string }> 
 
 const providerOrder = Object.keys(providerLabels) as Provider[];
 
-const navItems: Array<{ id: View; label: string; description: string; icon: NavIconName }> = [
+const featureKeys: FeatureKey[] = ["brain", "overview", "watch", "integrations", "analysis", "insights"];
+
+const defaultFeatureFlags: FeatureFlags = {
+  overview: false,
+  brain: true,
+  watch: false,
+  integrations: false,
+  analysis: false,
+  insights: false,
+};
+
+const featureDetails: Record<FeatureKey, { label: string; description: string; audience: "client" | "internal" }> = {
+  brain: {
+    label: "Br(AI)N",
+    description: "Content review and editorial QA with client-specific context.",
+    audience: "client",
+  },
+  overview: {
+    label: "Overview",
+    description: "Workspace readiness, connector coverage, and reporting summary.",
+    audience: "internal",
+  },
+  watch: {
+    label: "Website Watch",
+    description: "Surface checks, baseline tracking, visitor evidence, and deeper audit setup.",
+    audience: "internal",
+  },
+  integrations: {
+    label: "Tool Setup",
+    description: "Credential and metadata setup for connected tools.",
+    audience: "internal",
+  },
+  analysis: {
+    label: "Competitive Analysis",
+    description: "Competitor crawling and evidence-backed market briefs.",
+    audience: "internal",
+  },
+  insights: {
+    label: "Insights",
+    description: "AI recommendations from connected data and saved reports.",
+    audience: "internal",
+  },
+};
+
+const appRoles: AppRole[] = ["admin", "operator", "viewer"];
+
+const roleDetails: Record<AppRole, { label: string; description: string }> = {
+  admin: {
+    label: "Admin",
+    description: "Can manage logins, roles, client visibility, and dashboard setup.",
+  },
+  operator: {
+    label: "Operator",
+    description: "Can use dashboard tools but cannot manage login access.",
+  },
+  viewer: {
+    label: "Viewer",
+    description: "Read-focused role for limited dashboard access.",
+  },
+};
+
+const navItems: Array<{ id: View; label: string; description: string; icon: NavIconName; feature?: FeatureKey }> = [
   { id: "clients", label: "Clients", description: "Choose workspace", icon: "clients" },
-  { id: "overview", label: "Overview", description: "Health and report coverage", icon: "overview" },
-  { id: "brain", label: "Br(AI)N", description: "Vast blog audit", icon: "brain" },
-  { id: "watch", label: "Website Watch", description: "Surface checks and audit setup", icon: "watch" },
-  { id: "integrations", label: "Tool Setup", description: "Connect keys and metadata", icon: "tools" },
-  { id: "analysis", label: "Competitive Analysis", description: "Generate market briefs", icon: "analysis" },
-  { id: "insights", label: "Insights", description: "Review AI recommendations", icon: "insights" },
+  { id: "admin", label: "Admin", description: "Feature visibility", icon: "admin" },
+  { id: "brain", label: "Br(AI)N", description: "Content review", icon: "brain", feature: "brain" },
+  { id: "overview", label: "Overview", description: "Health and report coverage", icon: "overview", feature: "overview" },
+  { id: "watch", label: "Website Watch", description: "Surface checks and audit setup", icon: "watch", feature: "watch" },
+  { id: "integrations", label: "Tool Setup", description: "Connect keys and metadata", icon: "tools", feature: "integrations" },
+  { id: "analysis", label: "Competitive Analysis", description: "Generate market briefs", icon: "analysis", feature: "analysis" },
+  { id: "insights", label: "Insights", description: "Review AI recommendations", icon: "insights", feature: "insights" },
 ];
 
 const websiteWatchTools: Array<{ id: WebsiteWatchTool; label: string; description: string }> = [
   { id: "surface", label: "Surface Check", description: "Public page review" },
   { id: "tracker", label: "Baseline Watch", description: "Public site changes" },
+  { id: "visitors", label: "Viewership", description: "Visitor and bot telemetry" },
+  { id: "jobIndex", label: "Vast Job Index", description: "Automation WIP" },
   { id: "deep", label: "Deep Audit", description: "Protected access setup" },
 ];
 
@@ -323,6 +464,33 @@ const AI_SETUP_MESSAGE =
   "AI analysis is off. Connect an OpenAI API key to generate summaries, severity ratings, and suggested fixes.";
 const DEFAULT_WATCH_SITE_URL = "https://vast.ai";
 const DEFAULT_PRIORITY_PAGES = ["/", "/pricing", "/services", "/blog", "/contact"];
+
+const EMPTY_VISITOR_INTELLIGENCE_SUMMARY: VisitorIntelligenceSummary = {
+  storageReady: false,
+  storageError: null,
+  windowDays: 7,
+  totalEvents: 0,
+  requestEvents: 0,
+  pageviewEvents: 0,
+  botEvents: 0,
+  humanEvents: 0,
+  aiCrawlerEvents: 0,
+  scannerEvents: 0,
+  selfDeclaredBots: 0,
+  verifiedBots: 0,
+  topBots: [],
+  categories: [],
+  topPages: [],
+  recentEvents: [],
+  contract: {
+    endpointPath: "/api/seo/visitor-intelligence",
+    clientHeader: "x-seo-client-id",
+    secretHeader: "x-seo-visitor-secret",
+    secretEnvVar: "SEO_VISITOR_INGEST_SECRET",
+    maxEventsPerRequest: 25,
+    mode: "server-to-server",
+  },
+};
 
 const tourSteps: Step[] = [
   {
@@ -461,6 +629,24 @@ function priorityPagesText(value: string) {
   return normalizePriorityPageList(value).join("\n");
 }
 
+function normalizeFeatureFlags(value: Client["feature_flags_json"] | undefined): FeatureFlags {
+  return Object.fromEntries(
+    featureKeys.map((key) => [key, typeof value?.[key] === "boolean" ? Boolean(value[key]) : defaultFeatureFlags[key]])
+  ) as FeatureFlags;
+}
+
+function isViewAvailable(view: View, flags: FeatureFlags) {
+  if (view === "clients" || view === "admin") return true;
+  return Boolean(flags[view]);
+}
+
+function defaultViewForClient(client?: Client) {
+  const flags = normalizeFeatureFlags(client?.feature_flags_json);
+  if (flags.brain) return "brain" as View;
+  const firstEnabled = featureKeys.find((key) => flags[key]);
+  return (firstEnabled || "admin") as View;
+}
+
 export function SeoDashboard() {
   const [view, setView] = useState<View>("clients");
   const [clientId, setClientId] = useState(DEFAULT_CLIENT_ID);
@@ -483,13 +669,29 @@ export function SeoDashboard() {
   const [seoChangeRuns, setSeoChangeRuns] = useState<SeoChangeRun[]>([]);
   const [seoTrackerStorageReady, setSeoTrackerStorageReady] = useState(true);
   const [seoTrackerStorageError, setSeoTrackerStorageError] = useState<string | null>(null);
+  const [visitorIntelligence, setVisitorIntelligence] = useState<VisitorIntelligenceSummary>(EMPTY_VISITOR_INTELLIGENCE_SUMMARY);
   const [seoHealthChecks, setSeoHealthChecks] = useState<SeoHealthChecks | null>(null);
   const [tourRunning, setTourRunning] = useState(false);
   const [activeProvider, setActiveProvider] = useState<Provider>("ga4");
   const [activeWatchTool, setActiveWatchTool] = useState<WebsiteWatchTool>("surface");
   const [navPinned, setNavPinned] = useState(false);
+  const [savingFeatures, setSavingFeatures] = useState(false);
+  const [dedupingClients, setDedupingClients] = useState(false);
+  const [clientDedupeResult, setClientDedupeResult] = useState<ClientDedupeResult | null>(null);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [savingUserAccess, setSavingUserAccess] = useState(false);
 
   const activeClient = clients.find((client) => client.id === clientId);
+  const activeFeatureFlags = useMemo(() => normalizeFeatureFlags(activeClient?.feature_flags_json), [activeClient]);
+  const visibleNavItems = useMemo(
+    () => navItems.filter((item) => {
+      if (item.id === "admin") return currentUser?.role === "admin";
+      return !item.feature || activeFeatureFlags[item.feature];
+    }),
+    [activeFeatureFlags, currentUser?.role]
+  );
   const latestByProvider = useMemo(() => {
     return integrations.reduce<Partial<Record<Provider, Integration>>>((acc, integration) => {
       acc[integration.provider] = integration;
@@ -537,7 +739,16 @@ export function SeoDashboard() {
   async function loadDashboard(activeClientId = clientId) {
     try {
       setLoading(true);
-      const clientBody = await api<{ clients: Client[] }>(activeClientId, "/api/seo/clients");
+      const [sessionBody, clientBody] = await Promise.all([
+        api<{ user: CurrentUser | null }>(activeClientId, "/api/auth/me").catch(() => ({ user: null })),
+        api<{ clients: Client[] }>(activeClientId, "/api/seo/clients"),
+      ]);
+      setCurrentUser(sessionBody.user);
+
+      if (sessionBody.user?.role !== "admin") {
+        setManagedUsers([]);
+      }
+
       setClients(clientBody.clients);
 
       if (!clientBody.clients.length) {
@@ -550,6 +761,7 @@ export function SeoDashboard() {
         setSeoChangeRuns([]);
         setSeoTrackerStorageReady(true);
         setSeoTrackerStorageError(null);
+        setVisitorIntelligence(EMPTY_VISITOR_INTELLIGENCE_SUMMARY);
         setSeoHealthChecks(null);
         setNotice(null);
         return;
@@ -561,7 +773,7 @@ export function SeoDashboard() {
         setClientId(resolvedClientId);
       }
 
-      const [integrationBody, insightBody, competitiveBody, metricBody, watchBody, healthBody] = await Promise.all([
+      const [integrationBody, insightBody, competitiveBody, metricBody, watchBody, visitorBody, healthBody] = await Promise.all([
         api<{ integrations: Integration[] }>(resolvedClientId, "/api/seo/integrations"),
         api<{ insights: Insight[] }>(resolvedClientId, "/api/seo/insights"),
         api<{ analyses: CompetitiveAnalysis[] }>(resolvedClientId, "/api/seo/competitive-analysis"),
@@ -571,6 +783,11 @@ export function SeoDashboard() {
           runs: [],
           storageReady: false,
           storageError: error instanceof Error ? error.message : "SEO Watch storage state could not be loaded.",
+        })),
+        api<VisitorIntelligenceSummary>(resolvedClientId, "/api/seo/visitor-intelligence").catch((error) => ({
+          ...EMPTY_VISITOR_INTELLIGENCE_SUMMARY,
+          storageReady: false,
+          storageError: error instanceof Error ? error.message : "Visitor intelligence state could not be loaded.",
         })),
         api<{ checks: SeoHealthChecks }>(resolvedClientId, "/api/seo/health").catch((): { checks: SeoHealthChecks } => ({ checks: {} })),
       ]);
@@ -582,9 +799,14 @@ export function SeoDashboard() {
       setSeoChangeRuns(watchBody.runs);
       setSeoTrackerStorageReady(watchBody.storageReady !== false);
       setSeoTrackerStorageError(watchBody.storageError || null);
+      setVisitorIntelligence(visitorBody);
       setSeoHealthChecks(healthBody.checks);
       if (!integrationBody.integrations.some((item) => item.provider === "openai") && !healthBody.checks.openai_api_key) {
         setNotice({ type: "info", message: AI_SETUP_MESSAGE });
+      }
+
+      if (sessionBody.user?.role === "admin") {
+        loadManagedUsers();
       }
     } catch (error) {
       setNotice({
@@ -603,6 +825,21 @@ export function SeoDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!hasClients || !activeClient || isViewAvailable(view, activeFeatureFlags)) {
+      return;
+    }
+
+    setView(defaultViewForClient(activeClient));
+  }, [activeClient, activeFeatureFlags, hasClients, view]);
+
+  useEffect(() => {
+    if (view === "admin" && currentUser?.role === "admin" && !managedUsers.length && !loadingUsers) {
+      loadManagedUsers();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, currentUser?.role]);
+
   function switchClient(nextClientId: string) {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{1,62}[a-zA-Z0-9]$/.test(nextClientId)) {
       setNotice({
@@ -615,7 +852,7 @@ export function SeoDashboard() {
     const nextClient = clients.find((client) => client.id === nextClientId);
     window.localStorage.setItem(CLIENT_STORAGE_KEY, nextClientId);
     setClientId(nextClientId);
-    setView("overview");
+    setView(defaultViewForClient(nextClient));
     setIntegrations([]);
     setInsights([]);
     setMetricSnapshots([]);
@@ -626,6 +863,7 @@ export function SeoDashboard() {
     setSeoChangeRuns([]);
     setSeoTrackerStorageReady(true);
     setSeoTrackerStorageError(null);
+    setVisitorIntelligence(EMPTY_VISITOR_INTELLIGENCE_SUMMARY);
     setSeoHealthChecks(null);
     setNotice({ type: "info", message: `Viewing client workspace: ${nextClient?.name || nextClientId}` });
     loadDashboard(nextClientId);
@@ -645,11 +883,108 @@ export function SeoDashboard() {
       form.reset();
       window.localStorage.setItem(CLIENT_STORAGE_KEY, body.client.id);
       setClientId(body.client.id);
-      setView("overview");
+      setView(defaultViewForClient(body.client));
       await loadDashboard(body.client.id);
       setNotice({ type: "success", message: `${body.client.name} client workspace created.` });
     } catch (error) {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to add client." });
+    }
+  }
+
+  async function loadManagedUsers() {
+    try {
+      setLoadingUsers(true);
+      const body = await api<{ users: ManagedUser[] }>(clientId, "/api/admin/users");
+      setManagedUsers(body.users);
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to load login users." });
+    } finally {
+      setLoadingUsers(false);
+    }
+  }
+
+  async function createManagedUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const payload = {
+      email: String(formData.get("email") || "").trim(),
+      password: String(formData.get("password") || ""),
+      role: String(formData.get("role") || "operator") as AppRole,
+    };
+
+    try {
+      setSavingUserAccess(true);
+      const body = await api<{ user: ManagedUser }>(clientId, "/api/admin/users", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setManagedUsers((current) => {
+        const exists = current.some((user) => user.id === body.user.id);
+        return exists
+          ? current.map((user) => (user.id === body.user.id ? body.user : user))
+          : [...current, body.user].sort((a, b) => a.email.localeCompare(b.email));
+      });
+      form.reset();
+      setNotice({ type: "success", message: `${body.user.email} login saved.` });
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to save login user." });
+    } finally {
+      setSavingUserAccess(false);
+    }
+  }
+
+  async function updateManagedUser(userId: string, payload: Partial<{ role: AppRole; password: string; disabled: boolean }>) {
+    try {
+      setSavingUserAccess(true);
+      const body = await api<{ user: ManagedUser }>(clientId, `/api/admin/users/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+      setManagedUsers((current) => current.map((user) => (user.id === body.user.id ? body.user : user)));
+      setNotice({ type: "success", message: `${body.user.email} access updated.` });
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to update login user." });
+    } finally {
+      setSavingUserAccess(false);
+    }
+  }
+
+  async function saveClientFeatures(targetClientId: string, featureFlags: FeatureFlags) {
+    try {
+      setSavingFeatures(true);
+      const body = await api<{ client: Client }>(clientId, `/api/seo/clients/${targetClientId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ featureFlags }),
+      });
+      setClients((current) => current.map((client) => (client.id === body.client.id ? body.client : client)));
+      setNotice({ type: "success", message: `${body.client.name} feature visibility updated.` });
+      if (targetClientId === clientId && !isViewAvailable(view, normalizeFeatureFlags(body.client.feature_flags_json))) {
+        setView(defaultViewForClient(body.client));
+      }
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to save feature visibility." });
+    } finally {
+      setSavingFeatures(false);
+    }
+  }
+
+  async function dedupeClientShells() {
+    try {
+      setDedupingClients(true);
+      const body = await api<{ result: ClientDedupeResult }>(clientId, "/api/seo/clients/dedupe", { method: "POST" });
+      setClientDedupeResult(body.result);
+      await loadDashboard(clientId);
+      setNotice({
+        type: body.result.removed.length ? "success" : "info",
+        message: body.result.removed.length
+          ? `Removed ${body.result.removed.length} duplicate client shell${body.result.removed.length === 1 ? "" : "s"}.`
+          : "No empty duplicate client shells were removed.",
+      });
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to deduplicate clients." });
+    } finally {
+      setDedupingClients(false);
     }
   }
 
@@ -931,7 +1266,7 @@ export function SeoDashboard() {
 
         {hasClients ? (
           <nav className="side-nav" data-tour="side-nav" aria-label="Primary">
-            {navItems.map((item) => (
+            {visibleNavItems.map((item) => (
               <div className="nav-group" key={item.id}>
                 <button
                   className="nav-item"
@@ -1066,6 +1401,24 @@ export function SeoDashboard() {
               />
             ) : null}
 
+            {view === "admin" ? (
+              <AdminView
+                clients={clients}
+                clientDedupeResult={clientDedupeResult}
+                currentUser={currentUser}
+                dedupingClients={dedupingClients}
+                loadingUsers={loadingUsers}
+                managedUsers={managedUsers}
+                onCreateUser={createManagedUser}
+                onDedupeClients={dedupeClientShells}
+                onReloadUsers={loadManagedUsers}
+                onSaveClientFeatures={saveClientFeatures}
+                onUpdateUser={updateManagedUser}
+                savingFeatures={savingFeatures}
+                savingUserAccess={savingUserAccess}
+              />
+            ) : null}
+
             {view === "brain" ? <BrainView activeClient={activeClient} clientId={clientId} /> : null}
 
             {view === "watch" ? (
@@ -1080,6 +1433,7 @@ export function SeoDashboard() {
                 onSelectTool={setActiveWatchTool}
                 onConnectApiKey={openOpenAiSetup}
                 seoChangeRuns={seoChangeRuns}
+                visitorIntelligence={visitorIntelligence}
                 slackConnected={Boolean(seoHealthChecks?.slack_webhook)}
                 seoTrackerStorageError={seoTrackerStorageError}
                 seoTrackerStorageReady={seoTrackerStorageReady}
@@ -1152,6 +1506,12 @@ function NavIcon({ name }: { name: NavIconName }) {
           <path {...common} d="M4 20h6v-3H4v3Z" />
         </>
       ) : null}
+      {name === "admin" ? (
+        <>
+          <path {...common} d="M12 3.5 19 6.5v5.2c0 4.1-2.9 7.4-7 8.8-4.1-1.4-7-4.7-7-8.8V6.5l7-3Z" />
+          <path {...common} d="M9.5 12.2 11.2 14l3.5-4" />
+        </>
+      ) : null}
       {name === "brain" ? (
         <>
           <path {...common} d="M9 4.5a3 3 0 0 0-3 3v.3a3 3 0 0 0-1.2 5.4 3 3 0 0 0 3 5.3H9" />
@@ -1221,6 +1581,7 @@ function NavIcon({ name }: { name: NavIconName }) {
 
 function viewTitle(view: View, provider: Provider) {
   if (view === "clients") return "Clients";
+  if (view === "admin") return "Admin";
   if (view === "brain") return "Br(AI)N";
   if (view === "watch") return "Website Watch";
   if (view === "integrations") return providerDetails[provider].title;
@@ -1231,8 +1592,9 @@ function viewTitle(view: View, provider: Provider) {
 
 function viewDescription(view: View, clientName: string, provider: Provider) {
   if (view === "clients") return "Choose or create the active client workspace.";
-  if (view === "brain") return `${clientName}: audit Vast drafts for truth, evidence, and brand fit.`;
-  if (view === "watch") return `${clientName}: fast surface checks and deeper audit setup.`;
+  if (view === "admin") return "Manage logins, roles, and client feature visibility.";
+  if (view === "brain") return `${clientName}: review drafts for truth, evidence, brand fit, and client-specific context.`;
+  if (view === "watch") return `${clientName}: internal surface checks and deeper audit setup.`;
   if (view === "integrations") return `${clientName}: ${providerDetails[provider].description}`;
   if (view === "analysis") return `Generate competitive briefs for ${clientName}.`;
   if (view === "insights") return `Review AI recommendations for ${clientName}.`;
@@ -1336,6 +1698,24 @@ function ToastNotice({ toast }: { toast: ToastNoticeState | null }) {
       </div>
     </div>
   );
+}
+
+function duplicateClientGroups(clients: Client[]) {
+  const groups = new Map<string, Client[]>();
+
+  for (const client of clients) {
+    const key = client.name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!key) continue;
+    groups.set(key, [...(groups.get(key) || []), client]);
+  }
+
+  return [...groups.values()].filter((group) => group.length > 1);
 }
 
 function ClientsView({
@@ -1468,6 +1848,318 @@ function ClientsView({
         </aside>
       </section>
     </PageWorkspace>
+  );
+}
+
+function AdminView({
+  clients,
+  clientDedupeResult,
+  currentUser,
+  dedupingClients,
+  loadingUsers,
+  managedUsers,
+  onCreateUser,
+  onDedupeClients,
+  onReloadUsers,
+  onSaveClientFeatures,
+  onUpdateUser,
+  savingFeatures,
+  savingUserAccess,
+}: {
+  clients: Client[];
+  clientDedupeResult: ClientDedupeResult | null;
+  currentUser: CurrentUser | null;
+  dedupingClients: boolean;
+  loadingUsers: boolean;
+  managedUsers: ManagedUser[];
+  onCreateUser: (event: FormEvent<HTMLFormElement>) => void;
+  onDedupeClients: () => void;
+  onReloadUsers: () => void;
+  onSaveClientFeatures: (clientId: string, featureFlags: FeatureFlags) => void;
+  onUpdateUser: (userId: string, payload: Partial<{ role: AppRole; password: string; disabled: boolean }>) => void;
+  savingFeatures: boolean;
+  savingUserAccess: boolean;
+}) {
+  const activeUsers = managedUsers.filter((user) => user.status === "active");
+  const adminUsers = activeUsers.filter((user) => user.role === "admin");
+  const disabledUsers = managedUsers.filter((user) => user.status === "disabled");
+  const duplicateGroups = duplicateClientGroups(clients);
+
+  return (
+    <PageWorkspace className="admin-workspace">
+      <PageHero
+        eyebrow="Admin control"
+        title="Keep client access narrow."
+        description="Default to Br(AI)N content review. Turn on broader SEO, audit, and reporting tools only when that workspace needs them."
+        stats={[
+          { label: "signed in", value: currentUser?.role || "unknown", helper: currentUser?.email },
+          { label: "active logins", value: loadingUsers ? "..." : String(activeUsers.length) },
+          { label: "duplicate groups", value: String(duplicateGroups.length), helper: "safe cleanup only" },
+        ]}
+      />
+
+      <div className="dashboard-status-strip" aria-label="Admin status">
+        <DashboardStatusPill label="Your role" value={currentUser?.role || "Unknown"} state={currentUser?.role === "admin" ? "ready" : "missing"} />
+        <DashboardStatusPill label="Managed users" value={loadingUsers ? "Loading" : String(managedUsers.length)} state={managedUsers.length ? "ready" : "idle"} />
+        <DashboardStatusPill label="Active admins" value={loadingUsers ? "Loading" : String(adminUsers.length)} state={adminUsers.length ? "ready" : "missing"} />
+        <DashboardStatusPill label="Disabled" value={loadingUsers ? "Loading" : String(disabledUsers.length)} state={disabledUsers.length ? "idle" : "ready"} />
+      </div>
+
+      <section className="admin-layout" aria-label="Admin management">
+        <section className="panel admin-access-panel" aria-labelledby="admin-users-title">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Login access</span>
+              <h3 id="admin-users-title">Users and roles</h3>
+            </div>
+            <button className="button" type="button" onClick={onReloadUsers} disabled={loadingUsers}>
+              Refresh
+            </button>
+          </div>
+
+          <form className="admin-user-form" onSubmit={onCreateUser}>
+            <label>
+              Email
+              <input name="email" type="email" placeholder="operator@example.com" required autoComplete="email" />
+            </label>
+            <label>
+              Temporary password
+              <input name="password" type="password" minLength={8} placeholder="At least 8 characters" required autoComplete="new-password" />
+            </label>
+            <label>
+              Role
+              <select name="role" defaultValue="operator">
+                {appRoles.map((role) => (
+                  <option key={role} value={role}>
+                    {roleDetails[role].label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button className="button button-primary" type="submit" disabled={savingUserAccess}>
+              Create Login
+            </button>
+          </form>
+
+          <div className="admin-role-reference" aria-label="Role reference">
+            {appRoles.map((role) => (
+              <div key={role}>
+                <span className="priority" data-priority={role === "admin" ? "high" : role === "operator" ? "medium" : "low"}>
+                  {roleDetails[role].label}
+                </span>
+                <p>{roleDetails[role].description}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="admin-user-list" aria-busy={loadingUsers}>
+            {loadingUsers ? <p className="client-selection-empty">Loading login users...</p> : null}
+            {!loadingUsers && !managedUsers.length ? <p className="client-selection-empty">No app-managed logins found yet.</p> : null}
+            {managedUsers.map((user) => (
+              <ManagedUserCard
+                currentUserId={currentUser?.id || ""}
+                key={user.id}
+                onUpdateUser={onUpdateUser}
+                saving={savingUserAccess}
+                user={user}
+              />
+            ))}
+          </div>
+        </section>
+
+        <aside className="panel admin-maintenance-panel" aria-labelledby="admin-maintenance-title">
+          <span className="eyebrow">Maintenance</span>
+          <h3 id="admin-maintenance-title">Client controls</h3>
+          <p>Feature visibility belongs to each client workspace. Cleanup removes empty duplicate shells and skips anything with saved work.</p>
+          <div className="admin-principle-list">
+            <div>
+              <strong>Client-facing first</strong>
+              <span>Br(AI)N content review and editorial QA.</span>
+            </div>
+            <div>
+              <strong>Internal until ready</strong>
+              <span>SEO Watch, metrics, technical audits, integrations, and competitive analysis.</span>
+            </div>
+          </div>
+          <button className="button" type="button" onClick={onDedupeClients} disabled={dedupingClients || !duplicateGroups.length}>
+            {dedupingClients ? "Checking..." : "Remove Empty Duplicates"}
+          </button>
+          {duplicateGroups.length ? (
+            <div className="duplicate-client-list">
+              {duplicateGroups.map((group) => (
+                <article key={group.map((client) => client.id).join("-")}>
+                  <strong>{group[0].name}</strong>
+                  <span>{group.length} matching workspaces</span>
+                  <small>{group.map((client) => client.id).join(", ")}</small>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state">No duplicate client names found.</div>
+          )}
+          {clientDedupeResult ? (
+            <div className="admin-dedupe-result">
+              <strong>{clientDedupeResult.removed.length} removed</strong>
+              <span>{clientDedupeResult.skipped.length} skipped</span>
+              {clientDedupeResult.skipped.length ? <p>{clientDedupeResult.skipped.length} duplicate has saved work and needs manual review.</p> : null}
+            </div>
+          ) : null}
+        </aside>
+      </section>
+
+      <section className="panel admin-feature-panel" aria-labelledby="admin-feature-title">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Client visibility</span>
+            <h3 id="admin-feature-title">Feature access by workspace</h3>
+          </div>
+          <span className="badge">{clients.length} clients</span>
+        </div>
+        <div className="admin-feature-grid">
+          {clients.map((client) => (
+            <ClientFeatureAdminCard
+              client={client}
+              key={client.id}
+              onSaveClientFeatures={onSaveClientFeatures}
+              saving={savingFeatures}
+            />
+          ))}
+        </div>
+      </section>
+    </PageWorkspace>
+  );
+}
+
+function ManagedUserCard({
+  currentUserId,
+  onUpdateUser,
+  saving,
+  user,
+}: {
+  currentUserId: string;
+  onUpdateUser: (userId: string, payload: Partial<{ role: AppRole; password: string; disabled: boolean }>) => void;
+  saving: boolean;
+  user: ManagedUser;
+}) {
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const isCurrentUser = user.id === currentUserId;
+
+  function rotatePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const password = passwordRef.current?.value || "";
+    onUpdateUser(user.id, { password });
+    if (passwordRef.current) {
+      passwordRef.current.value = "";
+    }
+  }
+
+  return (
+    <article className="admin-user-card" data-status={user.status}>
+      <div className="admin-user-main">
+        <div>
+          <strong>{user.email}</strong>
+          <span>{user.id}</span>
+        </div>
+        <div className="admin-user-badges">
+          <span className="priority" data-priority={user.role === "admin" ? "high" : user.role === "operator" ? "medium" : "low"}>
+            {user.role}
+          </span>
+          <span className="badge">{user.status}</span>
+        </div>
+      </div>
+
+      <div className="admin-user-meta">
+        <span>Created {new Date(user.created_at).toLocaleDateString()}</span>
+        <span>{user.last_login_at ? `Last login ${new Date(user.last_login_at).toLocaleString()}` : "No login recorded"}</span>
+      </div>
+
+      <div className="admin-user-controls">
+        <label>
+          Role
+          <select
+            value={user.role}
+            onChange={(event) => onUpdateUser(user.id, { role: event.target.value as AppRole })}
+            disabled={saving || isCurrentUser}
+          >
+            {appRoles.map((role) => (
+              <option key={role} value={role}>
+                {roleDetails[role].label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <form className="admin-password-form" onSubmit={rotatePassword}>
+          <label>
+            New password
+            <input ref={passwordRef} type="password" minLength={8} placeholder="Rotate password" autoComplete="new-password" />
+          </label>
+          <button className="button" type="submit" disabled={saving}>
+            Update Password
+          </button>
+        </form>
+
+        <button
+          className="button"
+          type="button"
+          disabled={saving || isCurrentUser}
+          onClick={() => onUpdateUser(user.id, { disabled: user.status !== "disabled" })}
+        >
+          {user.status === "disabled" ? "Enable" : "Disable"}
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function ClientFeatureAdminCard({
+  client,
+  onSaveClientFeatures,
+  saving,
+}: {
+  client: Client;
+  onSaveClientFeatures: (clientId: string, featureFlags: FeatureFlags) => void;
+  saving: boolean;
+}) {
+  const [flags, setFlags] = useState<FeatureFlags>(() => normalizeFeatureFlags(client.feature_flags_json));
+
+  useEffect(() => {
+    setFlags(normalizeFeatureFlags(client.feature_flags_json));
+  }, [client.feature_flags_json]);
+
+  return (
+    <form
+      className="admin-feature-card"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSaveClientFeatures(client.id, flags);
+      }}
+    >
+      <div className="card-top">
+        <div>
+          <h4>{client.name}</h4>
+          <span>{client.id}</span>
+        </div>
+        <button className="button" type="submit" disabled={saving}>
+          Save
+        </button>
+      </div>
+      <div className="admin-feature-list">
+        {featureKeys.map((key) => (
+          <label className="admin-feature-toggle" key={`${client.id}-${key}`}>
+            <input
+              type="checkbox"
+              checked={flags[key]}
+              onChange={(event) => setFlags((current) => ({ ...current, [key]: event.target.checked }))}
+            />
+            <span>
+              <strong>{featureDetails[key].label}</strong>
+              <small>{featureDetails[key].description}</small>
+            </span>
+          </label>
+        ))}
+      </div>
+    </form>
   );
 }
 
@@ -1753,9 +2445,9 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
     <PageWorkspace className="brain-workspace">
       <section className="panel brain-brief-panel" aria-label="Vast Blog Audit">
         <div className="brain-brief-copy">
-          <span className="eyebrow">Vast Blog Audit</span>
-          <h3>Truth before publishing.</h3>
-          <p>Checks draft claims against Vast docs, site knowledge, live pricing, brand sources, and approved social feeds.</p>
+          <span className="eyebrow">Content Review</span>
+          <h3>Client-specific edits before publishing.</h3>
+          <p>Checks draft claims, brand fit, weak logic, and evidence gaps before a writer or editor sends content forward.</p>
         </div>
         <div className="brain-brief-meta" aria-label="Audit context">
           <div>
@@ -2076,6 +2768,7 @@ function WebsiteWatchView({
   onSelectTool,
   seoChangeRuns,
   slackConnected,
+  visitorIntelligence,
   seoTrackerBaseline,
   seoTrackerStorageError,
   seoTrackerStorageReady,
@@ -2095,6 +2788,7 @@ function WebsiteWatchView({
   onSelectTool: (tool: WebsiteWatchTool) => void;
   seoChangeRuns: SeoChangeRun[];
   slackConnected: boolean;
+  visitorIntelligence: VisitorIntelligenceSummary;
   seoTrackerBaseline: SeoChangeTrackerBaseline | null;
   seoTrackerStorageError: string | null;
   seoTrackerStorageReady: boolean;
@@ -2115,6 +2809,11 @@ function WebsiteWatchView({
     : seoTrackerBaseline
       ? "Captured"
       : "Missing";
+  const visitorStatus = visitorIntelligence.storageReady === false
+    ? "Setup needed"
+    : visitorIntelligence.totalEvents
+      ? `${visitorIntelligence.totalEvents} events`
+      : "No events";
 
   useEffect(() => {
     if (!latestSiteUrl) return;
@@ -2183,13 +2882,15 @@ function WebsiteWatchView({
       <PageHero
         eyebrow="Website monitoring"
         title="Check what changed or broke."
-        description="Run fast public checks, capture public baselines, and prepare deeper audits when authenticated access is ready."
+        description="Run fast public checks, capture public baselines, and prepare deeper audits or Vast Job Index automation when the runner is ready."
       />
 
       <div className="watch-status-strip" aria-label="Website Watch setup status">
         <WatchStatusPill label="AI Analysis" value={aiAnalysisConnected ? "Connected" : "Off"} state={aiAnalysisConnected ? "ready" : "missing"} />
         <WatchStatusPill label="Slack" value={slackConnected ? "Connected" : "Not Connected"} state={slackConnected ? "ready" : "missing"} />
         <WatchStatusPill label="Baseline" value={baselineStatus} state={seoTrackerBaseline && seoTrackerStorageReady ? "ready" : "missing"} />
+        <WatchStatusPill label="Viewership" value={visitorStatus} state={visitorIntelligence.totalEvents ? "ready" : visitorIntelligence.storageReady === false ? "missing" : "idle"} />
+        <WatchStatusPill label="Job Index" value="WIP" state="idle" />
         <WatchStatusPill label="Last Run" value={lastRunAt ? new Date(lastRunAt).toLocaleString() : "Never"} state={lastRunAt ? "ready" : "idle"} />
       </div>
 
@@ -2243,6 +2944,22 @@ function WebsiteWatchView({
           cta={seoTracking ? "Capturing..." : "Capture baseline"}
           onClick={runBaselineFromCommand}
           disabled={seoTracking}
+        />
+        <WatchModeCard
+          active={activeTool === "visitors"}
+          title="Viewership"
+          subtitle="Visitor contract"
+          description="Receive signed request events from tracked sites."
+          cta="Review contract"
+          onClick={() => onSelectTool("visitors")}
+        />
+        <WatchModeCard
+          active={activeTool === "jobIndex"}
+          title="Vast Job Index"
+          subtitle="Automation WIP"
+          description="Define the watched job-index feed before enabling a runner."
+          cta="Review setup"
+          onClick={() => onSelectTool("jobIndex")}
         />
         <WatchModeCard
           active={activeTool === "deep"}
@@ -2400,6 +3117,16 @@ function WebsiteWatchView({
             </section>
             <SeoChangeRunHistory runs={seoChangeRuns} storageError={seoTrackerStorageError} storageReady={seoTrackerStorageReady} />
           </>
+        ) : null}
+
+        {activeTool === "jobIndex" ? <VastJobIndexAutomationPanel onOpenBaseline={() => onSelectTool("tracker")} /> : null}
+
+        {activeTool === "visitors" ? (
+          <VisitorIntelligencePanel
+            activeClient={activeClient}
+            clientId={activeClient?.id || DEFAULT_CLIENT_ID}
+            summary={visitorIntelligence}
+          />
         ) : null}
 
         {activeTool === "deep" ? (
@@ -2585,6 +3312,280 @@ function SeoChangeRunHistory({
           {storageReady ? "No runs yet. Run a Surface Check or capture a baseline to see results here." : storageError || "SEO Watch storage is not ready yet."}
         </div>
       )}
+    </section>
+  );
+}
+
+function VisitorIntelligencePanel({
+  activeClient,
+  clientId,
+  summary,
+}: {
+  activeClient?: Client;
+  clientId: string;
+  summary: VisitorIntelligenceSummary;
+}) {
+  const endpoint =
+    typeof window === "undefined"
+      ? summary.contract.endpointPath
+      : `${window.location.origin}${summary.contract.endpointPath}`;
+  const samplePayload = `await fetch("${endpoint}", {
+  method: "POST",
+  headers: {
+    "content-type": "application/json",
+    "${summary.contract.clientHeader}": "${clientId}",
+    "${summary.contract.secretHeader}": process.env.${summary.contract.secretEnvVar}
+  },
+  body: JSON.stringify({
+    events: [{
+      eventType: "request",
+      source: "edge",
+      siteOrigin: "https://example.com",
+      pageUrl: "https://example.com/pricing",
+      method: "GET",
+      statusCode: 200,
+      userAgent: request.headers.get("user-agent"),
+      visitorIp: request.headers.get("x-forwarded-for")?.split(",")[0],
+      country: request.headers.get("x-vercel-ip-country")
+    }]
+  })
+});`;
+
+  return (
+    <section className="panel visitor-contract-panel" aria-labelledby="visitor-contract-title">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">Viewership contract</span>
+          <h3 id="visitor-contract-title">Receive visitor and bot evidence.</h3>
+          <p>
+            The tracked site forwards request events to this dashboard. The dashboard stores observed visits, classifies
+            likely bots, and keeps the claim separate from GA4 or crawl checks.
+          </p>
+        </div>
+        <span className="job-index-badge">{summary.storageReady === false ? "Setup needed" : "Read-only"}</span>
+      </div>
+
+      <div className="visitor-metric-grid" aria-label="Visitor intelligence summary">
+        <div>
+          <span>Total events</span>
+          <strong>{summary.totalEvents}</strong>
+        </div>
+        <div>
+          <span>Bot-like</span>
+          <strong>{summary.botEvents}</strong>
+        </div>
+        <div>
+          <span>AI crawlers</span>
+          <strong>{summary.aiCrawlerEvents}</strong>
+        </div>
+        <div>
+          <span>Pageviews</span>
+          <strong>{summary.pageviewEvents}</strong>
+        </div>
+      </div>
+
+      <div className="visitor-contract-grid">
+        <article>
+          <span>Inputs</span>
+          <p>Path, method, status, User-Agent, visitor IP, country, ASN, and safe request headers.</p>
+        </article>
+        <article>
+          <span>Processing</span>
+          <p>Hash IPs, classify User-Agents, flag scanner paths, and keep reasons with each event.</p>
+        </article>
+        <article>
+          <span>Outputs</span>
+          <p>Client-scoped viewership, top bots, top pages, recent requests, and automation score.</p>
+        </article>
+        <article>
+          <span>Boundary</span>
+          <p>Use edge or server forwarding for bots. Browser-only beacons prove JavaScript ran, not total visitation.</p>
+        </article>
+      </div>
+
+      {summary.storageReady === false ? (
+        <div className="tracker-baseline-note" data-ready="false">
+          <strong>Storage setup needed</strong>
+          <span>{summary.storageError || "Apply the Visitor Intelligence migration before saving events."}</span>
+        </div>
+      ) : null}
+
+      <div className="visitor-setup-grid">
+        <div className="visitor-contract-copy">
+          <span className="eyebrow">Tracked site setup</span>
+          <h4>{activeClient?.name || clientId}</h4>
+          <dl>
+            <div>
+              <dt>Endpoint</dt>
+              <dd>{endpoint}</dd>
+            </div>
+            <div>
+              <dt>Client header</dt>
+              <dd>{summary.contract.clientHeader}: {clientId}</dd>
+            </div>
+            <div>
+              <dt>Secret env</dt>
+              <dd>{summary.contract.secretEnvVar}</dd>
+            </div>
+          </dl>
+        </div>
+        <pre className="contract-code" aria-label="Visitor telemetry contract example">
+          <code>{samplePayload}</code>
+        </pre>
+      </div>
+
+      <div className="visitor-observation-grid">
+        <VisitorCountList title="Top bots" rows={summary.topBots} empty="No bot-like requests observed yet." />
+        <VisitorCountList title="Top pages" rows={summary.topPages} empty="No page requests observed yet." />
+      </div>
+
+      <div className="visitor-event-list" aria-label="Recent visitor events">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Recent evidence</span>
+            <h4>Latest observed requests</h4>
+          </div>
+        </div>
+        {summary.recentEvents.length ? (
+          summary.recentEvents.map((event) => (
+            <article className="visitor-event-row" key={event.id} data-category={event.botCategory}>
+              <div>
+                <strong>{event.botName || visitorCategoryLabel(event.botCategory)}</strong>
+                <span>{event.path}</span>
+              </div>
+              <dl>
+                <div>
+                  <dt>Score</dt>
+                  <dd>{event.automationScore}</dd>
+                </div>
+                <div>
+                  <dt>Source</dt>
+                  <dd>{event.source}</dd>
+                </div>
+                <div>
+                  <dt>Seen</dt>
+                  <dd>{new Date(event.receivedAt).toLocaleString()}</dd>
+                </div>
+              </dl>
+              <p>{event.classificationReasons[0] || "No classification reason recorded."}</p>
+            </article>
+          ))
+        ) : (
+          <div className="empty-state">No visitor events yet. Connect a tracked site to start observing real traffic.</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function VisitorCountList({ empty, rows, title }: { empty: string; rows: Array<{ label: string; count: number }>; title: string }) {
+  return (
+    <div className="visitor-count-list">
+      <h4>{title}</h4>
+      {rows.length ? (
+        rows.map((row) => (
+          <div key={row.label}>
+            <span>{row.label}</span>
+            <strong>{row.count}</strong>
+          </div>
+        ))
+      ) : (
+        <p>{empty}</p>
+      )}
+    </div>
+  );
+}
+
+function visitorCategoryLabel(category: VisitorIntelligenceEvent["botCategory"]) {
+  if (category === "human") return "Likely human";
+  if (category === "ai") return "AI crawler";
+  if (category === "seo") return "SEO crawler";
+  if (category === "search") return "Search crawler";
+  if (category === "monitoring") return "Monitoring bot";
+  if (category === "scanner") return "Likely scanner";
+  if (category === "automation") return "Automation";
+  return "Unknown automation";
+}
+
+function VastJobIndexAutomationPanel({ onOpenBaseline }: { onOpenBaseline: () => void }) {
+  const automationFlow = [
+    {
+      title: "Inputs",
+      detail: "Exact Vast job-index URL, watched fields, expected refresh cadence, and any required allowlist.",
+    },
+    {
+      title: "Processing",
+      detail: "Fetch the public job index, normalize the rows, compare against the last snapshot, then classify material changes.",
+    },
+    {
+      title: "Outputs",
+      detail: "Dashboard status, saved history, and Slack alerts when index shape, availability, or key job signals change.",
+    },
+    {
+      title: "Dependencies",
+      detail: "Reviewed runner, durable storage, Slack webhook, and a rollback path that disables only this automation.",
+    },
+  ];
+
+  const activationSteps = [
+    "Confirm the exact public source and fields the automation should watch.",
+    "Add a read-only runner endpoint or scheduled workflow.",
+    "Persist snapshots separately from the current page baseline tables.",
+    "Add a dry-run result before enabling Slack alerts.",
+  ];
+
+  return (
+    <section className="panel job-index-panel" aria-labelledby="job-index-title">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">Vast Job Index automation</span>
+          <h3 id="job-index-title">Track job-index drift without claiming it is live.</h3>
+          <p>This is a WIP control surface. It shows the automation contract, but it does not run a job-index crawler yet.</p>
+        </div>
+        <span className="job-index-badge">WIP</span>
+      </div>
+
+      <div className="job-index-readiness" aria-label="Job index readiness">
+        <div>
+          <span>Runner</span>
+          <strong>Not connected</strong>
+        </div>
+        <div>
+          <span>Storage</span>
+          <strong>Not defined</strong>
+        </div>
+        <div>
+          <span>Alerts</span>
+          <strong>Hold until dry run</strong>
+        </div>
+      </div>
+
+      <div className="job-index-flow-grid" aria-label="Job index system breakdown">
+        {automationFlow.map((item) => (
+          <article key={item.title}>
+            <span>{item.title}</span>
+            <p>{item.detail}</p>
+          </article>
+        ))}
+      </div>
+
+      <div className="job-index-checklist" aria-label="Activation checklist">
+        <h4>Activation checklist</h4>
+        <ol>
+          {activationSteps.map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
+      </div>
+
+      <div className="job-index-actions">
+        <button className="button button-primary" type="button" disabled title="The Vast Job Index runner is not connected yet.">
+          Runner not connected yet
+        </button>
+        <button className="button" type="button" onClick={onOpenBaseline}>
+          Open Baseline Watch
+        </button>
+      </div>
     </section>
   );
 }

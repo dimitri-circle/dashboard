@@ -135,6 +135,8 @@ select {
 .page-workspace > .audit-output-column,
 .page-workspace > .dashboard-status-strip,
 .page-workspace > .page-command-panel,
+.page-workspace > .admin-layout,
+.page-workspace > .admin-feature-panel,
 .page-workspace > .watch-status-strip,
 .page-workspace > .watch-mode-grid,
 .page-workspace > .watch-tool-stage {
@@ -718,6 +720,33 @@ select {
   line-height: 1.45;
 }
 
+.admin-principle-list,
+.duplicate-client-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-principle-list div,
+.duplicate-client-list article {
+  display: grid;
+  gap: 5px;
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.admin-principle-list span,
+.duplicate-client-list span,
+.duplicate-client-list small {
+  color: var(--muted);
+  line-height: 1.42;
+}
+
+.duplicate-client-list small {
+  overflow-wrap: anywhere;
+}
+
 .dashboard-client-topline {
   display: flex;
   align-items: end;
@@ -778,6 +807,204 @@ select {
   margin: 0;
   color: var(--muted);
   line-height: 1.45;
+}
+
+.admin-workspace {
+  display: grid;
+  gap: 18px;
+}
+
+.admin-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.36fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.admin-access-panel,
+.admin-feature-panel,
+.admin-maintenance-panel {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.admin-user-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(140px, 0.42fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.admin-user-form label,
+.admin-user-controls label,
+.admin-password-form label {
+  display: grid;
+  gap: 6px;
+  color: rgba(17, 18, 20, 0.74);
+  font-size: 0.82rem;
+  font-weight: 760;
+}
+
+.admin-user-form input,
+.admin-user-form select,
+.admin-user-controls input,
+.admin-user-controls select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid rgba(17, 18, 20, 0.16);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--ink);
+}
+
+.admin-role-reference,
+.admin-user-list,
+.admin-feature-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-role-reference {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.admin-role-reference div,
+.admin-user-card,
+.admin-feature-card,
+.admin-dedupe-result {
+  min-width: 0;
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.admin-role-reference div {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.admin-role-reference p,
+.admin-maintenance-panel p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.admin-user-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.admin-user-card[data-status="disabled"] {
+  opacity: 0.66;
+}
+
+.admin-user-main,
+.admin-user-controls,
+.admin-user-badges,
+.admin-user-meta {
+  display: flex;
+  gap: 10px;
+}
+
+.admin-user-main {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.admin-user-main > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.admin-user-main strong,
+.admin-feature-card h4 {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+}
+
+.admin-user-main span,
+.admin-feature-card .card-top span,
+.admin-user-meta {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.admin-user-badges,
+.admin-user-meta {
+  flex-wrap: wrap;
+}
+
+.admin-user-controls {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.34fr) minmax(260px, 1fr) auto;
+  align-items: end;
+}
+
+.admin-password-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.admin-dedupe-result {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.admin-dedupe-result span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.admin-feature-grid {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.admin-feature-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.admin-feature-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-feature-toggle {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  border: 1px solid rgba(17, 18, 20, 0.08);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.admin-feature-toggle input {
+  margin-top: 2px;
+}
+
+.admin-feature-toggle span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.admin-feature-toggle small {
+  color: var(--muted);
+  line-height: 1.35;
 }
 
 .first-client-form {
@@ -1649,10 +1876,15 @@ select {
   line-height: 1.45;
 }
 
-.watch-status-strip,
 .dashboard-status-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.watch-status-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
 }
 
@@ -1811,7 +2043,7 @@ select {
 
 .watch-mode-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
 
@@ -1989,6 +2221,268 @@ select {
 .baseline-settings-grid strong {
   font-size: 0.92rem;
   line-height: 1.25;
+}
+
+.job-index-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.job-index-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  border: 1px solid rgba(122, 77, 18, 0.22);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: rgba(122, 77, 18, 0.08);
+  color: var(--warn);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.job-index-readiness,
+.job-index-flow-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.job-index-readiness {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.job-index-flow-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.job-index-readiness div,
+.job-index-flow-grid article,
+.job-index-checklist {
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.job-index-readiness div,
+.job-index-flow-grid article {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+}
+
+.job-index-readiness span,
+.job-index-flow-grid span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.job-index-readiness strong {
+  font-size: 0.92rem;
+  line-height: 1.25;
+}
+
+.job-index-flow-grid p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.job-index-checklist {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.job-index-checklist h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.job-index-checklist ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.job-index-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.job-index-actions .button {
+  width: auto;
+}
+
+.visitor-contract-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.visitor-metric-grid,
+.visitor-contract-grid,
+.visitor-observation-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.visitor-metric-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.visitor-contract-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.visitor-observation-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.visitor-metric-grid div,
+.visitor-contract-grid article,
+.visitor-count-list,
+.visitor-contract-copy,
+.visitor-event-row {
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.visitor-metric-grid div,
+.visitor-contract-grid article,
+.visitor-count-list,
+.visitor-contract-copy {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+}
+
+.visitor-metric-grid span,
+.visitor-contract-grid span,
+.visitor-contract-copy dt,
+.visitor-count-list span,
+.visitor-event-row dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.visitor-metric-grid strong {
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.visitor-contract-grid p,
+.visitor-count-list p,
+.visitor-event-row p,
+.visitor-contract-copy dd {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.visitor-setup-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.75fr) minmax(0, 1.25fr);
+  gap: 12px;
+}
+
+.visitor-contract-copy h4,
+.visitor-count-list h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.visitor-contract-copy dl,
+.visitor-event-row dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.visitor-contract-copy dd,
+.visitor-event-row dd {
+  overflow: hidden;
+  margin: 3px 0 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contract-code {
+  overflow: auto;
+  min-width: 0;
+  max-height: 360px;
+  margin: 0;
+  border: 1px solid rgba(17, 18, 20, 0.12);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(17, 18, 20, 0.9);
+  color: #f7f2ea;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.visitor-count-list div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border-top: 1px solid rgba(17, 18, 20, 0.08);
+  padding-top: 8px;
+}
+
+.visitor-count-list strong {
+  font-size: 0.92rem;
+}
+
+.visitor-event-list {
+  display: grid;
+  gap: 10px;
+}
+
+.visitor-event-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.85fr);
+  gap: 10px 14px;
+  padding: 12px;
+}
+
+.visitor-event-row[data-category="scanner"] {
+  border-color: rgba(159, 31, 23, 0.26);
+}
+
+.visitor-event-row[data-category="ai"],
+.visitor-event-row[data-category="search"],
+.visitor-event-row[data-category="seo"] {
+  border-color: rgba(12, 145, 154, 0.22);
+}
+
+.visitor-event-row > div,
+.visitor-event-row dl {
+  min-width: 0;
+}
+
+.visitor-event-row strong,
+.visitor-event-row span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visitor-event-row p {
+  grid-column: 1 / -1;
+  font-size: 0.84rem;
 }
 
 .tracker-baseline-note[data-ready="true"] {
@@ -3779,10 +4273,22 @@ select {
   .watch-status-strip,
   .dashboard-status-strip,
   .page-command-panel,
-  .watch-mode-grid,
-  .baseline-settings-grid,
-  .priority-add-row,
-  .access-field-grid,
+  .admin-layout,
+  .admin-user-form,
+  .admin-user-controls,
+  .admin-password-form,
+  .admin-role-reference,
+	  .watch-mode-grid,
+	  .baseline-settings-grid,
+	  .job-index-readiness,
+	  .job-index-flow-grid,
+	  .visitor-metric-grid,
+	  .visitor-contract-grid,
+	  .visitor-observation-grid,
+	  .visitor-setup-grid,
+	  .visitor-event-row,
+	  .priority-add-row,
+	  .access-field-grid,
   .credentialed-source-grid,
   .surface-result-grid,
   .tracker-result-grid,

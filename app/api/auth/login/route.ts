@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { authenticateAppUser } from "@/lib/seo/auth";
+import { APP_SESSION_COOKIE, APP_SESSION_MAX_AGE_SECONDS, signAppSession } from "@/lib/seo/session";
 
 export async function POST(request: Request) {
   const formData = await request.formData();
@@ -17,19 +18,20 @@ export async function POST(request: Request) {
     return NextResponse.redirect(loginUrl, { status: 303 });
   }
 
-  let isAuthenticated = false;
+  let authenticatedUser: { id: string; email: string; role: "admin" | "operator" | "viewer" } | null = null;
 
   try {
-    isAuthenticated = await authenticateAppUser(email, password);
+    const user = await authenticateAppUser(email, password);
+    authenticatedUser = user ? { id: user.id, email: user.email, role: user.role } : null;
   } catch {
-    isAuthenticated = false;
+    authenticatedUser = null;
   }
 
-  if (!isAuthenticated && email === expectedEmail && password === expectedPassword) {
-    isAuthenticated = true;
+  if (!authenticatedUser && email === expectedEmail && password === expectedPassword) {
+    authenticatedUser = { id: "env-admin", email: expectedEmail, role: "admin" };
   }
 
-  if (!isAuthenticated) {
+  if (!authenticatedUser) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("error", "invalid");
     loginUrl.searchParams.set("next", nextPath);
@@ -37,11 +39,11 @@ export async function POST(request: Request) {
   }
 
   const response = NextResponse.redirect(redirectUrl, { status: 303 });
-  response.cookies.set("seo_app_session", sessionToken, {
+  response.cookies.set(APP_SESSION_COOKIE, signAppSession(authenticatedUser, sessionToken), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 12,
+    maxAge: APP_SESSION_MAX_AGE_SECONDS,
     path: "/",
   });
 

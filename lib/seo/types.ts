@@ -4,11 +4,18 @@ export type SeoStatus = "disconnected" | "connected" | "error";
 
 export type SeoPriority = "low" | "medium" | "high";
 
+export type SeoAppRole = "admin" | "operator" | "viewer";
+
+export type SeoClientFeatureKey = "overview" | "brain" | "watch" | "integrations" | "analysis" | "insights";
+
+export type SeoClientFeatureFlags = Record<SeoClientFeatureKey, boolean>;
+
 export type SeoClient = {
   _id?: string;
   id: string;
   name: string;
   notes: string | null;
+  feature_flags_json: SeoClientFeatureFlags;
   created_at: string;
   updated_at: string;
 };
@@ -193,6 +200,13 @@ export type SeoAppUser = {
   email: string;
   password_hash: string;
   password_salt: string;
+  role: SeoAppRole;
+  last_login_at: string | null;
+  disabled_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type SafeSeoAppUser = Omit<SeoAppUser, "_id" | "password_hash" | "password_salt"> & {
+  status: "active" | "disabled";
 };

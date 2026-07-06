@@ -40,10 +40,12 @@ For Vercel, add the same values under Project Settings → Environment Variables
 - `SEO_ADMIN_SECRET` (optional bearer token for `/api/seo/bootstrap`)
 - `SEO_APP_EMAIL` (dashboard login email, defaults to `dimitri@circleclick.com`)
 - `SEO_APP_PASSWORD` (recommended dashboard login password; falls back to `CRON_SECRET` if omitted)
-- `SEO_APP_SESSION_TOKEN` (recommended random token stored in the login cookie; falls back to `CRON_SECRET` if omitted)
+- `SEO_APP_SESSION_TOKEN` (recommended random signing secret for the HTTP-only login cookie; falls back to `CRON_SECRET` if omitted)
 - `WEBSITE_WATCH_GITHUB_OWNER`, `WEBSITE_WATCH_GITHUB_REPO`, `WEBSITE_WATCH_GITHUB_WORKFLOW`, `WEBSITE_WATCH_GITHUB_REF`, and `WEBSITE_WATCH_GITHUB_TOKEN` (optional future deep-audit workflow dispatch settings)
 - `SLACK_WEBHOOK_URL` (optional shared deep-audit or alert delivery target)
 - `SEO_WATCH_SLACK_WEBHOOK_URL` (optional SEO Watch-specific Slack incoming webhook; falls back to `SLACK_WEBHOOK_URL`)
+- `SEO_VISITOR_INGEST_SECRET` (optional shared server-side secret for signed visitor and bot telemetry ingestion)
+- `SEO_VISITOR_IP_HASH_SALT` (optional salt for visitor IP hashes; falls back to `SEO_VISITOR_INGEST_SECRET`)
 
 Apply the database schema before using the dashboard:
 
@@ -80,7 +82,9 @@ The dashboard opens with a client selection stage. If no clients exist, it only 
 - metric snapshots
 - generated insights
 
-The current MVP includes a simple email/password login backed by Supabase table `seo_app_users`. Passwords are stored as salted hashes, not plaintext. The env vars `SEO_APP_EMAIL`, `SEO_APP_PASSWORD`, and `SEO_APP_SESSION_TOKEN` remain as a fallback so existing deployments do not lock themselves out. This protects the app shell and SEO API routes with an HTTP-only cookie. Before broader production use, replace this with account-level auth so users can only access client ids assigned to them.
+The current MVP includes a simple email/password login backed by Supabase table `seo_app_users`. Passwords are stored as salted hashes, not plaintext. Admin users can create app-managed logins, assign `admin`, `operator`, or `viewer` roles, rotate passwords, and disable access without deleting the account. Existing rows are promoted to `admin` by the role migration so the current operator does not get locked out. The env vars `SEO_APP_EMAIL`, `SEO_APP_PASSWORD`, and `SEO_APP_SESSION_TOKEN` remain as a fallback so existing deployments do not lock themselves out.
+
+Roles protect the Admin screen and `/api/admin/users` routes. The existing SEO data routes still use the app-wide dashboard session plus `x-seo-client-id` workspace scope, so do not treat these roles as tenant-level client authorization yet.
 
 For temporary controlled deployments, set `SEO_ALLOWED_CLIENT_IDS` to a comma-separated list such as `acme,globex`. This does not replace real auth, but it prevents arbitrary workspace ids from being accepted.
 
@@ -95,6 +99,40 @@ The dashboard includes Website Watch for two levels of site review:
 - Surface Check runs immediately inside the authenticated dashboard backend. It fetches public same-origin pages, checks response status, titles, meta descriptions, canonical tags, robots metadata, H1s, expected text, image alt text, `robots.txt`, `sitemap.xml`, and a small set of internal links. It rejects local/private targets and limits page/link counts so the route cannot be used as a broad scanner.
 - Deep Audit is a setup worksheet for the heavier browser path. Use it when a site requires Vercel protection bypass, basic auth, a test login, or a custom access header. Store secrets in GitHub or Vercel, not in public client code. The actual browser runner should execute in GitHub Actions or a worker when those credentials are configured.
 - SEO Change Tracker stores the latest baseline per client and site URL in `seo_watch_baselines`, stores each scan in `seo_change_runs`, and compares every new public crawl against the latest saved baseline. It uses sitemap URLs first, falls back to homepage navigation when a sitemap is unavailable, and lets users add optional priority paths that must be included. When a baseline is first created or a later scan detects changes, the backend posts a Slack incoming-webhook alert if `SEO_WATCH_SLACK_WEBHOOK_URL` or `SLACK_WEBHOOK_URL` is configured. Unchanged scans stay in the dashboard history without creating Slack noise.
+- Viewership / Visitor Intelligence stores signed request events in `seo_visitor_events`. A tracked site sends server-side or edge-side events to `/api/seo/visitor-intelligence` with `x-seo-client-id` and `x-seo-visitor-secret`. The dashboard hashes visitor IPs before storage, keeps only safe request headers, classifies known bot User-Agents, flags common scanner paths, and stores the classification reasons with each event. Browser-only beacons are not enough for bot visibility because many bots do not run JavaScript.
+- Vast Job Index is represented as a WIP Website Watch module. The dashboard shows the intended inputs, processing, outputs, dependencies, and activation checklist, but it does not expose a live runner until the source contract, storage shape, dry-run behavior, and alert policy are reviewed.
+
+### Visitor Intelligence Contract
+
+The dashboard accepts up to 25 events per request:
+
+```json
+{
+  "events": [
+    {
+      "eventType": "request",
+      "source": "edge",
+      "siteOrigin": "https://example.com",
+      "pageUrl": "https://example.com/pricing",
+      "method": "GET",
+      "statusCode": 200,
+      "userAgent": "Googlebot/2.1",
+      "visitorIp": "203.0.113.10",
+      "country": "US",
+      "asn": "AS15169"
+    }
+  ]
+}
+```
+
+Required headers:
+
+```text
+x-seo-client-id: <client workspace id>
+x-seo-visitor-secret: <SEO_VISITOR_INGEST_SECRET>
+```
+
+Use a tracked-site server route, Next.js middleware, Vercel edge middleware, or Cloudflare Worker to forward request evidence. Do not put `SEO_VISITOR_INGEST_SECRET` in public browser JavaScript.
 
 ## Competitive Analysis
 

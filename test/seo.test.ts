@@ -3,9 +3,10 @@ import test from "node:test";
 import JSZip from "jszip";
 import { auditBlogDraft, cleanExtractedText, splitFactualClaims, type VastSourceResult } from "../lib/blog-audit";
 import { readBlogAuditFormPayload } from "../lib/blog-upload";
-import { hashPassword, verifyPassword } from "../lib/seo/auth";
+import { getCurrentAppSession, hashPassword, verifyPassword } from "../lib/seo/auth";
 import { decryptSecret, encryptSecret } from "../lib/seo/crypto";
 import { rateLimit, resetRateLimitsForTests } from "../lib/seo/rate-limit";
+import { APP_SESSION_COOKIE, signAppSession, verifyAppSessionCookie } from "../lib/seo/session";
 import {
   compareCompetitiveWebsites,
   extractWebsiteFacts,
@@ -635,4 +636,49 @@ test("app auth password hashing verifies without storing plaintext", () => {
   assert.notEqual(result.hash, "secret-password");
   assert.equal(verifyPassword("secret-password", result.salt, result.hash), true);
   assert.equal(verifyPassword("wrong-password", result.salt, result.hash), false);
+});
+
+test("app auth signed sessions expose user role and reject tampering", () => {
+  const token = signAppSession(
+    { id: "user-1", email: "Admin@Example.com", role: "admin" },
+    "test-session-secret",
+    1_800_000_000
+  );
+  const session = verifyAppSessionCookie(token, "test-session-secret");
+
+  assert.equal(session?.userId, "user-1");
+  assert.equal(session?.email, "admin@example.com");
+  assert.equal(session?.role, "admin");
+  assert.equal(verifyAppSessionCookie(`${token}tampered`, "test-session-secret"), null);
+  assert.equal(verifyAppSessionCookie(token, "wrong-secret"), null);
+});
+
+test("app auth legacy static session remains admin fallback", () => {
+  const session = verifyAppSessionCookie("legacy-secret", "legacy-secret");
+
+  assert.equal(session?.role, "admin");
+  assert.equal(session?.legacy, true);
+});
+
+test("app auth signed env fallback remains admin without database lookup", async () => {
+  const originalSessionToken = process.env.SEO_APP_SESSION_TOKEN;
+  process.env.SEO_APP_SESSION_TOKEN = "fallback-secret";
+
+  try {
+    const token = signAppSession({ id: "env-admin", email: "admin@example.com", role: "admin" }, "fallback-secret");
+    const request = new Request("https://app.example.test/api/auth/me", {
+      headers: { cookie: `${APP_SESSION_COOKIE}=${encodeURIComponent(token)}` },
+    });
+    const session = await getCurrentAppSession(request);
+
+    assert.equal(session?.userId, "env-admin");
+    assert.equal(session?.role, "admin");
+    assert.equal(session?.legacy, true);
+  } finally {
+    if (originalSessionToken === undefined) {
+      delete process.env.SEO_APP_SESSION_TOKEN;
+    } else {
+      process.env.SEO_APP_SESSION_TOKEN = originalSessionToken;
+    }
+  }
 });

@@ -1,7 +1,7 @@
 import crypto, { randomUUID } from "node:crypto";
 import { load } from "cheerio";
 import { decryptSecret, encryptSecret } from "./crypto";
-import { ensureSeoStorage, getSeoCollections } from "./db";
+import { ensureSeoStorage, getSeoCollections, getSupabaseAdminClient } from "./db";
 import {
   normalizeSeoChangeTrackerSite,
   runSeoChangeTracker,
@@ -12,6 +12,8 @@ import {
 import { notifySeoWatchSlack } from "./slack";
 import type {
   SeoClient,
+  SeoClientFeatureFlags,
+  SeoClientFeatureKey,
   SeoChangeRun,
   SeoCompetitiveAnalysis,
   SeoCompetitiveCrawlPage,
@@ -71,6 +73,16 @@ type ClientPayload = {
   id?: string;
   name?: string;
   notes?: string;
+};
+
+type ClientFeatureFlagsPayload = {
+  featureFlags?: unknown;
+};
+
+export type ClientDedupeResult = {
+  duplicateGroups: number;
+  removed: Array<{ id: string; name: string; keptId: string }>;
+  skipped: Array<{ id: string; name: string; keptId: string; reason: string }>;
 };
 
 type CompetitiveAnalysisPayload = {
@@ -272,6 +284,24 @@ const KEY_PAGE_PATTERNS = [
   /\bcompare\b|\bvs\b|\balternatives?\b/,
 ];
 
+export const CLIENT_FEATURE_KEYS: SeoClientFeatureKey[] = [
+  "overview",
+  "brain",
+  "watch",
+  "integrations",
+  "analysis",
+  "insights",
+];
+
+export const DEFAULT_CLIENT_FEATURE_FLAGS: SeoClientFeatureFlags = {
+  overview: false,
+  brain: true,
+  watch: false,
+  integrations: false,
+  analysis: false,
+  insights: false,
+};
+
 export function nowIso() {
   return new Date().toISOString();
 }
@@ -327,6 +357,24 @@ async function assignClientId(clients: Awaited<ReturnType<typeof getSeoCollectio
 
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+export function normalizeClientFeatureFlags(value: unknown): SeoClientFeatureFlags {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Partial<Record<SeoClientFeatureKey, unknown>>)
+    : {};
+
+  return Object.fromEntries(
+    CLIENT_FEATURE_KEYS.map((key) => [key, typeof record[key] === "boolean" ? Boolean(record[key]) : DEFAULT_CLIENT_FEATURE_FLAGS[key]])
+  ) as SeoClientFeatureFlags;
+}
+
+function safeClient(client: SeoClient): SeoClient {
+  const { _id: _mongoId, ...row } = client;
+  return {
+    ...row,
+    feature_flags_json: normalizeClientFeatureFlags(row.feature_flags_json),
+  };
 }
 
 function normalizeConfigKey(key: string) {
@@ -649,7 +697,7 @@ export async function listClients() {
   const rows = await clients.find({}).sort({ name: 1 }).toArray();
 
   if (rows.length) {
-    return rows.map(({ _id: _mongoId, ...row }) => row);
+    return rows.map(safeClient);
   }
 
   const timestamp = nowIso();
@@ -657,6 +705,7 @@ export async function listClients() {
     id: DEFAULT_CLIENT_ID,
     name: "Demo Client",
     notes: "Default workspace for local setup.",
+    feature_flags_json: DEFAULT_CLIENT_FEATURE_FLAGS,
     created_at: timestamp,
     updated_at: timestamp,
   };
@@ -679,6 +728,7 @@ export async function createClient(payload: ClientPayload) {
     id,
     name: name.slice(0, 120),
     notes: asString(payload.notes).slice(0, 400) || null,
+    feature_flags_json: DEFAULT_CLIENT_FEATURE_FLAGS,
     created_at: timestamp,
     updated_at: timestamp,
   };
@@ -692,6 +742,168 @@ export async function createClient(payload: ClientPayload) {
     metadata: { name: client.name },
   });
   return client;
+}
+
+export async function updateClientFeatureFlags(clientId: string, payload: ClientFeatureFlagsPayload) {
+  const { clients } = await getSeoCollections();
+  const id = normalizeClientId(clientId);
+  const existing = await clients.findOne({ id });
+
+  if (!existing) {
+    throw new Error("Client workspace not found.");
+  }
+
+  const timestamp = nowIso();
+  const featureFlags = normalizeClientFeatureFlags(payload.featureFlags);
+  const next: SeoClient = {
+    ...existing,
+    feature_flags_json: featureFlags,
+    updated_at: timestamp,
+  };
+
+  await clients.replaceOne({ id }, next);
+  await recordAuditEvent({
+    scope: { userId: id },
+    action: "client.feature_flags.updated",
+    entityType: "client",
+    entityId: id,
+    metadata: { featureFlags },
+  });
+
+  return safeClient(next);
+}
+
+function clientDedupeKey(client: SeoClient) {
+  return client.name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isMissingStorageTableError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /Could not find the table|schema cache|relation .* does not exist|relation .*seo_/i.test(message);
+}
+
+async function collectionHasClientRows<T extends { id: string }>(
+  collection: { find: (filter: { user_id: string }) => { limit: (limit: number) => { toArray: () => Promise<T[]> } } },
+  clientId: string
+) {
+  try {
+    return (await collection.find({ user_id: clientId }).limit(1).toArray()).length > 0;
+  } catch (error) {
+    if (isMissingStorageTableError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+async function visitorEventsHasClientRows(clientId: string) {
+  try {
+    const { data, error } = await getSupabaseAdminClient()
+      .from("seo_visitor_events")
+      .select("id")
+      .eq("user_id", clientId)
+      .limit(1);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return Boolean(data?.length);
+  } catch (error) {
+    if (isMissingStorageTableError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+async function clientHasSavedWork(collections: Awaited<ReturnType<typeof getSeoCollections>>, clientId: string) {
+  const checks = await Promise.all([
+    collectionHasClientRows(collections.integrations, clientId),
+    collectionHasClientRows(collections.insights, clientId),
+    collectionHasClientRows(collections.metricSnapshots, clientId),
+    collectionHasClientRows(collections.competitiveAnalyses, clientId),
+    collectionHasClientRows(collections.watchBaselines, clientId),
+    collectionHasClientRows(collections.changeRuns, clientId),
+    visitorEventsHasClientRows(clientId),
+  ]);
+
+  return checks.some(Boolean);
+}
+
+function chooseCanonicalClient(group: SeoClient[], activeClientId: string) {
+  const active = group.find((client) => client.id === activeClientId);
+  if (active) {
+    return active;
+  }
+
+  return [...group].sort((a, b) => {
+    const createdDelta = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    if (createdDelta !== 0) return createdDelta;
+    return a.id.localeCompare(b.id);
+  })[0];
+}
+
+export async function dedupeClients(scope: SeoTenantScope): Promise<ClientDedupeResult> {
+  const collections = await getSeoCollections();
+  const rows = (await collections.clients.find({}).sort({ name: 1 }).toArray()).map(safeClient);
+  const groups = new Map<string, SeoClient[]>();
+  const result: ClientDedupeResult = {
+    duplicateGroups: 0,
+    removed: [],
+    skipped: [],
+  };
+
+  for (const client of rows) {
+    const key = clientDedupeKey(client);
+    if (!key) continue;
+    groups.set(key, [...(groups.get(key) || []), client]);
+  }
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+
+    result.duplicateGroups += 1;
+    const canonical = chooseCanonicalClient(group, scope.userId);
+
+    for (const duplicate of group) {
+      if (duplicate.id === canonical.id) continue;
+
+      const hasSavedWork = await clientHasSavedWork(collections, duplicate.id);
+      if (hasSavedWork) {
+        result.skipped.push({
+          id: duplicate.id,
+          name: duplicate.name,
+          keptId: canonical.id,
+          reason: "Skipped because this duplicate contains saved reports, tools, watch data, or visitor events.",
+        });
+        continue;
+      }
+
+      await collections.auditEvents.updateOne({ user_id: duplicate.id }, { $set: { user_id: canonical.id } });
+      await collections.clients.deleteOne({ id: duplicate.id });
+      result.removed.push({ id: duplicate.id, name: duplicate.name, keptId: canonical.id });
+    }
+  }
+
+  if (result.removed.length || result.skipped.length) {
+    await recordAuditEvent({
+      scope,
+      action: "client.dedupe.checked",
+      entityType: "client",
+      entityId: scope.userId,
+      metadata: result,
+    });
+  }
+
+  return result;
 }
 
 export async function listIntegrations(scope: SeoTenantScope) {
