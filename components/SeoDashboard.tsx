@@ -21,6 +21,15 @@ type ToastNoticeState = {
   phase: "open" | "closing";
 };
 
+type SetupNotificationId = "openai";
+type SetupNotification = {
+  id: SetupNotificationId;
+  type: "info" | "error";
+  title: string;
+  message: string;
+  actionLabel: string;
+};
+
 type PageHeroStat = {
   label: string;
   value: string;
@@ -480,6 +489,13 @@ const CLIENT_STORAGE_KEY = "seo-intelligence-client-id";
 const COMPETITIVE_REPORTS_PER_PAGE = 1;
 const AI_SETUP_MESSAGE =
   "AI analysis is off. Connect an OpenAI API key to generate summaries, severity ratings, and suggested fixes.";
+const AI_SETUP_NOTIFICATION: SetupNotification = {
+  id: "openai",
+  type: "info",
+  title: "AI setup needed",
+  message: AI_SETUP_MESSAGE,
+  actionLabel: "Connect API Key",
+};
 const DEFAULT_WATCH_SITE_URL = "https://vast.ai";
 const DEFAULT_PRIORITY_PAGES = ["/", "/pricing", "/services", "/blog", "/contact"];
 
@@ -675,6 +691,8 @@ export function SeoDashboard() {
   const [competitiveAnalyses, setCompetitiveAnalyses] = useState<CompetitiveAnalysis[]>([]);
   const [notice, setNotice] = useState<{ type: "info" | "success" | "error"; message: string } | null>(null);
   const [toastNotice, setToastNotice] = useState<ToastNoticeState | null>(null);
+  const [notificationInboxOpen, setNotificationInboxOpen] = useState(false);
+  const setupToastIdsRef = useRef(new Set<SetupNotificationId>());
   const [loading, setLoading] = useState(true);
   const [syncingGa4, setSyncingGa4] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -721,6 +739,11 @@ export function SeoDashboard() {
   const readiness = Math.round(((latestByProvider.openai ? 1 : 0) + Math.min(savedToolCount, 4) / 4) * 50);
   const hasClients = clients.length > 0;
   const navOpen = navPinned;
+  const openAiReady = Boolean(latestByProvider.openai || seoHealthChecks?.openai_api_key);
+  const setupNotifications = useMemo(
+    () => (seoHealthChecks && !openAiReady ? [AI_SETUP_NOTIFICATION] : []),
+    [openAiReady, seoHealthChecks]
+  );
 
   function showToastNotice(toast: Omit<ToastNoticeState, "id" | "phase">) {
     setToastNotice({
@@ -729,6 +752,20 @@ export function SeoDashboard() {
       phase: "open",
     });
   }
+
+  useEffect(() => {
+    const nextNotification = setupNotifications.find((notification) => !setupToastIdsRef.current.has(notification.id));
+    if (!nextNotification) {
+      return;
+    }
+
+    setupToastIdsRef.current.add(nextNotification.id);
+    showToastNotice({
+      type: nextNotification.type,
+      title: nextNotification.title,
+      message: nextNotification.message,
+    });
+  }, [setupNotifications]);
 
   useEffect(() => {
     if (!toastNotice || toastNotice.phase === "closing") {
@@ -819,9 +856,6 @@ export function SeoDashboard() {
       setSeoTrackerStorageError(watchBody.storageError || null);
       setVisitorIntelligence(visitorBody);
       setSeoHealthChecks(healthBody.checks);
-      if (!integrationBody.integrations.some((item) => item.provider === "openai") && !healthBody.checks.openai_api_key) {
-        setNotice({ type: "info", message: AI_SETUP_MESSAGE });
-      }
 
       if (sessionBody.user?.role === "admin") {
         loadManagedUsers();
@@ -1224,6 +1258,7 @@ export function SeoDashboard() {
     setActiveProvider("openai");
     setView("integrations");
     setNotice(null);
+    setNotificationInboxOpen(false);
     if (window.matchMedia("(max-width: 880px)").matches) {
       setNavPinned(false);
     }
@@ -1281,6 +1316,14 @@ export function SeoDashboard() {
             <p>{loading ? "Loading workspace..." : `${clients.length} client workspace${clients.length === 1 ? "" : "s"}`}</p>
           </div>
         </div>
+
+        <NotificationInbox
+          notifications={setupNotifications}
+          onConnectOpenAi={openOpenAiSetup}
+          onToggle={() => setNotificationInboxOpen((current) => !current)}
+          open={notificationInboxOpen}
+          variant="sidebar"
+        />
 
         {hasClients ? (
           <nav className="side-nav" data-tour="side-nav" aria-label="Primary">
@@ -1367,16 +1410,18 @@ export function SeoDashboard() {
       ) : null}
 
       <ToastNotice toast={toastNotice} />
+      <NotificationInbox
+        notifications={setupNotifications}
+        onConnectOpenAi={openOpenAiSetup}
+        onToggle={() => setNotificationInboxOpen((current) => !current)}
+        open={notificationInboxOpen}
+        variant="mobile"
+      />
 
       <div className="dashboard" aria-live="polite">
-        {notice && !(view === "watch" && notice.message === AI_SETUP_MESSAGE) ? (
+        {notice ? (
           <div className="alert" data-type={notice.type} role="status">
             <span>{notice.message}</span>
-            {notice.message === AI_SETUP_MESSAGE ? (
-              <button className="button button-compact" type="button" onClick={openOpenAiSetup}>
-                Connect API Key
-              </button>
-            ) : null}
           </div>
         ) : null}
 
@@ -1495,6 +1540,73 @@ export function SeoDashboard() {
         ) : null}
       </div>
     </section>
+  );
+}
+
+function NotificationInbox({
+  notifications,
+  onConnectOpenAi,
+  onToggle,
+  open,
+  variant,
+}: {
+  notifications: SetupNotification[];
+  onConnectOpenAi: () => void;
+  onToggle: () => void;
+  open: boolean;
+  variant: "sidebar" | "mobile";
+}) {
+  if (!notifications.length) {
+    return null;
+  }
+
+  const panelId = `setup-inbox-${variant}`;
+  const itemCountLabel = `${notifications.length} open item${notifications.length === 1 ? "" : "s"}`;
+
+  return (
+    <div className={`notification-inbox notification-inbox-${variant}`} data-open={open}>
+      <button
+        className="notification-inbox-trigger"
+        type="button"
+        aria-controls={panelId}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-label={`${open ? "Collapse" : "Expand"} setup inbox, ${itemCountLabel}`}
+        title={open ? "Collapse setup inbox" : "Expand setup inbox"}
+        onClick={onToggle}
+      >
+        <span className="notification-inbox-trigger-label" aria-hidden="true">
+          Inbox
+        </span>
+        <span className="notification-inbox-trigger-meta" aria-hidden="true">
+          <strong>{notifications.length}</strong>
+          <span className="notification-inbox-caret" />
+        </span>
+      </button>
+      {open ? (
+        <section className="notification-inbox-panel" id={panelId} role="dialog" aria-label="Setup inbox">
+          <div className="notification-inbox-heading">
+            <span className="eyebrow">Setup inbox</span>
+            <strong>{itemCountLabel}</strong>
+          </div>
+          <div className="notification-inbox-list">
+            {notifications.map((notification) => (
+              <article className="notification-inbox-item" data-type={notification.type} key={notification.id}>
+                <div>
+                  <strong>{notification.title}</strong>
+                  <p>{notification.message}</p>
+                </div>
+                {notification.id === "openai" ? (
+                  <button className="button button-compact" type="button" onClick={onConnectOpenAi}>
+                    {notification.actionLabel}
+                  </button>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </div>
   );
 }
 
@@ -1736,6 +1848,12 @@ function duplicateClientGroups(clients: Client[]) {
   return [...groups.values()].filter((group) => group.length > 1);
 }
 
+function featureAccessLabel(flags: FeatureFlags) {
+  const presetId = featurePresetId(flags);
+  const preset = featurePresets.find((item) => item.id === presetId);
+  return preset?.label || `${enabledFeatureCount(flags)} enabled`;
+}
+
 function ClientsView({
   clientId,
   clients,
@@ -1753,63 +1871,60 @@ function ClientsView({
   const [mode, setMode] = useState<"list" | "create">("list");
   const showForm = !hasClients || mode === "create";
   const activeClient = clients.find((client) => client.id === clientId);
-  const scopeRows = [
+  const duplicateGroups = duplicateClientGroups(clients);
+  const duplicateIds = new Set(duplicateGroups.flatMap((group) => group.map((client) => client.id)));
+  const activeFeatureFlags = activeClient ? normalizeFeatureFlags(activeClient.feature_flags_json) : defaultFeatureFlags;
+  const activeFeatureLabel = activeClient ? featureAccessLabel(activeFeatureFlags) : "No workspace";
+  const activeIsDuplicate = activeClient ? duplicateIds.has(activeClient.id) : false;
+  const inspectorRows = [
     {
-      label: "Active workspace",
-      value: activeClient?.name || (loading ? "Loading" : "No client selected"),
-      helper: clientId,
+      label: "Client id",
+      value: activeClient?.id || (loading ? "Loading" : "Not selected"),
+      helper: "Used by reports, tools, and saved audit history.",
     },
     {
-      label: "Reports",
-      value: "Scoped",
-      helper: "Competitive briefs, Br(AI)N audits, and watch results follow this client.",
+      label: "Feature access",
+      value: activeFeatureLabel,
+      helper: activeClient ? `${enabledFeatureCount(activeFeatureFlags)} dashboard areas enabled.` : "Select a workspace to see enabled areas.",
     },
     {
-      label: "Connectors",
+      label: "Scope",
       value: "Isolated",
-      helper: "Saved tool credentials and tests stay attached to the selected workspace.",
+      helper: "Connectors, reports, insights, and watch results follow this workspace.",
     },
   ];
 
   return (
     <PageWorkspace className="client-workspace">
-      <PageHero
-        eyebrow="Workspace control"
-        title="Choose the client before anything runs."
-        description="Every connector, audit, report, and insight is scoped to the active client workspace."
-        stats={[
-          { label: "saved clients", value: loading ? "..." : String(clients.length) },
-          { label: "active id", value: clientId },
-        ]}
-      />
-
-      <div className="dashboard-status-strip" aria-label="Client workspace status">
-        <DashboardStatusPill
-          label="Active client"
-          value={activeClient?.name || (loading ? "Loading" : "None")}
-          state={activeClient ? "ready" : "idle"}
-        />
-        <DashboardStatusPill
-          label="Saved clients"
-          value={loading ? "Loading" : String(clients.length)}
-          state={clients.length ? "ready" : "missing"}
-        />
-        <DashboardStatusPill label="Reports" value="Scoped" state={activeClient ? "ready" : "idle"} />
-        <DashboardStatusPill label="Connectors" value="Isolated" state={activeClient ? "ready" : "idle"} />
-      </div>
+      <section className="panel client-command-panel" aria-label="Client workspace control">
+        <div className="client-command-copy">
+          <span className="eyebrow">Clients</span>
+          <h3>Pick the workspace.</h3>
+          <p>Selecting a client scopes reports, connectors, audits, and saved work before anything runs.</p>
+        </div>
+        <div className="client-command-actions">
+          <div className="client-active-chip">
+            <span>Active</span>
+            <strong>{activeClient?.name || (loading ? "Loading" : "None")}</strong>
+            <small>{activeClient?.id || "Select a workspace"}</small>
+          </div>
+          {hasClients ? (
+            <button className="button" type="button" onClick={() => setMode(showForm ? "list" : "create")}>
+              {showForm ? "Show Clients" : "New Client"}
+            </button>
+          ) : null}
+        </div>
+      </section>
 
       <section className="client-page client-module-grid" aria-labelledby="client-selection-title">
         <div className="dashboard-client-selection" data-tour="client-switcher">
           <div className="dashboard-client-topline">
             <div>
-              <p className="eyebrow">Client selection</p>
-              <h2 id="client-selection-title">{showForm ? "Create a client." : "Choose a client."}</h2>
+              <p className="eyebrow">Workspaces</p>
+              <h2 id="client-selection-title">{showForm ? "Create workspace" : "Saved clients"}</h2>
+              <span>{loading ? "Loading clients..." : `${clients.length} saved workspace${clients.length === 1 ? "" : "s"}`}</span>
             </div>
-            {hasClients ? (
-              <button className="button" type="button" onClick={() => setMode(showForm ? "list" : "create")}>
-                {showForm ? "Show Clients" : "New Client"}
-              </button>
-            ) : null}
+            {duplicateIds.size ? <span className="client-duplicate-badge">{duplicateGroups.length} duplicate group{duplicateGroups.length === 1 ? "" : "s"}</span> : null}
           </div>
 
           {loading ? <p className="client-selection-empty">Loading clients...</p> : null}
@@ -1818,6 +1933,8 @@ function ClientsView({
             <div className="dashboard-client-list" aria-label="Available clients">
               {clients.map((client) => {
                 const isActive = client.id === clientId;
+                const flags = normalizeFeatureFlags(client.feature_flags_json);
+                const isDuplicate = duplicateIds.has(client.id);
 
                 return (
                   <button
@@ -1828,7 +1945,15 @@ function ClientsView({
                     onClick={() => onSwitchClient(client.id)}
                   >
                     <ClientLogo client={client} />
-                    <span>{client.name}</span>
+                    <span className="client-option-main">
+                      <strong>{client.name}</strong>
+                      <small>{client.id}</small>
+                    </span>
+                    <span className="client-option-meta">
+                      <span>{featureAccessLabel(flags)}</span>
+                      {isDuplicate ? <em>Duplicate name</em> : null}
+                    </span>
+                    <span className="client-option-action">{isActive ? "Active" : "Select"}</span>
                   </button>
                 );
               })}
@@ -1851,11 +1976,13 @@ function ClientsView({
         </div>
 
         <aside className="panel client-scope-panel" aria-label="Client workspace scope">
-          <span className="eyebrow">Workspace scope</span>
-          <h3>Everything follows this client.</h3>
-          <p>Switching clients changes the saved tools, reports, insights, and audit history shown across the dashboard.</p>
+          <div className="client-inspector-heading">
+            <span className="eyebrow">Selected workspace</span>
+            <h3>{activeClient?.name || (loading ? "Loading" : "No client selected")}</h3>
+            <p>Use this panel to confirm the workspace before opening tools or reports.</p>
+          </div>
           <div className="client-scope-list">
-            {scopeRows.map((row) => (
+            {inspectorRows.map((row) => (
               <div key={row.label}>
                 <span>{row.label}</span>
                 <strong>{row.value}</strong>
@@ -1863,6 +1990,12 @@ function ClientsView({
               </div>
             ))}
           </div>
+          {activeIsDuplicate ? (
+            <div className="client-scope-warning">
+              <strong>Duplicate name</strong>
+              <span>This workspace shares a name with another client. Check the id before saving work.</span>
+            </div>
+          ) : null}
         </aside>
       </section>
     </PageWorkspace>
