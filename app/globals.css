@@ -118,13 +118,13 @@ select {
 
 .dashboard {
   display: grid;
-  gap: 16px;
+  gap: 14px;
 }
 
 .page-workspace {
   position: relative;
   display: grid;
-  gap: 18px;
+  gap: 16px;
   isolation: isolate;
 }
 
@@ -146,11 +146,11 @@ select {
 
 .workspace-background-ribbon {
   position: absolute;
-  inset: -54px -22px -88px;
+  inset: -32px -18px -72px;
   z-index: 0;
   height: calc(100% + 142px);
   min-height: 720px;
-  opacity: 0.2;
+  opacity: 0.12;
   pointer-events: none;
   --dot-ribbon-height: 100%;
   --dot-ribbon-min-height: 100%;
@@ -167,51 +167,51 @@ select {
 .page-hero {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.7fr);
-  gap: clamp(24px, 4vw, 54px);
-  align-items: end;
-  min-height: 220px;
-  padding: clamp(24px, 3vw, 36px);
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.44fr);
+  gap: 18px;
+  align-items: center;
+  min-height: 0;
+  padding: 18px 20px;
   overflow: hidden;
 }
 
 .page-hero-copy {
   display: grid;
-  gap: 14px;
+  gap: 8px;
   max-width: 780px;
 }
 
 .page-hero h3 {
-  max-width: 26ch;
+  max-width: 44ch;
   margin: 0;
-  font-size: clamp(1.08rem, 1.35vw, 1.32rem);
+  font-size: 1rem;
   font-weight: 850;
-  line-height: 1.08;
+  line-height: 1.18;
 }
 
 .page-hero p {
   max-width: 68ch;
   color: var(--muted);
-  font-size: 0.98rem;
-  line-height: 1.55;
+  font-size: 0.88rem;
+  line-height: 1.45;
 }
 
 .page-proof-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
-  gap: 12px;
-  align-self: end;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 8px;
+  align-self: center;
 }
 
 .page-proof-grid div {
   min-width: 0;
-  min-height: 92px;
+  min-height: 68px;
   display: grid;
   align-content: center;
-  gap: 5px;
+  gap: 4px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 16px;
+  padding: 10px 12px;
   background: rgba(255, 255, 255, 0.66);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
@@ -226,16 +226,15 @@ select {
 
 .page-proof-grid strong {
   color: var(--ink);
-  font-size: clamp(1.18rem, 2vw, 1.55rem);
+  font-size: 1.08rem;
   line-height: 1.05;
   white-space: nowrap;
 }
 
 .page-proof-grid span,
 .page-proof-grid small {
-  margin-top: 6px;
   color: var(--muted);
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   font-weight: 760;
   line-height: 1.25;
 }
@@ -616,7 +615,7 @@ select {
 
 .dashboard h2 {
   margin-top: 0;
-  font-size: clamp(1.8rem, 2.4vw, 2.85rem);
+  font-size: clamp(1.65rem, 2vw, 2.25rem);
   font-weight: 720;
   line-height: 1.04;
 }
@@ -726,6 +725,10 @@ select {
   gap: 10px;
 }
 
+.admin-maintenance-panel .admin-principle-list {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
 .admin-principle-list div,
 .duplicate-client-list article {
   display: grid;
@@ -816,7 +819,7 @@ select {
 
 .admin-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.36fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
@@ -831,7 +834,7 @@ select {
 
 .admin-user-form {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(140px, 0.42fr) auto;
+  grid-template-columns: minmax(190px, 1fr) minmax(190px, 1fr) minmax(150px, 0.55fr) minmax(132px, auto);
   gap: 10px;
   align-items: end;
 }
@@ -944,13 +947,13 @@ select {
 
 .admin-user-controls {
   display: grid;
-  grid-template-columns: minmax(140px, 0.34fr) minmax(260px, 1fr) auto;
+  grid-template-columns: minmax(150px, 0.28fr) minmax(280px, 1fr) minmax(104px, auto);
   align-items: end;
 }
 
 .admin-password-form {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(132px, auto);
   gap: 10px;
   align-items: end;
 }
@@ -1878,7 +1881,7 @@ select {
 
 .dashboard-status-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
 }
 
@@ -1920,7 +1923,7 @@ select {
 .watch-status-pill {
   min-width: 0;
   border: 1px solid rgba(17, 18, 20, 0.1);
-  border-radius: 999px;
+  border-radius: 8px;
   padding: 10px 12px;
   background: rgba(255, 255, 255, 0.86);
   -webkit-backdrop-filter: blur(10px);
@@ -1943,7 +1946,7 @@ select {
   overflow: hidden;
   margin-top: 3px;
   color: var(--ink);
-  font-size: 0.9rem;
+  font-size: 0.94rem;
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3953,6 +3956,20 @@ select {
   flex-wrap: wrap;
   gap: 10px;
   font-size: 0.78rem;
+}
+
+@media (max-width: 1180px) {
+  .page-command-panel,
+  .watch-command-panel,
+  .tool-page-layout,
+  .insights-layout,
+  .competitive-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .page-command-actions {
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 980px) {
