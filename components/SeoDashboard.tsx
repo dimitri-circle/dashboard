@@ -8,7 +8,7 @@ type Provider = "ga4" | "gtm" | "hotjar" | "openai" | "mcp";
 type Status = "disconnected" | "connected" | "error";
 type View = "clients" | "overview" | "brain" | "watch" | "integrations" | "analysis" | "insights";
 type NavIconName = "clients" | "overview" | "brain" | "watch" | "tools" | "analysis" | "insights" | "menu" | "close" | "signout";
-type WebsiteWatchTool = "surface" | "tracker" | "deep";
+type WebsiteWatchTool = "surface" | "tracker" | "visitors" | "deep";
 type DeepAuditAccess = "public" | "vercel" | "basic" | "login" | "custom";
 type ToastNoticeState = {
   id: number;
@@ -267,6 +267,55 @@ type SeoHealthChecks = {
   slack_webhook?: boolean;
 };
 
+type VisitorIntelligenceEvent = {
+  id: string;
+  siteOrigin: string;
+  eventType: "request" | "pageview";
+  source: string;
+  occurredAt: string;
+  receivedAt: string;
+  pageUrl: string;
+  path: string;
+  method: string | null;
+  statusCode: number | null;
+  referrer: string | null;
+  userAgent: string | null;
+  country: string | null;
+  asn: string | null;
+  botName: string | null;
+  botCategory: "human" | "search" | "ai" | "seo" | "monitoring" | "scanner" | "automation" | "unknown";
+  botVerification: "verified" | "self_declared" | "failed" | "unknown" | "not_applicable";
+  automationScore: number;
+  classificationReasons: string[];
+};
+
+type VisitorIntelligenceSummary = {
+  storageReady?: boolean;
+  storageError?: string | null;
+  windowDays: number;
+  totalEvents: number;
+  requestEvents: number;
+  pageviewEvents: number;
+  botEvents: number;
+  humanEvents: number;
+  aiCrawlerEvents: number;
+  scannerEvents: number;
+  selfDeclaredBots: number;
+  verifiedBots: number;
+  topBots: Array<{ label: string; count: number }>;
+  categories: Array<{ label: string; count: number }>;
+  topPages: Array<{ label: string; count: number }>;
+  recentEvents: VisitorIntelligenceEvent[];
+  contract: {
+    endpointPath: string;
+    clientHeader: string;
+    secretHeader: string;
+    secretEnvVar: string;
+    maxEventsPerRequest: number;
+    mode: string;
+  };
+};
+
 const providerLabels: Record<Provider, string> = {
   ga4: "GA4",
   gtm: "GTM",
@@ -313,6 +362,7 @@ const navItems: Array<{ id: View; label: string; description: string; icon: NavI
 const websiteWatchTools: Array<{ id: WebsiteWatchTool; label: string; description: string }> = [
   { id: "surface", label: "Surface Check", description: "Public page review" },
   { id: "tracker", label: "Baseline Watch", description: "Public site changes" },
+  { id: "visitors", label: "Viewership", description: "Visitor and bot telemetry" },
   { id: "deep", label: "Deep Audit", description: "Protected access setup" },
 ];
 
@@ -323,6 +373,33 @@ const AI_SETUP_MESSAGE =
   "AI analysis is off. Connect an OpenAI API key to generate summaries, severity ratings, and suggested fixes.";
 const DEFAULT_WATCH_SITE_URL = "https://vast.ai";
 const DEFAULT_PRIORITY_PAGES = ["/", "/pricing", "/services", "/blog", "/contact"];
+
+const EMPTY_VISITOR_INTELLIGENCE_SUMMARY: VisitorIntelligenceSummary = {
+  storageReady: false,
+  storageError: null,
+  windowDays: 7,
+  totalEvents: 0,
+  requestEvents: 0,
+  pageviewEvents: 0,
+  botEvents: 0,
+  humanEvents: 0,
+  aiCrawlerEvents: 0,
+  scannerEvents: 0,
+  selfDeclaredBots: 0,
+  verifiedBots: 0,
+  topBots: [],
+  categories: [],
+  topPages: [],
+  recentEvents: [],
+  contract: {
+    endpointPath: "/api/seo/visitor-intelligence",
+    clientHeader: "x-seo-client-id",
+    secretHeader: "x-seo-visitor-secret",
+    secretEnvVar: "SEO_VISITOR_INGEST_SECRET",
+    maxEventsPerRequest: 25,
+    mode: "server-to-server",
+  },
+};
 
 const tourSteps: Step[] = [
   {
@@ -483,6 +560,7 @@ export function SeoDashboard() {
   const [seoChangeRuns, setSeoChangeRuns] = useState<SeoChangeRun[]>([]);
   const [seoTrackerStorageReady, setSeoTrackerStorageReady] = useState(true);
   const [seoTrackerStorageError, setSeoTrackerStorageError] = useState<string | null>(null);
+  const [visitorIntelligence, setVisitorIntelligence] = useState<VisitorIntelligenceSummary>(EMPTY_VISITOR_INTELLIGENCE_SUMMARY);
   const [seoHealthChecks, setSeoHealthChecks] = useState<SeoHealthChecks | null>(null);
   const [tourRunning, setTourRunning] = useState(false);
   const [activeProvider, setActiveProvider] = useState<Provider>("ga4");
@@ -550,6 +628,7 @@ export function SeoDashboard() {
         setSeoChangeRuns([]);
         setSeoTrackerStorageReady(true);
         setSeoTrackerStorageError(null);
+        setVisitorIntelligence(EMPTY_VISITOR_INTELLIGENCE_SUMMARY);
         setSeoHealthChecks(null);
         setNotice(null);
         return;
@@ -561,7 +640,7 @@ export function SeoDashboard() {
         setClientId(resolvedClientId);
       }
 
-      const [integrationBody, insightBody, competitiveBody, metricBody, watchBody, healthBody] = await Promise.all([
+      const [integrationBody, insightBody, competitiveBody, metricBody, watchBody, visitorBody, healthBody] = await Promise.all([
         api<{ integrations: Integration[] }>(resolvedClientId, "/api/seo/integrations"),
         api<{ insights: Insight[] }>(resolvedClientId, "/api/seo/insights"),
         api<{ analyses: CompetitiveAnalysis[] }>(resolvedClientId, "/api/seo/competitive-analysis"),
@@ -571,6 +650,11 @@ export function SeoDashboard() {
           runs: [],
           storageReady: false,
           storageError: error instanceof Error ? error.message : "SEO Watch storage state could not be loaded.",
+        })),
+        api<VisitorIntelligenceSummary>(resolvedClientId, "/api/seo/visitor-intelligence").catch((error) => ({
+          ...EMPTY_VISITOR_INTELLIGENCE_SUMMARY,
+          storageReady: false,
+          storageError: error instanceof Error ? error.message : "Visitor intelligence state could not be loaded.",
         })),
         api<{ checks: SeoHealthChecks }>(resolvedClientId, "/api/seo/health").catch((): { checks: SeoHealthChecks } => ({ checks: {} })),
       ]);
@@ -582,6 +666,7 @@ export function SeoDashboard() {
       setSeoChangeRuns(watchBody.runs);
       setSeoTrackerStorageReady(watchBody.storageReady !== false);
       setSeoTrackerStorageError(watchBody.storageError || null);
+      setVisitorIntelligence(visitorBody);
       setSeoHealthChecks(healthBody.checks);
       if (!integrationBody.integrations.some((item) => item.provider === "openai") && !healthBody.checks.openai_api_key) {
         setNotice({ type: "info", message: AI_SETUP_MESSAGE });
@@ -626,6 +711,7 @@ export function SeoDashboard() {
     setSeoChangeRuns([]);
     setSeoTrackerStorageReady(true);
     setSeoTrackerStorageError(null);
+    setVisitorIntelligence(EMPTY_VISITOR_INTELLIGENCE_SUMMARY);
     setSeoHealthChecks(null);
     setNotice({ type: "info", message: `Viewing client workspace: ${nextClient?.name || nextClientId}` });
     loadDashboard(nextClientId);
@@ -1080,6 +1166,7 @@ export function SeoDashboard() {
                 onSelectTool={setActiveWatchTool}
                 onConnectApiKey={openOpenAiSetup}
                 seoChangeRuns={seoChangeRuns}
+                visitorIntelligence={visitorIntelligence}
                 slackConnected={Boolean(seoHealthChecks?.slack_webhook)}
                 seoTrackerStorageError={seoTrackerStorageError}
                 seoTrackerStorageReady={seoTrackerStorageReady}
@@ -2075,6 +2162,7 @@ function WebsiteWatchView({
   onRunSurfaceCheck,
   onSelectTool,
   seoChangeRuns,
+  visitorIntelligence,
   slackConnected,
   seoTrackerBaseline,
   seoTrackerStorageError,
@@ -2094,6 +2182,7 @@ function WebsiteWatchView({
   onRunSurfaceCheck: (payload: { siteUrl: string; pages: string; expectedText: string }) => void;
   onSelectTool: (tool: WebsiteWatchTool) => void;
   seoChangeRuns: SeoChangeRun[];
+  visitorIntelligence: VisitorIntelligenceSummary;
   slackConnected: boolean;
   seoTrackerBaseline: SeoChangeTrackerBaseline | null;
   seoTrackerStorageError: string | null;
@@ -2115,6 +2204,11 @@ function WebsiteWatchView({
     : seoTrackerBaseline
       ? "Captured"
       : "Missing";
+  const visitorStatus = visitorIntelligence.storageReady === false
+    ? "Setup needed"
+    : visitorIntelligence.totalEvents
+      ? `${visitorIntelligence.totalEvents} events`
+      : "No events";
 
   useEffect(() => {
     if (!latestSiteUrl) return;
@@ -2190,6 +2284,7 @@ function WebsiteWatchView({
         <WatchStatusPill label="AI Analysis" value={aiAnalysisConnected ? "Connected" : "Off"} state={aiAnalysisConnected ? "ready" : "missing"} />
         <WatchStatusPill label="Slack" value={slackConnected ? "Connected" : "Not Connected"} state={slackConnected ? "ready" : "missing"} />
         <WatchStatusPill label="Baseline" value={baselineStatus} state={seoTrackerBaseline && seoTrackerStorageReady ? "ready" : "missing"} />
+        <WatchStatusPill label="Viewership" value={visitorStatus} state={visitorIntelligence.totalEvents ? "ready" : visitorIntelligence.storageReady === false ? "missing" : "idle"} />
         <WatchStatusPill label="Last Run" value={lastRunAt ? new Date(lastRunAt).toLocaleString() : "Never"} state={lastRunAt ? "ready" : "idle"} />
       </div>
 
@@ -2243,6 +2338,14 @@ function WebsiteWatchView({
           cta={seoTracking ? "Capturing..." : "Capture baseline"}
           onClick={runBaselineFromCommand}
           disabled={seoTracking}
+        />
+        <WatchModeCard
+          active={activeTool === "visitors"}
+          title="Viewership"
+          subtitle="Visitor contract"
+          description="Receive signed request events from tracked sites."
+          cta="Review contract"
+          onClick={() => onSelectTool("visitors")}
         />
         <WatchModeCard
           active={activeTool === "deep"}
@@ -2402,6 +2505,14 @@ function WebsiteWatchView({
           </>
         ) : null}
 
+        {activeTool === "visitors" ? (
+          <VisitorIntelligencePanel
+            activeClient={activeClient}
+            clientId={activeClient?.id || DEFAULT_CLIENT_ID}
+            summary={visitorIntelligence}
+          />
+        ) : null}
+
         {activeTool === "deep" ? (
           <section className="panel deep-audit-panel" aria-labelledby="deep-audit-title">
             <div className="section-heading">
@@ -2477,6 +2588,197 @@ function WebsiteWatchView({
       {activeTool === "tracker" && seoTrackerResult ? <SeoChangeTrackerResults result={seoTrackerResult} /> : null}
     </PageWorkspace>
   );
+}
+
+function VisitorIntelligencePanel({
+  activeClient,
+  clientId,
+  summary,
+}: {
+  activeClient?: Client;
+  clientId: string;
+  summary: VisitorIntelligenceSummary;
+}) {
+  const endpoint =
+    typeof window === "undefined"
+      ? summary.contract.endpointPath
+      : `${window.location.origin}${summary.contract.endpointPath}`;
+  const samplePayload = `await fetch("${endpoint}", {
+  method: "POST",
+  headers: {
+    "content-type": "application/json",
+    "${summary.contract.clientHeader}": "${clientId}",
+    "${summary.contract.secretHeader}": process.env.${summary.contract.secretEnvVar}
+  },
+  body: JSON.stringify({
+    events: [{
+      eventType: "request",
+      source: "edge",
+      siteOrigin: "https://example.com",
+      pageUrl: "https://example.com/pricing",
+      method: "GET",
+      statusCode: 200,
+      userAgent: request.headers.get("user-agent"),
+      visitorIp: request.headers.get("x-forwarded-for")?.split(",")[0],
+      country: request.headers.get("x-vercel-ip-country")
+    }]
+  })
+});`;
+
+  return (
+    <section className="panel visitor-contract-panel" aria-labelledby="visitor-contract-title">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">Viewership contract</span>
+          <h3 id="visitor-contract-title">Receive visitor and bot evidence.</h3>
+          <p>
+            The tracked site forwards request events to this dashboard. The dashboard stores observed visits, classifies
+            likely bots, and keeps the claim separate from GA4 or crawl checks.
+          </p>
+        </div>
+        <span className="visitor-status-badge">{summary.storageReady === false ? "Setup needed" : "Read-only"}</span>
+      </div>
+
+      <div className="visitor-metric-grid" aria-label="Visitor intelligence summary">
+        <div>
+          <span>Total events</span>
+          <strong>{summary.totalEvents}</strong>
+        </div>
+        <div>
+          <span>Bot-like</span>
+          <strong>{summary.botEvents}</strong>
+        </div>
+        <div>
+          <span>AI crawlers</span>
+          <strong>{summary.aiCrawlerEvents}</strong>
+        </div>
+        <div>
+          <span>Pageviews</span>
+          <strong>{summary.pageviewEvents}</strong>
+        </div>
+      </div>
+
+      <div className="visitor-contract-grid">
+        <article>
+          <span>Inputs</span>
+          <p>Path, method, status, User-Agent, visitor IP, country, ASN, and safe request headers.</p>
+        </article>
+        <article>
+          <span>Processing</span>
+          <p>Hash IPs, classify User-Agents, flag scanner paths, and keep reasons with each event.</p>
+        </article>
+        <article>
+          <span>Outputs</span>
+          <p>Client-scoped viewership, top bots, top pages, recent requests, and automation score.</p>
+        </article>
+        <article>
+          <span>Boundary</span>
+          <p>Use edge or server forwarding for bots. Browser-only beacons prove JavaScript ran, not total visitation.</p>
+        </article>
+      </div>
+
+      {summary.storageReady === false ? (
+        <div className="tracker-baseline-note" data-ready="false">
+          <strong>Storage setup needed</strong>
+          <span>{summary.storageError || "Apply the Visitor Intelligence migration before saving events."}</span>
+        </div>
+      ) : null}
+
+      <div className="visitor-setup-grid">
+        <div className="visitor-contract-copy">
+          <span className="eyebrow">Tracked site setup</span>
+          <h4>{activeClient?.name || clientId}</h4>
+          <dl>
+            <div>
+              <dt>Endpoint</dt>
+              <dd>{endpoint}</dd>
+            </div>
+            <div>
+              <dt>Client header</dt>
+              <dd>{summary.contract.clientHeader}: {clientId}</dd>
+            </div>
+            <div>
+              <dt>Secret env</dt>
+              <dd>{summary.contract.secretEnvVar}</dd>
+            </div>
+          </dl>
+        </div>
+        <pre className="contract-code" aria-label="Visitor telemetry contract example">
+          <code>{samplePayload}</code>
+        </pre>
+      </div>
+
+      <div className="visitor-observation-grid">
+        <VisitorCountList title="Top bots" rows={summary.topBots} empty="No bot-like requests observed yet." />
+        <VisitorCountList title="Top pages" rows={summary.topPages} empty="No page requests observed yet." />
+      </div>
+
+      <div className="visitor-event-list" aria-label="Recent visitor events">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Recent evidence</span>
+            <h4>Latest observed requests</h4>
+          </div>
+        </div>
+        {summary.recentEvents.length ? (
+          summary.recentEvents.map((event) => (
+            <article className="visitor-event-row" key={event.id} data-category={event.botCategory}>
+              <div>
+                <strong>{event.botName || visitorCategoryLabel(event.botCategory)}</strong>
+                <span>{event.path}</span>
+              </div>
+              <dl>
+                <div>
+                  <dt>Score</dt>
+                  <dd>{event.automationScore}</dd>
+                </div>
+                <div>
+                  <dt>Source</dt>
+                  <dd>{event.source}</dd>
+                </div>
+                <div>
+                  <dt>Seen</dt>
+                  <dd>{new Date(event.receivedAt).toLocaleString()}</dd>
+                </div>
+              </dl>
+              <p>{event.classificationReasons[0] || "No classification reason recorded."}</p>
+            </article>
+          ))
+        ) : (
+          <div className="empty-state">No visitor events yet. Connect a tracked site to start observing real traffic.</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function VisitorCountList({ empty, rows, title }: { empty: string; rows: Array<{ label: string; count: number }>; title: string }) {
+  return (
+    <div className="visitor-count-list">
+      <h4>{title}</h4>
+      {rows.length ? (
+        rows.map((row) => (
+          <div key={row.label}>
+            <span>{row.label}</span>
+            <strong>{row.count}</strong>
+          </div>
+        ))
+      ) : (
+        <p>{empty}</p>
+      )}
+    </div>
+  );
+}
+
+function visitorCategoryLabel(category: VisitorIntelligenceEvent["botCategory"]) {
+  if (category === "human") return "Likely human";
+  if (category === "ai") return "AI crawler";
+  if (category === "seo") return "SEO crawler";
+  if (category === "search") return "Search crawler";
+  if (category === "monitoring") return "Monitoring bot";
+  if (category === "scanner") return "Likely scanner";
+  if (category === "automation") return "Automation";
+  return "Unknown automation";
 }
 
 function DashboardStatusPill({

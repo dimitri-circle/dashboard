@@ -15,10 +15,14 @@ function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
 
+function isSignedVisitorIngest(request: NextRequest) {
+  return request.method === "POST" && request.nextUrl.pathname === "/api/seo/visitor-intelligence";
+}
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (pathname.startsWith("/_next") || isPublicPath(pathname)) {
+  if (pathname.startsWith("/_next") || isPublicPath(pathname) || isSignedVisitorIngest(request)) {
     return NextResponse.next();
   }
 

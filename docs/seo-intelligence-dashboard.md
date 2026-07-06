@@ -44,6 +44,8 @@ For Vercel, add the same values under Project Settings → Environment Variables
 - `WEBSITE_WATCH_GITHUB_OWNER`, `WEBSITE_WATCH_GITHUB_REPO`, `WEBSITE_WATCH_GITHUB_WORKFLOW`, `WEBSITE_WATCH_GITHUB_REF`, and `WEBSITE_WATCH_GITHUB_TOKEN` (optional future deep-audit workflow dispatch settings)
 - `SLACK_WEBHOOK_URL` (optional shared deep-audit or alert delivery target)
 - `SEO_WATCH_SLACK_WEBHOOK_URL` (optional SEO Watch-specific Slack incoming webhook; falls back to `SLACK_WEBHOOK_URL`)
+- `SEO_VISITOR_INGEST_SECRET` (optional shared server-side secret for signed visitor and bot telemetry ingestion)
+- `SEO_VISITOR_IP_HASH_SALT` (optional salt for visitor IP hashes; falls back to `SEO_VISITOR_INGEST_SECRET`)
 
 Apply the database schema before using the dashboard:
 
@@ -95,6 +97,39 @@ The dashboard includes Website Watch for two levels of site review:
 - Surface Check runs immediately inside the authenticated dashboard backend. It fetches public same-origin pages, checks response status, titles, meta descriptions, canonical tags, robots metadata, H1s, expected text, image alt text, `robots.txt`, `sitemap.xml`, and a small set of internal links. It rejects local/private targets and limits page/link counts so the route cannot be used as a broad scanner.
 - Deep Audit is a setup worksheet for the heavier browser path. Use it when a site requires Vercel protection bypass, basic auth, a test login, or a custom access header. Store secrets in GitHub or Vercel, not in public client code. The actual browser runner should execute in GitHub Actions or a worker when those credentials are configured.
 - SEO Change Tracker stores the latest baseline per client and site URL in `seo_watch_baselines`, stores each scan in `seo_change_runs`, and compares every new public crawl against the latest saved baseline. It uses sitemap URLs first, falls back to homepage navigation when a sitemap is unavailable, and lets users add optional priority paths that must be included. When a baseline is first created or a later scan detects changes, the backend posts a Slack incoming-webhook alert if `SEO_WATCH_SLACK_WEBHOOK_URL` or `SLACK_WEBHOOK_URL` is configured. Unchanged scans stay in the dashboard history without creating Slack noise.
+- Viewership / Visitor Intelligence stores signed request events in `seo_visitor_events`. A tracked site sends server-side or edge-side events to `/api/seo/visitor-intelligence` with `x-seo-client-id` and `x-seo-visitor-secret`. The dashboard hashes visitor IPs before storage, keeps only safe request headers, classifies known bot User-Agents, flags common scanner paths, and stores the classification reasons with each event. Browser-only beacons are not enough for bot visibility because many bots do not run JavaScript.
+
+### Visitor Intelligence Contract
+
+The dashboard accepts up to 25 events per request:
+
+```json
+{
+  "events": [
+    {
+      "eventType": "request",
+      "source": "edge",
+      "siteOrigin": "https://example.com",
+      "pageUrl": "https://example.com/pricing",
+      "method": "GET",
+      "statusCode": 200,
+      "userAgent": "Googlebot/2.1",
+      "visitorIp": "203.0.113.10",
+      "country": "US",
+      "asn": "AS15169"
+    }
+  ]
+}
+```
+
+Required headers:
+
+```text
+x-seo-client-id: <client workspace id>
+x-seo-visitor-secret: <SEO_VISITOR_INGEST_SECRET>
+```
+
+Use a tracked-site server route, Next.js middleware, Vercel edge middleware, or Cloudflare Worker to forward request evidence. Do not put `SEO_VISITOR_INGEST_SECRET` in public browser JavaScript.
 
 ## Competitive Analysis
 
