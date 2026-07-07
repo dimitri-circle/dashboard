@@ -411,6 +411,35 @@ test("blog audit applies generated tone profile as a brand rule", async () => {
   assert.ok(report.brandFindings.some((finding) => /tone profile|tone rules|hype/i.test(finding.issue)));
 });
 
+test("blog audit blocks drafts framed around a different company than the active client", async () => {
+  const report = await auditBlogDraft(
+    {
+      title: "NVIDIA Rubin platform",
+      format: "plain_text",
+      clientName: "Vast.ai",
+      content:
+        "NVIDIA Rubin Platform: everything we know so far. NVIDIA unveiled Rubin as a next-generation AI computing platform. NVIDIA says Rubin combines new GPUs, CPUs, networking, and software for large-scale AI.",
+    },
+    {
+      sources: auditSourceFixture,
+      externalEvidence: [
+        {
+          claim: "NVIDIA unveiled Rubin as a next-generation AI computing platform.",
+          status: "PASS",
+          reason: "External evidence supports the NVIDIA claim.",
+          evidence: ["https://www.nvidia.com/en-us/data-center/rubin/"],
+          suggestedRewrite: "No rewrite required.",
+        },
+      ],
+    }
+  );
+
+  assert.equal(report.clientFit.status, "MISMATCH");
+  assert.equal(report.recommendation, "DO_NOT_PUBLISH");
+  assert.ok(report.brandScore <= 54);
+  assert.ok(report.publishRisks.some((risk) => /client framing mismatch/i.test(risk)));
+});
+
 test("blog audit form carries tone profile JSON into the server payload", async () => {
   const profile = generateBlogToneProfile({
     sampleText:
@@ -419,11 +448,13 @@ test("blog audit form carries tone profile JSON into the server payload", async 
   const form = new FormData();
 
   form.set("content", "Vast.ai offers on-demand GPU instances for AI workloads.");
+  form.set("clientName", "vast");
   form.set("toneProfile", JSON.stringify(profile));
 
   const payload = await readBlogAuditFormPayload(form);
   const parsedProfile = payload.toneProfile as { summary?: string } | null;
 
+  assert.equal(payload.clientName, "vast");
   assert.equal(parsedProfile?.summary, profile.summary);
 });
 

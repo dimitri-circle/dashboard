@@ -37,6 +37,7 @@ export async function readBlogAuditFormPayload(form: FormData): Promise<BlogAudi
 
 function readContextPayload(form: FormData) {
   return {
+    clientName: asString(form.get("clientName")),
     clientContext: asString(form.get("clientContext")),
     approvedSources: parseList(form.get("approvedSources")),
     forbiddenClaims: parseList(form.get("forbiddenClaims")),

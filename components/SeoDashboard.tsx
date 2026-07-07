@@ -162,10 +162,17 @@ type BlogAuditExternalEvidenceSummary = {
   evidenceUrls: string[];
 };
 
+type BlogAuditClientFit = {
+  status: "MATCH" | "UNCLEAR" | "MISMATCH";
+  message: string;
+  signals: string[];
+};
+
 type BlogAuditReport = {
   recommendation: "PASS" | "PASS_WITH_EDITS" | "DO_NOT_PUBLISH";
   truthScore: number;
   brandScore: number;
+  clientFit?: BlogAuditClientFit;
   summary: string;
   claims: Array<{
     claim: string;
@@ -3213,6 +3220,7 @@ function BrainView({ activeClient, clientId, currentUser }: { activeClient?: Cli
           </details>
 
           <input name="toneProfile" type="hidden" value={toneProfile ? JSON.stringify(toneProfile) : ""} />
+          <input name="clientName" type="hidden" value={activeClient?.name || clientId} />
 
           <label className="audit-upload-card">
             <input
@@ -3602,7 +3610,73 @@ function ToneProfileSummary({ profile }: { profile: BrainToneProfile }) {
   );
 }
 
+type AuditClaimStatusFilter = "ALL" | BlogAuditClaimStatus;
+type AuditClaimSourceFilter = "all" | BlogAuditClaimSourceType;
+
+const claimStatusFilters: Array<{ label: string; value: AuditClaimStatusFilter }> = [
+  { label: "All", value: "ALL" },
+  { label: "Passed", value: "PASS" },
+  { label: "Failed", value: "FAIL" },
+  { label: "Unsupported", value: "UNSUPPORTED" },
+  { label: "Stale risk", value: "STALE_RISK" },
+  { label: "Blocked", value: "BLOCKED" },
+];
+
+const claimSourceFilters: Array<{ label: string; value: AuditClaimSourceFilter }> = [
+  { label: "All sources", value: "all" },
+  { label: "External web", value: "external_web" },
+  { label: "Vast source", value: "vast_source" },
+  { label: "Client context", value: "client_context" },
+  { label: "Needs source", value: "missing_source" },
+  { label: "Blocked", value: "blocked" },
+];
+
 function AuditReportView({ report }: { report: BlogAuditReport }) {
+  const [statusFilter, setStatusFilter] = useState<AuditClaimStatusFilter>("ALL");
+  const [sourceFilter, setSourceFilter] = useState<AuditClaimSourceFilter>("all");
+  const claimsWithSource = useMemo(
+    () =>
+      report.claims.map((claim) => ({
+        ...claim,
+        resolvedSourceType: claim.sourceType || sourceTypeFromClaim(claim),
+      })),
+    [report.claims]
+  );
+  const statusCounts = useMemo(
+    () =>
+      claimsWithSource.reduce<Record<AuditClaimStatusFilter, number>>(
+        (counts, claim) => {
+          counts.ALL += 1;
+          counts[claim.status] += 1;
+          return counts;
+        },
+        { ALL: 0, PASS: 0, FAIL: 0, UNSUPPORTED: 0, STALE_RISK: 0, BLOCKED: 0 }
+      ),
+    [claimsWithSource]
+  );
+  const sourceCounts = useMemo(
+    () =>
+      claimsWithSource.reduce<Record<AuditClaimSourceFilter, number>>(
+        (counts, claim) => {
+          counts.all += 1;
+          counts[claim.resolvedSourceType] += 1;
+          return counts;
+        },
+        { all: 0, vast_source: 0, client_context: 0, external_web: 0, missing_source: 0, blocked: 0 }
+      ),
+    [claimsWithSource]
+  );
+  const filteredClaims = claimsWithSource.filter((claim) => {
+    const statusMatches = statusFilter === "ALL" || claim.status === statusFilter;
+    const sourceMatches = sourceFilter === "all" || claim.resolvedSourceType === sourceFilter;
+    return statusMatches && sourceMatches;
+  });
+
+  function resetClaimFilters() {
+    setStatusFilter("ALL");
+    setSourceFilter("all");
+  }
+
   return (
     <div className="audit-report">
       <div className="audit-score-grid">
@@ -3613,21 +3687,71 @@ function AuditReportView({ report }: { report: BlogAuditReport }) {
       </div>
 
       <ExternalEvidenceSummary evidence={report.externalEvidence} />
+      <ClientFitSummary brandFindings={report.brandFindings} fit={report.clientFit} />
 
       <p className="audit-summary">{report.summary}</p>
 
       <div className="audit-section">
-        <h4>Claims</h4>
+        <div className="audit-section-header">
+          <div>
+            <h4>Claims</h4>
+            <p>
+              Showing {filteredClaims.length} of {claimsWithSource.length} claim{claimsWithSource.length === 1 ? "" : "s"}.
+            </p>
+          </div>
+          {statusFilter !== "ALL" || sourceFilter !== "all" ? (
+            <button className="button" type="button" onClick={resetClaimFilters}>
+              Reset filters
+            </button>
+          ) : null}
+        </div>
+        <div className="audit-filter-panel" aria-label="Claim filters">
+          <div className="audit-filter-group" aria-label="Filter by claim status">
+            <span>Status</span>
+            <div>
+              {claimStatusFilters.map((filter) => (
+                <button
+                  className="audit-filter-button"
+                  data-active={statusFilter === filter.value}
+                  key={filter.value}
+                  onClick={() => setStatusFilter(filter.value)}
+                  type="button"
+                >
+                  {filter.label}
+                  <strong>{statusCounts[filter.value]}</strong>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="audit-filter-group" aria-label="Filter by source type">
+            <span>Sourcing</span>
+            <div>
+              {claimSourceFilters.map((filter) => (
+                <button
+                  className="audit-filter-button"
+                  data-active={sourceFilter === filter.value}
+                  key={filter.value}
+                  onClick={() => setSourceFilter(filter.value)}
+                  type="button"
+                >
+                  {filter.label}
+                  <strong>{sourceCounts[filter.value]}</strong>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
         <div className="audit-claim-list">
           {report.claims.length ? (
-            report.claims.map((claim, index) => (
+            filteredClaims.length ? (
+              filteredClaims.map((claim, index) => (
               <article className="audit-claim" data-status={claim.status} key={`${claim.claim}-${index}`}>
                 <div className="card-top">
                   <span className="claim-badge-group">
                     <span className="audit-status" data-status={claim.status}>
                       {claim.status.replace(/_/g, " ")}
                     </span>
-                    <SourceTypePill type={claim.sourceType || sourceTypeFromClaim(claim)} />
+                    <SourceTypePill type={claim.resolvedSourceType} />
                   </span>
                   <SourceLinks urls={claim.evidence} />
                 </div>
@@ -3640,7 +3764,15 @@ function AuditReportView({ report }: { report: BlogAuditReport }) {
                   </div>
                 ) : null}
               </article>
-            ))
+              ))
+            ) : (
+              <div className="empty-state">
+                No claims match those filters.
+                <button className="button" type="button" onClick={resetClaimFilters}>
+                  Show all claims
+                </button>
+              </div>
+            )
           ) : (
             <div className="empty-state">No factual claims were extracted.</div>
           )}
@@ -3650,6 +3782,32 @@ function AuditReportView({ report }: { report: BlogAuditReport }) {
       <AuditList title="Brand findings" items={report.brandFindings.map((finding) => `${finding.severity}: ${finding.issue} ${finding.suggestedRewrite}`)} />
       <AuditList title="Missing evidence" items={report.missingEvidence} />
       <AuditList title="Publish risks" items={report.publishRisks} />
+    </div>
+  );
+}
+
+function ClientFitSummary({ brandFindings, fit }: { brandFindings: BlogAuditReport["brandFindings"]; fit?: BlogAuditClientFit }) {
+  const status = fit?.status || "UNCHECKED";
+  const label =
+    status === "MATCH" ? "Client match" : status === "MISMATCH" ? "Wrong client framing" : status === "UNCLEAR" ? "Needs framing review" : "Not checked";
+  const message = fit?.message || "Re-run the audit to check whether the draft is framed for the selected client and saved tone rules.";
+  const toneFindingCount = brandFindings.filter((finding) => /tone|hype|vocabulary|sentence|framing|client/i.test(finding.issue)).length;
+  const signals = [...(fit?.signals || []), `${toneFindingCount} tone/framing finding${toneFindingCount === 1 ? "" : "s"}`];
+
+  return (
+    <div className="client-fit-summary" data-status={status}>
+      <div>
+        <span>Tone and framing</span>
+        <strong>{label}</strong>
+        <p>{message}</p>
+      </div>
+      {signals.length ? (
+        <ul>
+          {signals.slice(0, 4).map((signal) => (
+            <li key={signal}>{signal}</li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }
@@ -3722,6 +3880,12 @@ function formatSourceType(type: BlogAuditClaimSourceType) {
   return "Needs source";
 }
 
+function formatClientFitStatus(status: BlogAuditClientFit["status"]) {
+  if (status === "MATCH") return "Client match";
+  if (status === "MISMATCH") return "Wrong client framing";
+  return "Needs framing review";
+}
+
 function formatReportStatus(status: BlogAuditReportStatus) {
   return status.replace(/_/g, " ");
 }
@@ -3734,6 +3898,7 @@ function reportToMarkdown(report: BlogAuditReport) {
     `Truth score: ${report.truthScore}`,
     `Brand score: ${report.brandScore}`,
     `Claims: ${report.claims.length}`,
+    report.clientFit ? `Client fit: ${formatClientFitStatus(report.clientFit.status)} - ${report.clientFit.message}` : "",
     "",
     report.summary,
     "",

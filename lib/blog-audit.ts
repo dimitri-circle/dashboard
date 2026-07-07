@@ -17,6 +17,7 @@ export type BlogAuditInput = {
   format?: string;
   content?: string;
   url?: string;
+  clientName?: string;
   clientContext?: string;
   approvedSources?: string[];
   forbiddenClaims?: string[];
@@ -41,10 +42,17 @@ export type BlogAuditBrandFinding = {
   suggestedRewrite: string;
 };
 
+export type BlogAuditClientFit = {
+  status: "MATCH" | "UNCLEAR" | "MISMATCH";
+  message: string;
+  signals: string[];
+};
+
 export type BlogAuditReport = {
   recommendation: BlogAuditRecommendation;
   truthScore: number;
   brandScore: number;
+  clientFit: BlogAuditClientFit;
   summary: string;
   claims: BlogAuditClaim[];
   brandFindings: BlogAuditBrandFinding[];
@@ -240,20 +248,24 @@ export async function auditBlogDraft(input: BlogAuditInput, options: AuditOption
       : await fetchExternalEvidenceForClaims(baseClaimFindings, sources);
   const claimFindings = applyExternalEvidence(baseClaimFindings, externalEvidence);
   const brandFindings = auditBrand(cleanText);
+  const clientFit = auditClientFit(cleanText, normalizedInput);
+  const clientFitBrandFindings = clientFitToBrandFindings(clientFit);
   const clientBrandFindings = auditClientRules(cleanText, normalizedInput);
+  const combinedBrandFindings = [...brandFindings, ...clientFitBrandFindings, ...clientBrandFindings];
   const missingEvidence = buildMissingEvidence(claimFindings, sources, claims, externalEvidence);
-  const publishRisks = buildPublishRisks(claimFindings, [...brandFindings, ...clientBrandFindings], sources, externalEvidence);
+  const publishRisks = buildPublishRisks(claimFindings, combinedBrandFindings, sources, externalEvidence, clientFit);
   const truthScore = scoreTruth(claimFindings, sources);
-  const brandScore = scoreBrand([...brandFindings, ...clientBrandFindings]);
-  const recommendation = recommendPublication(truthScore, brandScore, claimFindings, [...brandFindings, ...clientBrandFindings], sources);
+  const brandScore = scoreBrand(combinedBrandFindings, clientFit);
+  const recommendation = recommendPublication(truthScore, brandScore, claimFindings, combinedBrandFindings, sources, clientFit);
 
   return {
     recommendation,
     truthScore,
     brandScore,
-    summary: summarizeAudit(recommendation, truthScore, brandScore, claimFindings, brandFindings),
+    clientFit,
+    summary: summarizeAudit(recommendation, truthScore, brandScore, claimFindings, combinedBrandFindings, clientFit),
     claims: claimFindings,
-    brandFindings: [...brandFindings, ...clientBrandFindings],
+    brandFindings: combinedBrandFindings,
     missingEvidence,
     publishRisks,
     externalEvidence: externalEvidenceSummary(externalEvidence),
@@ -264,6 +276,7 @@ export function validateBlogAuditInput(input: BlogAuditInput): BlogAuditInput & 
   format: BlogAuditFormat;
   content: string;
   url: string;
+  clientName: string;
   clientContext: string;
   approvedSources: string[];
   forbiddenClaims: string[];
@@ -291,6 +304,7 @@ export function validateBlogAuditInput(input: BlogAuditInput): BlogAuditInput & 
     format,
     content,
     url,
+    clientName: sanitizeClientName(input.clientName),
     clientContext: sanitizeContextText(input.clientContext),
     approvedSources: normalizeStringList(input.approvedSources, 12, 240),
     forbiddenClaims: normalizeStringList(input.forbiddenClaims, 24, 220),
@@ -1028,9 +1042,176 @@ function auditBrand(text: string) {
   return findings.slice(0, 12);
 }
 
+const KNOWN_COMPANY_SIGNALS = [
+  "Amazon Web Services",
+  "Anthropic",
+  "CoreWeave",
+  "Cerebras",
+  "DigitalOcean",
+  "Google Cloud",
+  "Hewlett Packard Enterprise",
+  "Lambda Labs",
+  "Linode",
+  "Microsoft Azure",
+  "NVIDIA",
+  "OpenAI",
+  "Oracle Cloud",
+  "RunPod",
+  "Together AI",
+  "THORChain",
+  "Vast.ai",
+];
+
+function auditClientFit(
+  text: string,
+  input: BlogAuditInput & {
+    clientName: string;
+    clientContext: string;
+    toneProfile: BlogToneProfile | null;
+  }
+): BlogAuditClientFit {
+  const clientName = input.clientName.trim();
+
+  if (!clientName) {
+    return {
+      status: "UNCLEAR",
+      message: "No active client name was supplied, so Br(AI)N could not verify whether the draft is framed for the selected client.",
+      signals: ["Missing selected client name"],
+    };
+  }
+
+  const normalizedText = normalizeForSearch(text);
+  const openingText = normalizeForSearch(text.slice(0, 2200));
+  const aliases = clientNameAliases(clientName);
+  const clientMentions = countAliasMentions(normalizedText, aliases);
+  const clientOpeningMentions = countAliasMentions(openingText, aliases);
+  const otherCompanies = extractCompanySignals(text, aliases);
+  const dominantCompany = otherCompanies[0];
+
+  const signals = [
+    `${clientName} mentions: ${clientMentions}`,
+    `${clientName} opening mentions: ${clientOpeningMentions}`,
+    ...(dominantCompany ? [`Dominant other company: ${dominantCompany.name} (${dominantCompany.count})`] : []),
+  ];
+
+  if (
+    dominantCompany &&
+    dominantCompany.count >= 3 &&
+    dominantCompany.openingCount >= 1 &&
+    (clientMentions === 0 || dominantCompany.count >= clientMentions + 3)
+  ) {
+    return {
+      status: "MISMATCH",
+      message: `The draft appears centered on ${dominantCompany.name}, not ${clientName}. It may be valid research, but it is not framed as a ${clientName} content draft yet.`,
+      signals,
+    };
+  }
+
+  if (clientMentions === 0) {
+    return {
+      status: "UNCLEAR",
+      message: `Br(AI)N could not find clear ${clientName} framing in the draft. Add client-specific positioning before treating this as ready for editorial review.`,
+      signals,
+    };
+  }
+
+  if (clientOpeningMentions === 0 && text.length > 700) {
+    return {
+      status: "UNCLEAR",
+      message: `${clientName} appears in the draft, but not in the opening frame. The reader may not understand why this is a ${clientName} piece.`,
+      signals,
+    };
+  }
+
+  return {
+    status: "MATCH",
+    message: `The draft includes visible ${clientName} framing and can be reviewed against the saved client context and tone rules.`,
+    signals,
+  };
+}
+
+function clientFitToBrandFindings(clientFit: BlogAuditClientFit): BlogAuditBrandFinding[] {
+  if (isMissingClientFit(clientFit)) {
+    return [];
+  }
+
+  if (clientFit.status === "MISMATCH") {
+    return [
+      {
+        issue: `Client framing mismatch. ${clientFit.message}`,
+        severity: "high",
+        suggestedRewrite: "Reframe the draft around the selected client before editing line-level claims.",
+      },
+    ];
+  }
+
+  if (clientFit.status === "UNCLEAR") {
+    return [
+      {
+        issue: `Client framing needs review. ${clientFit.message}`,
+        severity: "medium",
+        suggestedRewrite: "Add client-specific positioning, audience context, or approved source support near the top of the draft.",
+      },
+    ];
+  }
+
+  return [];
+}
+
+function isMissingClientFit(clientFit: BlogAuditClientFit) {
+  return clientFit.status === "UNCLEAR" && clientFit.signals.includes("Missing selected client name");
+}
+
+function clientNameAliases(clientName: string) {
+  const normalized = normalizeForSearch(clientName);
+  const compact = normalized.replace(/\s+/g, "");
+  const aliases = new Set([normalized, compact]);
+
+  if (/\bvast\b|\bvastai\b/i.test(normalized) || compact === "vastai") {
+    aliases.add("vast");
+    aliases.add("vastai");
+    aliases.add("vast ai");
+  }
+
+  normalized
+    .split(/\s+/)
+    .filter((part) => part.length >= 4)
+    .forEach((part) => aliases.add(part));
+
+  return Array.from(aliases).filter(Boolean);
+}
+
+function countAliasMentions(normalizedText: string, aliases: string[]) {
+  return aliases.reduce((sum, alias) => {
+    const normalizedAlias = normalizeForSearch(alias);
+    if (!normalizedAlias) return sum;
+    const pattern = new RegExp(`(^|\\s)${escapeRegExp(normalizedAlias)}(?=\\s|$)`, "g");
+    return sum + (normalizedText.match(pattern) || []).length;
+  }, 0);
+}
+
+function extractCompanySignals(text: string, clientAliases: string[]) {
+  const normalizedText = normalizeForSearch(text);
+  const openingText = normalizeForSearch(text.slice(0, 2200));
+
+  return KNOWN_COMPANY_SIGNALS.map((name) => {
+    const aliases = clientNameAliases(name);
+    if (aliases.some((alias) => clientAliases.includes(alias))) {
+      return null;
+    }
+
+    const count = countAliasMentions(normalizedText, aliases);
+    const openingCount = countAliasMentions(openingText, aliases);
+    return count ? { name, count, openingCount } : null;
+  })
+    .filter((item): item is { name: string; count: number; openingCount: number } => Boolean(item))
+    .sort((a, b) => b.count - a.count || b.openingCount - a.openingCount || a.name.localeCompare(b.name));
+}
+
 function auditClientRules(
   text: string,
   input: BlogAuditInput & {
+    clientName: string;
     forbiddenClaims: string[];
     toneRules: string[];
     toneProfile: BlogToneProfile | null;
@@ -1130,7 +1311,8 @@ function buildPublishRisks(
   claims: BlogAuditClaim[],
   brandFindings: BlogAuditBrandFinding[],
   sources: VastSourceResult[],
-  externalEvidence: ExternalEvidenceState
+  externalEvidence: ExternalEvidenceState,
+  clientFit: BlogAuditClientFit
 ) {
   const risks = [];
 
@@ -1166,6 +1348,14 @@ function buildPublishRisks(
     risks.push("High-severity brand or overpromise language needs human review.");
   }
 
+  if (clientFit.status === "MISMATCH") {
+    risks.push(`Client framing mismatch: ${clientFit.message}`);
+  }
+
+  if (clientFit.status === "UNCLEAR" && !isMissingClientFit(clientFit)) {
+    risks.push(`Client framing needs review: ${clientFit.message}`);
+  }
+
   risks.push("Human approval is required before publishing; this endpoint audits only.");
 
   return Array.from(new Set(risks));
@@ -1188,14 +1378,24 @@ function scoreTruth(claims: BlogAuditClaim[], sources: VastSourceResult[]) {
   return clampScore(Math.round(average - sourcePenalty));
 }
 
-function scoreBrand(findings: BlogAuditBrandFinding[]) {
+function scoreBrand(findings: BlogAuditBrandFinding[], clientFit: BlogAuditClientFit) {
   const penalty = findings.reduce((sum, finding) => {
     if (finding.severity === "high") return sum + 26;
     if (finding.severity === "medium") return sum + 14;
     return sum + 7;
   }, 0);
 
-  return clampScore(100 - penalty);
+  const baseScore = clampScore(100 - penalty);
+
+  if (clientFit.status === "MISMATCH") {
+    return Math.min(baseScore, 54);
+  }
+
+  if (clientFit.status === "UNCLEAR" && !isMissingClientFit(clientFit)) {
+    return Math.min(baseScore, 78);
+  }
+
+  return baseScore;
 }
 
 function recommendPublication(
@@ -1203,9 +1403,11 @@ function recommendPublication(
   brandScore: number,
   claims: BlogAuditClaim[],
   brandFindings: BlogAuditBrandFinding[],
-  sources: VastSourceResult[]
+  sources: VastSourceResult[],
+  clientFit: BlogAuditClientFit
 ): BlogAuditRecommendation {
   if (
+    clientFit.status === "MISMATCH" ||
     truthScore < 55 ||
     brandScore < 65 ||
     claims.some((claim) => claim.status === "FAIL") ||
@@ -1218,6 +1420,7 @@ function recommendPublication(
   if (
     truthScore < 88 ||
     brandScore < 90 ||
+    (clientFit.status === "UNCLEAR" && !isMissingClientFit(clientFit)) ||
     claims.some((claim) => claim.status === "UNSUPPORTED" || claim.status === "STALE_RISK" || claim.status === "BLOCKED") ||
     brandFindings.length
   ) {
@@ -1232,12 +1435,21 @@ function summarizeAudit(
   truthScore: number,
   brandScore: number,
   claims: BlogAuditClaim[],
-  brandFindings: BlogAuditBrandFinding[]
+  brandFindings: BlogAuditBrandFinding[],
+  clientFit: BlogAuditClientFit
 ) {
   const blocked = claims.filter((claim) => claim.status === "BLOCKED").length;
   const unsupported = claims.filter((claim) => claim.status === "UNSUPPORTED").length;
   const stale = claims.filter((claim) => claim.status === "STALE_RISK").length;
   const failed = claims.filter((claim) => claim.status === "FAIL").length;
+
+  if (clientFit.status === "MISMATCH") {
+    return `Do not publish yet. ${clientFit.message} Truth score ${truthScore}, brand score ${brandScore}; review ${unsupported + blocked + stale + failed} claim issues and ${brandFindings.length} brand findings.`;
+  }
+
+  if (clientFit.status === "UNCLEAR" && !isMissingClientFit(clientFit)) {
+    return `Publish only after edits. ${clientFit.message} Truth score ${truthScore}, brand score ${brandScore}; review ${unsupported + blocked + stale + failed} claim issues and ${brandFindings.length} brand findings.`;
+  }
 
   if (recommendation === "PASS") {
     return `The draft is publishable after human approval. Truth score ${truthScore}, brand score ${brandScore}.`;
@@ -1254,8 +1466,16 @@ function normalizeWhitespace(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function sanitizeClientName(value: unknown) {
+  return typeof value === "string" ? normalizeWhitespace(value).slice(0, 120) : "";
+}
+
 function normalizeForSearch(value: string) {
   return value.toLowerCase().replace(/vast\.ai/g, "vastai").replace(/[^a-z0-9.$/ -]+/g, " ").replace(/\s+/g, " ");
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function compactClaimPhrase(claim: string) {
