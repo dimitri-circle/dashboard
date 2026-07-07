@@ -48,11 +48,25 @@ export type BlogAuditClientFit = {
   signals: string[];
 };
 
+export type BlogAuditHumanEditSignal = {
+  label: string;
+  severity: "low" | "medium" | "high";
+  detail: string;
+};
+
+export type BlogAuditHumanEditCheck = {
+  status: "READY" | "NEEDS_EDIT" | "HIGH_RISK";
+  score: number;
+  message: string;
+  signals: BlogAuditHumanEditSignal[];
+};
+
 export type BlogAuditReport = {
   recommendation: BlogAuditRecommendation;
   truthScore: number;
   brandScore: number;
   clientFit: BlogAuditClientFit;
+  humanEditCheck: BlogAuditHumanEditCheck;
   summary: string;
   claims: BlogAuditClaim[];
   brandFindings: BlogAuditBrandFinding[];
@@ -174,6 +188,25 @@ const HARD_OVERPROMISE_PATTERNS = [
 const SUPERLATIVE_PATTERNS = [/\bbest\b/i, /\bfastest\b/i, /\bcheapest\b/i, /\bmost\s+\w+/i, /\bunbeatable\b/i, /\bindustry-leading\b/i];
 const HYPE_PATTERNS = [/\brevolutionary\b/i, /\bgame[- ]changing\b/i, /\binsane\b/i, /\bmagic\b/i, /\bworld[- ]class\b/i];
 const PRODUCT_NAME_PATTERNS = [/\bVastAI\b/i, /\bVast AI\b/i, /\bvast ai\b/i];
+const GENERIC_AI_STYLE_PHRASES = [
+  "in today's fast-paced",
+  "ever-evolving",
+  "game-changing",
+  "revolutionary",
+  "cutting-edge",
+  "seamless",
+  "unlock",
+  "delve",
+  "landscape",
+  "robust",
+  "leverage",
+  "transformative",
+  "at the forefront",
+  "in the realm of",
+  "pivotal",
+  "redefine",
+  "harness",
+];
 
 export function getVastAuditSources(): VastAuditSource[] {
   const sources: VastAuditSource[] = [
@@ -251,9 +284,11 @@ export async function auditBlogDraft(input: BlogAuditInput, options: AuditOption
   const clientFit = auditClientFit(cleanText, normalizedInput);
   const clientFitBrandFindings = clientFitToBrandFindings(clientFit);
   const clientBrandFindings = auditClientRules(cleanText, normalizedInput);
-  const combinedBrandFindings = [...brandFindings, ...clientFitBrandFindings, ...clientBrandFindings];
+  const preliminaryBrandFindings = [...brandFindings, ...clientFitBrandFindings, ...clientBrandFindings];
+  const humanEditCheck = auditHumanEditReadiness(cleanText, normalizedInput, clientFit, claimFindings, preliminaryBrandFindings);
+  const combinedBrandFindings = [...preliminaryBrandFindings, ...humanEditToBrandFindings(humanEditCheck)];
   const missingEvidence = buildMissingEvidence(claimFindings, sources, claims, externalEvidence);
-  const publishRisks = buildPublishRisks(claimFindings, combinedBrandFindings, sources, externalEvidence, clientFit);
+  const publishRisks = buildPublishRisks(claimFindings, combinedBrandFindings, sources, externalEvidence, clientFit, humanEditCheck);
   const truthScore = scoreTruth(claimFindings, sources);
   const brandScore = scoreBrand(combinedBrandFindings, clientFit);
   const recommendation = recommendPublication(truthScore, brandScore, claimFindings, combinedBrandFindings, sources, clientFit);
@@ -263,6 +298,7 @@ export async function auditBlogDraft(input: BlogAuditInput, options: AuditOption
     truthScore,
     brandScore,
     clientFit,
+    humanEditCheck,
     summary: summarizeAudit(recommendation, truthScore, brandScore, claimFindings, combinedBrandFindings, clientFit),
     claims: claimFindings,
     brandFindings: combinedBrandFindings,
@@ -1158,6 +1194,204 @@ function clientFitToBrandFindings(clientFit: BlogAuditClientFit): BlogAuditBrand
   return [];
 }
 
+function auditHumanEditReadiness(
+  text: string,
+  input: BlogAuditInput & { clientName: string; toneProfile: BlogToneProfile | null },
+  clientFit: BlogAuditClientFit,
+  claims: BlogAuditClaim[],
+  brandFindings: BlogAuditBrandFinding[]
+): BlogAuditHumanEditCheck {
+  const signals: BlogAuditHumanEditSignal[] = [];
+  const normalizedText = normalizeForSearch(text);
+  const sentences = splitSentencesForEditCheck(text);
+  const sentenceWordCounts = sentences.map((sentence) => countWords(sentence)).filter((count) => count > 0);
+  const totalWords = sentenceWordCounts.reduce((sum, count) => sum + count, 0);
+  const averageSentenceWords = sentenceWordCounts.length ? totalWords / sentenceWordCounts.length : 0;
+  const longestSentenceWords = sentenceWordCounts.length ? Math.max(...sentenceWordCounts) : 0;
+  const longSentenceCount = sentenceWordCounts.filter((count) => count >= 42).length;
+  const genericPhraseHits = GENERIC_AI_STYLE_PHRASES.reduce((hits, phrase) => {
+    const normalizedPhrase = normalizeForSearch(phrase);
+    return hits + (normalizedText.match(new RegExp(`\\b${escapeRegExp(normalizedPhrase)}\\b`, "g")) || []).length;
+  }, 0);
+  const claimIssues = claims.filter((claim) => claim.status !== "PASS").length;
+  const claimIssueRatio = claims.length ? claimIssues / claims.length : 0;
+  const repeatedStarts = repeatedSentenceStarts(sentences);
+  const concreteAnchorCount = (text.match(/https?:\/\/|\$|\b\d+(?:[.,]\d+)?%?\b|\b(?:gpu|gpus|nvidia|api|pricing|instance|instances|docker|ssh|model|models|platform)\b/gi) || []).length;
+  const highBrandFindings = brandFindings.filter((finding) => finding.severity === "high").length;
+  const profileAverage = input.toneProfile?.signals.averageSentenceWords || 0;
+
+  function addSignal(label: string, severity: BlogAuditHumanEditSignal["severity"], detail: string) {
+    if (signals.some((signal) => signal.label === label && signal.detail === detail)) {
+      return;
+    }
+    signals.push({ label, severity, detail });
+  }
+
+  if (clientFit.status === "MISMATCH") {
+    addSignal("Client framing risk", "high", clientFit.message);
+  } else if (clientFit.status === "UNCLEAR" && !isMissingClientFit(clientFit)) {
+    addSignal("Client framing needs edit", "medium", clientFit.message);
+  }
+
+  if (genericPhraseHits >= 7) {
+    addSignal(
+      "Generic marketing language",
+      "high",
+      `${genericPhraseHits} broad phrases were found. Replace them with client-specific facts, proof, or examples.`
+    );
+  } else if (genericPhraseHits >= 4) {
+    addSignal(
+      "Generic marketing language",
+      "medium",
+      `${genericPhraseHits} broad phrases were found. Replace them with client-specific facts, proof, or examples.`
+    );
+  } else if (genericPhraseHits >= 2) {
+    addSignal(
+      "Generic language needs review",
+      "low",
+      `${genericPhraseHits} broad phrase${genericPhraseHits === 1 ? "" : "s"} may need a more specific rewrite.`
+    );
+  }
+
+  if (repeatedStarts.length) {
+    addSignal(
+      "Repeated sentence pattern",
+      repeatedStarts[0].count >= 4 ? "medium" : "low",
+      `Several sentences begin with "${repeatedStarts[0].start}". Vary the structure during human edit.`
+    );
+  }
+
+  if (longSentenceCount >= 2 || longestSentenceWords >= 58) {
+    addSignal(
+      "Dense sentence structure",
+      longestSentenceWords >= 58 ? "medium" : "low",
+      `${longSentenceCount} sentence${longSentenceCount === 1 ? "" : "s"} exceed 42 words; the longest is ${longestSentenceWords} words.`
+    );
+  }
+
+  if (sentenceWordCounts.length >= 8 && sentenceLengthDeviation(sentenceWordCounts) <= 3.2 && averageSentenceWords >= 12) {
+    addSignal(
+      "Uniform rhythm",
+      "low",
+      "Sentence lengths are unusually even. Add human variation where the draft sounds patterned."
+    );
+  }
+
+  if (claims.length >= 5 && claimIssueRatio >= 0.45) {
+    addSignal(
+      "Evidence density risk",
+      "high",
+      `${claimIssues} of ${claims.length} claims need proof, blocking, or freshness review.`
+    );
+  } else if (claims.length >= 5 && claimIssueRatio >= 0.25) {
+    addSignal(
+      "Evidence density needs edit",
+      "medium",
+      `${claimIssues} of ${claims.length} claims need proof, blocking, or freshness review.`
+    );
+  }
+
+  if (totalWords >= 360 && concreteAnchorCount < 3) {
+    addSignal(
+      "Low concrete detail",
+      "medium",
+      "The draft has few numbers, URLs, product terms, or technical anchors for its length."
+    );
+  }
+
+  if (highBrandFindings >= 2) {
+    addSignal(
+      "High-severity editorial risk",
+      "high",
+      `${highBrandFindings} high-severity brand or overpromise findings need editor review.`
+    );
+  }
+
+  if (profileAverage && sentenceWordCounts.length >= 5 && Math.abs(averageSentenceWords - profileAverage) >= 12) {
+    addSignal(
+      "Tone profile distance",
+      "medium",
+      `Average sentence length is ${Math.round(averageSentenceWords)} words versus ${Math.round(profileAverage)} in the saved client tone profile.`
+    );
+  }
+
+  const penalty = signals.reduce((sum, signal) => {
+    if (signal.severity === "high") return sum + 24;
+    if (signal.severity === "medium") return sum + 14;
+    return sum + 7;
+  }, 0);
+  const score = clampScore(100 - penalty);
+  const status: BlogAuditHumanEditCheck["status"] =
+    clientFit.status === "MISMATCH" || score <= 60 ? "HIGH_RISK" : score <= 82 ? "NEEDS_EDIT" : "READY";
+  const message =
+    status === "HIGH_RISK"
+      ? "Needs a human rewrite before editorial review."
+      : status === "NEEDS_EDIT"
+        ? "Needs a human pass for specificity, voice, or proof."
+        : "No major AI-likeness or generic-edit signals were found.";
+
+  return {
+    status,
+    score,
+    message,
+    signals: signals.slice(0, 8),
+  };
+}
+
+function humanEditToBrandFindings(check: BlogAuditHumanEditCheck): BlogAuditBrandFinding[] {
+  if (check.status !== "HIGH_RISK") {
+    return [];
+  }
+
+  return [
+    {
+      issue: `Human edit risk. ${check.message}`,
+      severity: "medium",
+      suggestedRewrite: "Treat this as an editorial signal, not a definitive AI detector; rewrite the draft with client-specific proof and human review.",
+    },
+  ];
+}
+
+function splitSentencesForEditCheck(text: string) {
+  return text
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => importantTokens(sentence).length >= 4)
+    .slice(0, 80);
+}
+
+function countWords(value: string) {
+  return value.match(/\b[\p{L}\p{N}][\p{L}\p{N}'-]*\b/gu)?.length || 0;
+}
+
+function repeatedSentenceStarts(sentences: string[]) {
+  const counts = new Map<string, number>();
+
+  for (const sentence of sentences) {
+    const start = importantTokens(sentence).slice(0, 3).join(" ");
+    if (start.split(" ").length < 2) {
+      continue;
+    }
+    counts.set(start, (counts.get(start) || 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .map(([start, count]) => ({ start, count }))
+    .filter((item) => item.count >= 3)
+    .sort((a, b) => b.count - a.count || a.start.localeCompare(b.start));
+}
+
+function sentenceLengthDeviation(counts: number[]) {
+  if (!counts.length) {
+    return 0;
+  }
+
+  const average = counts.reduce((sum, count) => sum + count, 0) / counts.length;
+  const variance = counts.reduce((sum, count) => sum + (count - average) ** 2, 0) / counts.length;
+  return Math.sqrt(variance);
+}
+
 function isMissingClientFit(clientFit: BlogAuditClientFit) {
   return clientFit.status === "UNCLEAR" && clientFit.signals.includes("Missing selected client name");
 }
@@ -1312,7 +1546,8 @@ function buildPublishRisks(
   brandFindings: BlogAuditBrandFinding[],
   sources: VastSourceResult[],
   externalEvidence: ExternalEvidenceState,
-  clientFit: BlogAuditClientFit
+  clientFit: BlogAuditClientFit,
+  humanEditCheck: BlogAuditHumanEditCheck
 ) {
   const risks = [];
 
@@ -1354,6 +1589,12 @@ function buildPublishRisks(
 
   if (clientFit.status === "UNCLEAR" && !isMissingClientFit(clientFit)) {
     risks.push(`Client framing needs review: ${clientFit.message}`);
+  }
+
+  if (humanEditCheck.status === "HIGH_RISK") {
+    risks.push(`Human edit risk: ${humanEditCheck.message}`);
+  } else if (humanEditCheck.status === "NEEDS_EDIT") {
+    risks.push(`Human edit recommended: ${humanEditCheck.message}`);
   }
 
   risks.push("Human approval is required before publishing; this endpoint audits only.");

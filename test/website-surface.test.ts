@@ -5,6 +5,7 @@ import {
   normalizeWebsiteSurfaceInput,
   validatePublicWebsiteUrl,
 } from "../lib/seo/website-surface";
+import { normalizeSocialSurfaceInput, runSocialSurfaceScan } from "../lib/seo/social-surface";
 import { runSeoChangeTracker } from "../lib/seo/seo-change-tracker";
 import { buildSeoWatchSlackPayload, notifySeoWatchSlack, shouldSendSeoWatchSlackAlert } from "../lib/seo/slack";
 
@@ -38,6 +39,90 @@ test("website surface input accepts comma and newline lists", () => {
   assert.equal(input.siteUrl, "https://example.com");
   assert.deepEqual(input.pages, ["/pricing", "/blog"]);
   assert.deepEqual(input.expectedText, ["Example", "Pricing"]);
+});
+
+test("social surface input accepts comma and newline profile lists", () => {
+  const input = normalizeSocialSurfaceInput({
+    siteUrl: " https://example.com ",
+    profileUrls: "https://x.com/acme,\nhttps://www.linkedin.com/company/acme",
+  });
+
+  assert.equal(input.siteUrl, "https://example.com");
+  assert.deepEqual(input.profileUrls, ["https://x.com/acme", "https://www.linkedin.com/company/acme"]);
+});
+
+test("social surface discovers homepage profiles and reports blocked coverage", async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+
+    if (url.hostname === "example.com") {
+      return new Response(
+        `<!doctype html>
+        <html>
+          <head><title>Example</title></head>
+          <body>
+            <a href="https://x.com/acme">X</a>
+            <a href="https://www.linkedin.com/company/acme">LinkedIn</a>
+          </body>
+        </html>`,
+        { status: 200, headers: { "content-type": "text/html" } }
+      );
+    }
+
+    if (url.hostname === "x.com") {
+      return new Response(
+        `<!doctype html>
+        <html>
+          <head>
+            <title>ACME on X</title>
+            <meta name="description" content="ACME updates and company news.">
+            <link rel="canonical" href="https://x.com/acme">
+          </head>
+          <body>Public profile metadata.</body>
+        </html>`,
+        { status: 200, headers: { "content-type": "text/html" } }
+      );
+    }
+
+    return new Response("blocked", { status: 403, headers: { "content-type": "text/html" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await runSocialSurfaceScan({ siteUrl: "https://example.com", profileUrls: [] });
+
+    assert.equal(result.summary.discoveredProfiles, 2);
+    assert.equal(result.summary.checkedProfiles, 2);
+    assert.equal(result.summary.blockedProfiles, 1);
+    assert.equal(result.status, "partial");
+    assert.ok(result.profiles.some((profile) => profile.platform === "X" && profile.status === "ok"));
+    assert.ok(result.issues.some((issue) => /blocks public crawl/i.test(issue.title)));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("social surface reports when no supported profile is available", async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async () => {
+    return new Response(
+      `<!doctype html>
+      <html><head><title>No social</title></head><body><a href="/contact">Contact</a></body></html>`,
+      { status: 200, headers: { "content-type": "text/html" } }
+    );
+  }) as typeof fetch;
+
+  try {
+    const result = await runSocialSurfaceScan({ siteUrl: "https://example.com", profileUrls: [] });
+
+    assert.equal(result.status, "failed");
+    assert.equal(result.summary.checkedProfiles, 0);
+    assert.ok(result.issues.some((issue) => /No public social profiles/i.test(issue.title)));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("seo change tracker captures baseline then reports metadata and copy changes", async () => {

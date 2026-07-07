@@ -2665,6 +2665,116 @@ select {
   line-height: 1;
 }
 
+.human-edit-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(86px, auto);
+  gap: 14px;
+  align-items: start;
+  border: 1px solid rgba(17, 18, 20, 0.14);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.64);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+}
+
+.human-edit-summary[data-status="READY"] {
+  border-color: rgba(20, 92, 66, 0.24);
+}
+
+.human-edit-summary[data-status="NEEDS_EDIT"] {
+  border-color: rgba(122, 77, 18, 0.26);
+}
+
+.human-edit-summary[data-status="HIGH_RISK"] {
+  border-color: rgba(159, 31, 23, 0.3);
+}
+
+.human-edit-summary > div:first-child {
+  min-width: 0;
+}
+
+.human-edit-summary span,
+.human-edit-score span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.human-edit-summary strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink);
+  font-size: 1.08rem;
+  line-height: 1.15;
+}
+
+.human-edit-summary p {
+  max-width: 72ch;
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.human-edit-score {
+  min-width: 86px;
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 8px;
+  padding: 10px;
+  text-align: right;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.human-edit-score strong {
+  margin-top: 5px;
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.human-edit-summary ul {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.human-edit-summary li {
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.human-edit-summary li[data-severity="high"] {
+  border-color: rgba(159, 31, 23, 0.22);
+}
+
+.human-edit-summary li[data-severity="medium"] {
+  border-color: rgba(122, 77, 18, 0.22);
+}
+
+.human-edit-summary li strong {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.human-edit-summary li span {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.45;
+  text-transform: none;
+}
+
 .audit-section {
   border-top: 1px solid var(--line);
   padding-top: 14px;
@@ -3699,7 +3809,8 @@ select {
 }
 
 .surface-status,
-.tracker-status {
+.tracker-status,
+.social-status {
   display: inline-flex;
   align-items: center;
   min-height: 30px;
@@ -3715,6 +3826,11 @@ select {
   color: var(--good);
 }
 
+.social-status[data-status="healthy"] {
+  background: rgba(20, 92, 66, 0.12);
+  color: var(--good);
+}
+
 .tracker-status[data-status="baseline"],
 .tracker-status[data-status="unchanged"] {
   background: rgba(20, 92, 66, 0.12);
@@ -3722,26 +3838,31 @@ select {
 }
 
 .surface-status[data-status="warning"],
-.tracker-status[data-status="changed"] {
+.tracker-status[data-status="changed"],
+.social-status[data-status="partial"] {
   background: rgba(122, 77, 18, 0.12);
   color: var(--warn);
 }
 
 .surface-status[data-status="failed"],
-.tracker-status[data-status="failed"] {
+.tracker-status[data-status="failed"],
+.social-status[data-status="blocked"],
+.social-status[data-status="failed"] {
   background: rgba(159, 31, 23, 0.1);
   color: var(--bad);
 }
 
 .surface-score-grid,
-.tracker-score-grid {
+.tracker-score-grid,
+.social-score-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
 .surface-score,
-.tracker-score-grid div {
+.tracker-score-grid div,
+.social-score-grid div {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
@@ -3749,14 +3870,16 @@ select {
 }
 
 .surface-score strong,
-.tracker-score-grid strong {
+.tracker-score-grid strong,
+.social-score-grid strong {
   display: block;
   margin-top: 6px;
   font-size: 2rem;
   line-height: 1;
 }
 
-.tracker-score-grid span {
+.tracker-score-grid span,
+.social-score-grid span {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 820;
@@ -3788,6 +3911,13 @@ select {
   align-items: start;
 }
 
+.social-result-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: 14px;
+  align-items: start;
+}
+
 .tracker-result-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
@@ -3797,21 +3927,54 @@ select {
 
 .surface-page-list,
 .surface-issue-list,
+.social-profile-list,
+.social-issue-list,
 .tracker-change-list,
 .tracker-page-list,
-.seo-tracker-results {
+.seo-tracker-results,
+.social-results {
   display: grid;
   gap: 10px;
 }
 
 .surface-page-row,
 .surface-issue,
+.social-profile-row,
 .tracker-change,
 .tracker-page-row {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
   background: rgba(255, 255, 255, 0.62);
+}
+
+.social-profile-row[data-status="blocked"],
+.social-profile-row[data-status="error"] {
+  border-color: rgba(122, 77, 18, 0.2);
+}
+
+.social-profile-row p {
+  margin: 8px 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.social-signal-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.social-signal-row span {
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 780;
+  line-height: 1;
 }
 
 .surface-page-row,
@@ -5276,12 +5439,17 @@ select {
     grid-template-columns: 1fr;
   }
 
-  .client-fit-summary {
+  .client-fit-summary,
+  .human-edit-summary {
     grid-template-columns: 1fr;
   }
 
   .client-fit-summary ul {
     justify-content: flex-start;
+  }
+
+  .human-edit-score {
+    text-align: left;
   }
 
   .audit-section-header {
@@ -5541,6 +5709,7 @@ select {
   .access-field-grid,
   .credentialed-source-grid,
   .surface-result-grid,
+  .social-result-grid,
   .tracker-result-grid,
   .two-col,
   .first-client-form,
@@ -5718,7 +5887,8 @@ select {
   }
 
   .access-methods,
-  .surface-score-grid {
+  .surface-score-grid,
+  .social-score-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

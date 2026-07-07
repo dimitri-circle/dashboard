@@ -435,9 +435,27 @@ test("blog audit blocks drafts framed around a different company than the active
   );
 
   assert.equal(report.clientFit.status, "MISMATCH");
+  assert.equal(report.humanEditCheck.status, "HIGH_RISK");
   assert.equal(report.recommendation, "DO_NOT_PUBLISH");
   assert.ok(report.brandScore <= 54);
   assert.ok(report.publishRisks.some((risk) => /client framing mismatch/i.test(risk)));
+});
+
+test("blog audit reports human edit risk without claiming definitive AI detection", async () => {
+  const report = await auditBlogDraft(
+    {
+      title: "Generic edit check",
+      format: "plain_text",
+      clientName: "Vast.ai",
+      content:
+        "Vast.ai offers on-demand access to GPUs from data centers and independent hosts worldwide. In today's fast-paced AI landscape, teams must unlock cutting-edge infrastructure and leverage robust tools. This transformative platform helps builders stay at the forefront while delivering seamless workflows.",
+    },
+    { sources: auditSourceFixture }
+  );
+
+  assert.notEqual(report.humanEditCheck.status, "READY");
+  assert.ok(report.humanEditCheck.signals.some((signal) => /generic/i.test(signal.label)));
+  assert.match(report.humanEditCheck.message, /human|major/i);
 });
 
 test("blog audit form carries tone profile JSON into the server payload", async () => {

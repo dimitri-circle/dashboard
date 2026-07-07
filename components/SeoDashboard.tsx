@@ -11,7 +11,7 @@ type FeatureKey = "overview" | "brain" | "watch" | "integrations" | "analysis" |
 type FeatureFlags = Record<FeatureKey, boolean>;
 type AppRole = "admin" | "operator" | "viewer";
 type NavIconName = "clients" | "admin" | "overview" | "brain" | "watch" | "tools" | "analysis" | "insights" | "menu" | "close" | "signout";
-type WebsiteWatchTool = "surface" | "tracker" | "visitors" | "jobIndex" | "deep";
+type WebsiteWatchTool = "surface" | "tracker" | "social" | "visitors" | "jobIndex" | "deep";
 type DeepAuditAccess = "public" | "vercel" | "basic" | "login" | "custom";
 type ToastNoticeState = {
   id: number;
@@ -168,11 +168,23 @@ type BlogAuditClientFit = {
   signals: string[];
 };
 
+type BlogAuditHumanEditCheck = {
+  status: "READY" | "NEEDS_EDIT" | "HIGH_RISK";
+  score: number;
+  message: string;
+  signals: Array<{
+    label: string;
+    severity: "low" | "medium" | "high";
+    detail: string;
+  }>;
+};
+
 type BlogAuditReport = {
   recommendation: "PASS" | "PASS_WITH_EDITS" | "DO_NOT_PUBLISH";
   truthScore: number;
   brandScore: number;
   clientFit?: BlogAuditClientFit;
+  humanEditCheck?: BlogAuditHumanEditCheck;
   summary: string;
   claims: Array<{
     claim: string;
@@ -290,6 +302,32 @@ type WebsiteSurfaceResult = {
     low: number;
   };
   pages: WebsiteSurfacePageResult[];
+  issues: WebsiteSurfaceIssue[];
+};
+
+type SocialSurfaceProfile = {
+  platform: string;
+  url: string;
+  status: "ok" | "blocked" | "error";
+  httpStatus: number | null;
+  title: string | null;
+  description: string | null;
+  canonical: string | null;
+  signals: string[];
+  error?: string;
+};
+
+type SocialSurfaceResult = {
+  siteUrl: string;
+  checkedAt: string;
+  status: "healthy" | "partial" | "blocked" | "failed";
+  summary: {
+    discoveredProfiles: number;
+    checkedProfiles: number;
+    blockedProfiles: number;
+    issues: number;
+  };
+  profiles: SocialSurfaceProfile[];
   issues: WebsiteSurfaceIssue[];
 };
 
@@ -556,6 +594,7 @@ const navItems: Array<{ id: View; label: string; description: string; icon: NavI
 const websiteWatchTools: Array<{ id: WebsiteWatchTool; label: string; description: string }> = [
   { id: "surface", label: "Surface Check", description: "Public page review" },
   { id: "tracker", label: "Baseline Watch", description: "Public site changes" },
+  { id: "social", label: "Social Surface", description: "Public profile scan" },
   { id: "visitors", label: "Viewership", description: "Visitor and bot telemetry" },
   { id: "jobIndex", label: "Vast Job Index", description: "Automation WIP" },
   { id: "deep", label: "Deep Audit", description: "Protected access setup" },
@@ -820,6 +859,8 @@ export function SeoDashboard() {
   const [analyzing, setAnalyzing] = useState(false);
   const [surfaceChecking, setSurfaceChecking] = useState(false);
   const [surfaceResult, setSurfaceResult] = useState<WebsiteSurfaceResult | null>(null);
+  const [socialScanning, setSocialScanning] = useState(false);
+  const [socialResult, setSocialResult] = useState<SocialSurfaceResult | null>(null);
   const [seoTracking, setSeoTracking] = useState(false);
   const [seoTrackerBaseline, setSeoTrackerBaseline] = useState<SeoChangeTrackerBaseline | null>(null);
   const [seoTrackerResult, setSeoTrackerResult] = useState<SeoChangeTrackerResult | null>(null);
@@ -932,6 +973,8 @@ export function SeoDashboard() {
         setInsights([]);
         setCompetitiveAnalyses([]);
         setMetricSnapshots([]);
+        setSurfaceResult(null);
+        setSocialResult(null);
         setSeoTrackerBaseline(null);
         setSeoTrackerResult(null);
         setSeoChangeRuns([]);
@@ -1031,6 +1074,7 @@ export function SeoDashboard() {
     setMetricSnapshots([]);
     setCompetitiveAnalyses([]);
     setSurfaceResult(null);
+    setSocialResult(null);
     setSeoTrackerBaseline(null);
     setSeoTrackerResult(null);
     setSeoChangeRuns([]);
@@ -1295,6 +1339,25 @@ export function SeoDashboard() {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to run surface check." });
     } finally {
       setSurfaceChecking(false);
+    }
+  }
+
+  async function runSocialSurfaceScan(payload: { siteUrl: string; profileUrls: string }) {
+    try {
+      setSocialScanning(true);
+      const body = await api<{ result: SocialSurfaceResult }>(clientId, "/api/seo/website-watch/social-surface", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setSocialResult(body.result);
+      setNotice({
+        type: body.result.status === "failed" || body.result.status === "blocked" ? "error" : body.result.status === "partial" ? "info" : "success",
+        message: `Social Surface checked ${body.result.summary.checkedProfiles} profile${body.result.summary.checkedProfiles === 1 ? "" : "s"} with ${body.result.summary.issues} issue${body.result.summary.issues === 1 ? "" : "s"}.`,
+      });
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to run Social Surface scan." });
+    } finally {
+      setSocialScanning(false);
     }
   }
 
@@ -1620,12 +1683,15 @@ export function SeoDashboard() {
                 aiAnalysisConnected={Boolean(latestByProvider.openai || seoHealthChecks?.openai_api_key)}
                 onResetSeoTrackerBaseline={resetSeoTrackerBaseline}
                 onRunSeoChangeTracker={runSeoChangeTracker}
+                onRunSocialSurfaceScan={runSocialSurfaceScan}
                 onRunSurfaceCheck={runWebsiteSurfaceCheck}
                 onSelectTool={setActiveWatchTool}
                 onConnectApiKey={openOpenAiSetup}
                 seoChangeRuns={seoChangeRuns}
                 visitorIntelligence={visitorIntelligence}
                 slackConnected={Boolean(seoHealthChecks?.slack_webhook)}
+                socialResult={socialResult}
+                socialScanning={socialScanning}
                 seoTrackerStorageError={seoTrackerStorageError}
                 seoTrackerStorageReady={seoTrackerStorageReady}
                 seoTrackerBaseline={seoTrackerBaseline}
@@ -3688,6 +3754,7 @@ function AuditReportView({ report }: { report: BlogAuditReport }) {
 
       <ExternalEvidenceSummary evidence={report.externalEvidence} />
       <ClientFitSummary brandFindings={report.brandFindings} fit={report.clientFit} />
+      <HumanEditSummary check={report.humanEditCheck} />
 
       <p className="audit-summary">{report.summary}</p>
 
@@ -3812,6 +3879,44 @@ function ClientFitSummary({ brandFindings, fit }: { brandFindings: BlogAuditRepo
   );
 }
 
+function HumanEditSummary({ check }: { check?: BlogAuditHumanEditCheck }) {
+  const status = check?.status || "UNCHECKED";
+  const label =
+    status === "READY"
+      ? "Editor-ready signal"
+      : status === "HIGH_RISK"
+        ? "Rewrite risk"
+        : status === "NEEDS_EDIT"
+          ? "Needs human pass"
+          : "Not checked";
+  const message = check?.message || "Re-run the audit to check AI-likeness risk, generic language, evidence density, and client-specific framing.";
+  const signals = check?.signals || [];
+
+  return (
+    <div className="human-edit-summary" data-status={status}>
+      <div>
+        <span>Human Edit Check</span>
+        <strong>{label}</strong>
+        <p>{message} This is not a definitive AI detector.</p>
+      </div>
+      <div className="human-edit-score">
+        <span>Score</span>
+        <strong>{check ? check.score : "—"}</strong>
+      </div>
+      {signals.length ? (
+        <ul>
+          {signals.slice(0, 4).map((signal) => (
+            <li data-severity={signal.severity} key={`${signal.label}-${signal.detail}`}>
+              <strong>{signal.label}</strong>
+              <span>{signal.detail}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function ExternalEvidenceSummary({ evidence }: { evidence?: BlogAuditExternalEvidenceSummary }) {
   if (!evidence) {
     return null;
@@ -3899,6 +4004,9 @@ function reportToMarkdown(report: BlogAuditReport) {
     `Brand score: ${report.brandScore}`,
     `Claims: ${report.claims.length}`,
     report.clientFit ? `Client fit: ${formatClientFitStatus(report.clientFit.status)} - ${report.clientFit.message}` : "",
+    report.humanEditCheck
+      ? `Human edit check: ${formatHumanEditStatus(report.humanEditCheck.status)} (${report.humanEditCheck.score}) - ${report.humanEditCheck.message}`
+      : "",
     "",
     report.summary,
     "",
@@ -3931,6 +4039,12 @@ function reportToMarkdown(report: BlogAuditReport) {
   }
 
   return lines.filter((line, index) => line || lines[index - 1]).join("\n");
+}
+
+function formatHumanEditStatus(status: BlogAuditHumanEditCheck["status"]) {
+  if (status === "READY") return "Editor-ready signal";
+  if (status === "HIGH_RISK") return "Rewrite risk";
+  return "Needs human pass";
 }
 
 const deepAuditGuidance: Record<
@@ -4021,10 +4135,13 @@ function WebsiteWatchView({
   onConnectApiKey,
   onResetSeoTrackerBaseline,
   onRunSeoChangeTracker,
+  onRunSocialSurfaceScan,
   onRunSurfaceCheck,
   onSelectTool,
   seoChangeRuns,
   slackConnected,
+  socialResult,
+  socialScanning,
   visitorIntelligence,
   seoTrackerBaseline,
   seoTrackerStorageError,
@@ -4041,10 +4158,13 @@ function WebsiteWatchView({
   onConnectApiKey: () => void;
   onResetSeoTrackerBaseline: () => void;
   onRunSeoChangeTracker: (payload: { siteUrl: string; pages: string }) => void;
+  onRunSocialSurfaceScan: (payload: { siteUrl: string; profileUrls: string }) => void;
   onRunSurfaceCheck: (payload: { siteUrl: string; pages: string; expectedText: string }) => void;
   onSelectTool: (tool: WebsiteWatchTool) => void;
   seoChangeRuns: SeoChangeRun[];
   slackConnected: boolean;
+  socialResult: SocialSurfaceResult | null;
+  socialScanning: boolean;
   visitorIntelligence: VisitorIntelligenceSummary;
   seoTrackerBaseline: SeoChangeTrackerBaseline | null;
   seoTrackerStorageError: string | null;
@@ -4058,9 +4178,10 @@ function WebsiteWatchView({
   const [watchSiteUrl, setWatchSiteUrl] = useState(latestSiteUrl || DEFAULT_WATCH_SITE_URL);
   const [priorityPages, setPriorityPages] = useState(DEFAULT_PRIORITY_PAGES.join("\n"));
   const [customPriorityPage, setCustomPriorityPage] = useState("");
+  const [socialProfileUrls, setSocialProfileUrls] = useState("");
   const guidance = deepAuditGuidance[accessMethod];
   const normalizedPriorityPages = priorityPagesText(priorityPages) || DEFAULT_PRIORITY_PAGES.join("\n");
-  const lastRunAt = seoChangeRuns[0]?.checked_at || seoTrackerResult?.checkedAt || surfaceResult?.checkedAt || null;
+  const lastRunAt = seoChangeRuns[0]?.checked_at || seoTrackerResult?.checkedAt || socialResult?.checkedAt || surfaceResult?.checkedAt || null;
   const baselineStatus = !seoTrackerStorageReady
     ? "Setup needed"
     : seoTrackerBaseline
@@ -4096,6 +4217,15 @@ function WebsiteWatchView({
     });
   }
 
+  function handleSocialSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    onRunSocialSurfaceScan({
+      siteUrl: String(formData.get("siteUrl") || watchSiteUrl),
+      profileUrls: String(formData.get("profileUrls") || socialProfileUrls),
+    });
+  }
+
   function runSurfaceFromCommand() {
     onSelectTool("surface");
     onRunSurfaceCheck({
@@ -4110,6 +4240,14 @@ function WebsiteWatchView({
     onRunSeoChangeTracker({
       siteUrl: watchSiteUrl,
       pages: normalizedPriorityPages,
+    });
+  }
+
+  function runSocialFromCommand() {
+    onSelectTool("social");
+    onRunSocialSurfaceScan({
+      siteUrl: watchSiteUrl,
+      profileUrls: socialProfileUrls,
     });
   }
 
@@ -4146,6 +4284,11 @@ function WebsiteWatchView({
         <WatchStatusPill label="AI Analysis" value={aiAnalysisConnected ? "Connected" : "Off"} state={aiAnalysisConnected ? "ready" : "missing"} />
         <WatchStatusPill label="Slack" value={slackConnected ? "Connected" : "Not Connected"} state={slackConnected ? "ready" : "missing"} />
         <WatchStatusPill label="Baseline" value={baselineStatus} state={seoTrackerBaseline && seoTrackerStorageReady ? "ready" : "missing"} />
+        <WatchStatusPill
+          label="Social"
+          value={socialResult ? socialResult.status : "Not run"}
+          state={socialResult ? (socialResult.status === "healthy" ? "ready" : "missing") : "idle"}
+        />
         <WatchStatusPill label="Viewership" value={visitorStatus} state={visitorIntelligence.totalEvents ? "ready" : visitorIntelligence.storageReady === false ? "missing" : "idle"} />
         <WatchStatusPill label="Job Index" value="WIP" state="idle" />
         <WatchStatusPill label="Last Run" value={lastRunAt ? new Date(lastRunAt).toLocaleString() : "Never"} state={lastRunAt ? "ready" : "idle"} />
@@ -4175,6 +4318,9 @@ function WebsiteWatchView({
             <button className="button" type="button" onClick={runBaselineFromCommand} disabled={seoTracking}>
               {seoTracking ? "Capturing..." : "Capture Baseline"}
             </button>
+            <button className="button" type="button" onClick={runSocialFromCommand} disabled={socialScanning}>
+              {socialScanning ? "Scanning..." : "Scan Social"}
+            </button>
             <button className="button" type="button" disabled title="Scheduling needs the next backend runner connection.">
               Schedule Watch
             </button>
@@ -4201,6 +4347,15 @@ function WebsiteWatchView({
           cta={seoTracking ? "Capturing..." : "Capture baseline"}
           onClick={runBaselineFromCommand}
           disabled={seoTracking}
+        />
+        <WatchModeCard
+          active={activeTool === "social"}
+          title="Social Surface"
+          subtitle="Public social crawl"
+          description="Find crawlable profile metadata and blocked public social surfaces."
+          cta={socialScanning ? "Scanning..." : "Open scanner"}
+          onClick={() => onSelectTool("social")}
+          disabled={socialScanning}
         />
         <WatchModeCard
           active={activeTool === "visitors"}
@@ -4376,6 +4531,54 @@ function WebsiteWatchView({
           </>
         ) : null}
 
+        {activeTool === "social" ? (
+          <section className="panel watch-run-panel social-surface-panel" aria-labelledby="social-surface-title">
+            <div className="section-heading">
+              <div>
+                <span className="eyebrow">Social Surface</span>
+                <h3 id="social-surface-title">Scan public social profiles</h3>
+                <p>Discover supported social links from the homepage, then check whether public metadata is visible or blocked.</p>
+              </div>
+            </div>
+
+            <form className="watch-form" onSubmit={handleSocialSubmit}>
+              <label>
+                Site URL
+                <input
+                  name="siteUrl"
+                  type="url"
+                  placeholder="https://example.com"
+                  value={watchSiteUrl}
+                  onChange={(event) => setWatchSiteUrl(event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Social profile URLs
+                <span className="field-helper">Optional. Leave blank to discover supported social links from the homepage.</span>
+                <textarea
+                  name="profileUrls"
+                  value={socialProfileUrls}
+                  onChange={(event) => setSocialProfileUrls(event.target.value)}
+                  placeholder={"https://x.com/example\nhttps://www.linkedin.com/company/example"}
+                  rows={5}
+                />
+              </label>
+              <div className="tracker-baseline-note" data-ready={Boolean(socialResult)}>
+                <strong>{socialResult ? "Latest social scan available" : "Public-only scan"}</strong>
+                <span>
+                  {socialResult
+                    ? `Last checked ${socialResult.summary.checkedProfiles} profile${socialResult.summary.checkedProfiles === 1 ? "" : "s"} at ${new Date(socialResult.checkedAt).toLocaleString()}.`
+                    : "This does not log into social platforms. Blocked or JavaScript-heavy profiles are reported as partial coverage."}
+                </span>
+              </div>
+              <button className="button button-primary" type="submit" disabled={socialScanning}>
+                {socialScanning ? "Scanning social profiles..." : "Run Social Surface Scan"}
+              </button>
+            </form>
+          </section>
+        ) : null}
+
         {activeTool === "jobIndex" ? <VastJobIndexAutomationPanel onOpenBaseline={() => onSelectTool("tracker")} /> : null}
 
         {activeTool === "visitors" ? (
@@ -4459,6 +4662,7 @@ function WebsiteWatchView({
 
       {activeTool === "surface" && surfaceResult ? <WebsiteSurfaceResults result={surfaceResult} /> : null}
       {activeTool === "tracker" && seoTrackerResult ? <SeoChangeTrackerResults result={seoTrackerResult} /> : null}
+      {activeTool === "social" && socialResult ? <SocialSurfaceResults result={socialResult} /> : null}
     </PageWorkspace>
   );
 }
@@ -5008,6 +5212,91 @@ function SeoChangeTrackerResults({ result }: { result: SeoChangeTrackerResult })
   );
 }
 
+function SocialSurfaceResults({ result }: { result: SocialSurfaceResult }) {
+  const topIssues = result.issues.slice(0, 8);
+
+  return (
+    <section className="panel social-results" aria-labelledby="social-results-title">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">Latest social scan</span>
+          <h3 id="social-results-title">{socialSurfaceStatusLabel(result.status)}</h3>
+          <p>
+            Checked {result.summary.checkedProfiles} public profile{result.summary.checkedProfiles === 1 ? "" : "s"} at{" "}
+            {new Date(result.checkedAt).toLocaleString()}.
+          </p>
+        </div>
+        <span className="social-status" data-status={result.status}>
+          {result.status}
+        </span>
+      </div>
+
+      <div className="social-score-grid" aria-label="Social scan counts">
+        <div>
+          <span>Discovered</span>
+          <strong>{result.summary.discoveredProfiles}</strong>
+        </div>
+        <div>
+          <span>Checked</span>
+          <strong>{result.summary.checkedProfiles}</strong>
+        </div>
+        <div>
+          <span>Blocked</span>
+          <strong>{result.summary.blockedProfiles}</strong>
+        </div>
+        <div>
+          <span>Issues</span>
+          <strong>{result.summary.issues}</strong>
+        </div>
+      </div>
+
+      <div className="social-result-grid">
+        <div className="social-profile-list">
+          <h4>Profiles checked</h4>
+          {result.profiles.length ? (
+            result.profiles.map((profile) => (
+              <article className="social-profile-row" data-status={profile.status} key={profile.url}>
+                <div className="card-top">
+                  <span className="source-type-pill">{profile.platform}</span>
+                  <small>{profile.httpStatus || profile.status}</small>
+                </div>
+                <strong>{profile.title || profile.url}</strong>
+                <p>{profile.description || profile.error || "No public description was exposed."}</p>
+                <small>{profile.url}</small>
+                {profile.signals.length ? (
+                  <div className="social-signal-row">
+                    {profile.signals.slice(0, 3).map((signal) => (
+                      <span key={signal}>{signal}</span>
+                    ))}
+                  </div>
+                ) : null}
+              </article>
+            ))
+          ) : (
+            <div className="empty-state">No supported public social profiles were found.</div>
+          )}
+        </div>
+
+        <div className="social-issue-list">
+          <h4>Coverage notes</h4>
+          {topIssues.length ? (
+            topIssues.map((issue) => (
+              <article className="surface-issue" data-severity={issue.severity} key={`${issue.title}-${issue.url}-${issue.detail}`}>
+                <span>{issue.severity}</span>
+                <strong>{issue.title}</strong>
+                <p>{issue.detail}</p>
+                {issue.url ? <small>{issue.url}</small> : null}
+              </article>
+            ))
+          ) : (
+            <div className="empty-state">No social surface issues were found in this run.</div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function surfaceStatusLabel(status: WebsiteSurfaceResult["status"]) {
   if (status === "healthy") return "Surface looks healthy";
   if (status === "failed") return "Critical surface issue found";
@@ -5019,6 +5308,13 @@ function seoChangeStatusLabel(status: SeoChangeTrackerResult["status"]) {
   if (status === "unchanged") return "No SEO changes found";
   if (status === "failed") return "SEO crawl failed";
   return "SEO changes found";
+}
+
+function socialSurfaceStatusLabel(status: SocialSurfaceResult["status"]) {
+  if (status === "healthy") return "Social surfaces look healthy";
+  if (status === "blocked") return "Social scan was blocked";
+  if (status === "failed") return "No social profile coverage found";
+  return "Social surface has partial coverage";
 }
 
 function SurfaceScore({
