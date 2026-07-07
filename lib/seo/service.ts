@@ -1049,6 +1049,19 @@ export async function updateBrainReportStatus(scope: SeoTenantScope, reportId: s
   return safeBrainReport(next);
 }
 
+export async function clearBrainReports(scope: SeoTenantScope) {
+  const { brainReports } = await getSeoCollections();
+  const result = await brainReports.deleteMany({ user_id: scope.userId });
+  await recordAuditEvent({
+    scope,
+    action: "brain.reports.cleared",
+    entityType: "system",
+    metadata: { deletedCount: result.deletedCount },
+  });
+
+  return result.deletedCount;
+}
+
 function clientDedupeKey(client: SeoClient) {
   return client.name
     .trim()

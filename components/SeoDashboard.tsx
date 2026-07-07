@@ -30,6 +30,15 @@ type SetupNotification = {
   actionLabel: string;
 };
 
+type ChangelogEntry = {
+  id: string;
+  date: string;
+  dateTime: string;
+  title: string;
+  summary: string;
+  tags: string[];
+};
+
 type PageHeroStat = {
   label: string;
   value: string;
@@ -557,6 +566,50 @@ const AI_SETUP_NOTIFICATION: SetupNotification = {
   message: AI_SETUP_MESSAGE,
   actionLabel: "Connect API Key",
 };
+
+const productChangelog: ChangelogEntry[] = [
+  {
+    id: "brain-audit-modal-flow",
+    date: "Jul 7, 2026",
+    dateTime: "2026-07-07",
+    title: "Audit modal workflow",
+    summary: "Running audits now open a focused incoming-report modal, completed reports open in a dismissible modal, and admins can clear saved report history.",
+    tags: ["Br(AI)N", "Workflow"],
+  },
+  {
+    id: "brain-workbench-layout",
+    date: "Jul 7, 2026",
+    dateTime: "2026-07-07",
+    title: "Cleaner Br(AI)N workbench",
+    summary: "The draft review screen now uses a full-width workbench, compact status strip, collapsed context drawer, and toast-based workspace updates.",
+    tags: ["Br(AI)N", "UI"],
+  },
+  {
+    id: "brain-editorial-context",
+    date: "Jul 7, 2026",
+    dateTime: "2026-07-07",
+    title: "Client context and tone profiles",
+    summary: "Br(AI)N can save editorial notes, approved sources, forbidden claims, tone rules, and generated style profiles for each client workspace.",
+    tags: ["Br(AI)N", "Context"],
+  },
+  {
+    id: "brain-report-history",
+    date: "Jul 7, 2026",
+    dateTime: "2026-07-07",
+    title: "Audit history and report workflow",
+    summary: "Reports are saved per client with status controls, markdown export, source handling, and a new-audit flow that keeps previous reports available.",
+    tags: ["Reports", "Workflow"],
+  },
+  {
+    id: "website-watch-baselines",
+    date: "Jun 30, 2026",
+    dateTime: "2026-06-30",
+    title: "Website Watch baselines",
+    summary: "SEO Watch can capture public page baselines, compare future crawls, and keep history for metadata, copy, and technical changes.",
+    tags: ["Website Watch", "Internal"],
+  },
+];
+
 const DEFAULT_WATCH_SITE_URL = "https://vast.ai";
 const DEFAULT_PRIORITY_PAGES = ["/", "/pricing", "/services", "/blog", "/contact"];
 
@@ -1384,6 +1437,7 @@ export function SeoDashboard() {
         </div>
 
         <NotificationInbox
+          changelogEntries={productChangelog}
           notifications={setupNotifications}
           onConnectOpenAi={openOpenAiSetup}
           onToggle={() => setNotificationInboxOpen((current) => !current)}
@@ -1477,6 +1531,7 @@ export function SeoDashboard() {
 
       <ToastNotice toast={toastNotice} />
       <NotificationInbox
+        changelogEntries={productChangelog}
         notifications={setupNotifications}
         onConnectOpenAi={openOpenAiSetup}
         onToggle={() => setNotificationInboxOpen((current) => !current)}
@@ -1548,7 +1603,7 @@ export function SeoDashboard() {
               />
             ) : null}
 
-            {view === "brain" ? <BrainView activeClient={activeClient} clientId={clientId} /> : null}
+            {view === "brain" ? <BrainView activeClient={activeClient} clientId={clientId} currentUser={currentUser} /> : null}
 
             {view === "watch" ? (
               <WebsiteWatchView
@@ -1610,24 +1665,28 @@ export function SeoDashboard() {
 }
 
 function NotificationInbox({
+  changelogEntries,
   notifications,
   onConnectOpenAi,
   onToggle,
   open,
   variant,
 }: {
+  changelogEntries: ChangelogEntry[];
   notifications: SetupNotification[];
   onConnectOpenAi: () => void;
   onToggle: () => void;
   open: boolean;
   variant: "sidebar" | "mobile";
 }) {
-  if (!notifications.length) {
+  if (!notifications.length && !changelogEntries.length) {
     return null;
   }
 
-  const panelId = `setup-inbox-${variant}`;
-  const itemCountLabel = `${notifications.length} open item${notifications.length === 1 ? "" : "s"}`;
+  const panelId = `dashboard-inbox-${variant}`;
+  const updateCountLabel = `${changelogEntries.length} update${changelogEntries.length === 1 ? "" : "s"}`;
+  const openItemLabel = `${notifications.length} setup item${notifications.length === 1 ? "" : "s"}`;
+  const itemCountLabel = notifications.length ? `${openItemLabel}, ${updateCountLabel}` : updateCountLabel;
 
   return (
     <div className={`notification-inbox notification-inbox-${variant}`} data-open={open}>
@@ -1637,39 +1696,68 @@ function NotificationInbox({
         aria-controls={panelId}
         aria-expanded={open}
         aria-haspopup="dialog"
-        aria-label={`${open ? "Collapse" : "Expand"} setup inbox, ${itemCountLabel}`}
-        title={open ? "Collapse setup inbox" : "Expand setup inbox"}
+        aria-label={`${open ? "Collapse" : "Expand"} dashboard inbox, ${itemCountLabel}`}
+        title={open ? "Collapse dashboard inbox" : "Expand dashboard inbox"}
         onClick={onToggle}
       >
         <span className="notification-inbox-trigger-label" aria-hidden="true">
           Inbox
         </span>
         <span className="notification-inbox-trigger-meta" aria-hidden="true">
-          <strong>{notifications.length}</strong>
+          <strong>{notifications.length || changelogEntries.length}</strong>
           <span className="notification-inbox-caret" />
         </span>
       </button>
       {open ? (
-        <section className="notification-inbox-panel" id={panelId} role="dialog" aria-label="Setup inbox">
+        <section className="notification-inbox-panel" id={panelId} role="dialog" aria-label="Dashboard inbox">
           <div className="notification-inbox-heading">
-            <span className="eyebrow">Setup inbox</span>
-            <strong>{itemCountLabel}</strong>
+            <span className="eyebrow">Dashboard inbox</span>
+            <strong>{notifications.length ? openItemLabel : "Product changelog"}</strong>
+            <p>{notifications.length ? "Handle setup items first, then review recent product updates." : "Recent changes shipped to this dashboard."}</p>
           </div>
-          <div className="notification-inbox-list">
-            {notifications.map((notification) => (
-              <article className="notification-inbox-item" data-type={notification.type} key={notification.id}>
-                <div>
-                  <strong>{notification.title}</strong>
-                  <p>{notification.message}</p>
-                </div>
-                {notification.id === "openai" ? (
-                  <button className="button button-compact" type="button" onClick={onConnectOpenAi}>
-                    {notification.actionLabel}
-                  </button>
-                ) : null}
-              </article>
-            ))}
-          </div>
+          {notifications.length ? (
+            <div className="notification-inbox-list" aria-label="Setup items">
+              {notifications.map((notification) => (
+                <article className="notification-inbox-item" data-type={notification.type} key={notification.id}>
+                  <div>
+                    <strong>{notification.title}</strong>
+                    <p>{notification.message}</p>
+                  </div>
+                  {notification.id === "openai" ? (
+                    <button className="button button-compact" type="button" onClick={onConnectOpenAi}>
+                      {notification.actionLabel}
+                    </button>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          ) : null}
+          {changelogEntries.length ? (
+            <div className="changelog-list" aria-label="Product changelog">
+              <div className="changelog-list-heading">
+                <span className="eyebrow">Product changelog</span>
+                <small>{updateCountLabel}</small>
+              </div>
+              {changelogEntries.map((entry, index) => (
+                <article className="changelog-item" data-latest={index === 0} key={entry.id}>
+                  <div className="changelog-marker" aria-hidden="true" />
+                  <div className="changelog-copy">
+                    <div className="changelog-meta">
+                      <time dateTime={entry.dateTime}>{entry.date}</time>
+                      {index === 0 ? <span>Latest</span> : null}
+                    </div>
+                    <strong>{entry.title}</strong>
+                    <p>{entry.summary}</p>
+                    <div className="changelog-tags" aria-label="Change tags">
+                      {entry.tags.map((tag) => (
+                        <span key={`${entry.id}-${tag}`}>{tag}</span>
+                      ))}
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : null}
         </section>
       ) : null}
     </div>
@@ -2711,7 +2799,7 @@ function GraphCard({ helper, label, percent, value }: { helper: string; label: s
   );
 }
 
-function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId: string }) {
+function BrainView({ activeClient, clientId, currentUser }: { activeClient?: Client; clientId: string; currentUser: CurrentUser | null }) {
   const [auditReport, setAuditReport] = useState<BlogAuditReport | null>(null);
   const [auditHistory, setAuditHistory] = useState<BlogAuditHistoryItem[]>([]);
   const [auditing, setAuditing] = useState(false);
@@ -2731,8 +2819,13 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
   const [toneProfile, setToneProfile] = useState<BrainToneProfile | null>(null);
   const [generatingToneProfile, setGeneratingToneProfile] = useState(false);
   const [reportNotice, setReportNotice] = useState<string | null>(null);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [clearHistoryDialogOpen, setClearHistoryDialogOpen] = useState(false);
+  const [clearHistoryConfirm, setClearHistoryConfirm] = useState("");
+  const [clearingReports, setClearingReports] = useState(false);
   const auditFormRef = useRef<HTMLFormElement | null>(null);
   const auditTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const isAdmin = currentUser?.role === "admin";
 
   useEffect(() => {
     let cancelled = false;
@@ -2766,6 +2859,9 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
     setAuditReport(null);
     setActiveReportId(null);
     setReportNotice(null);
+    setReportModalOpen(false);
+    setClearHistoryDialogOpen(false);
+    setClearHistoryConfirm("");
     loadBrainState();
 
     return () => {
@@ -2800,7 +2896,19 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
         body: formData,
       });
       const text = await response.text();
-      const body = text ? JSON.parse(text) : {};
+      let body: {
+        error?: string;
+        report?: BlogAuditReport;
+        savedReport?: BrainSavedReport | null;
+        storageReady?: boolean;
+        storageError?: string | null;
+      } = {};
+
+      try {
+        body = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(text.slice(0, 220) || `Audit failed with HTTP ${response.status}.`);
+      }
 
       if (!response.ok) {
         throw new Error(body.error || "Unable to audit blog draft.");
@@ -2822,6 +2930,7 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
       setStorageReady(typeof body.storageReady === "boolean" ? body.storageReady : true);
       setStorageError(typeof body.storageError === "string" ? body.storageError : null);
       setAuditHistory((items) => [historyItem, ...items.filter((item) => item.id !== historyItem.id)].slice(0, 12));
+      setReportModalOpen(true);
     } catch (error) {
       setAuditError(error instanceof Error ? error.message : "Unable to audit blog draft.");
     } finally {
@@ -2834,9 +2943,36 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
     setAuditError(null);
     setActiveReportId(null);
     setReportNotice(null);
+    setReportModalOpen(false);
     setSelectedFileName(null);
     auditFormRef.current?.reset();
     window.setTimeout(() => auditTextareaRef.current?.focus(), 0);
+  }
+
+  async function clearReportHistory() {
+    if (!isAdmin || clearHistoryConfirm.trim().toUpperCase() !== "CLEAR") {
+      return;
+    }
+
+    try {
+      setClearingReports(true);
+      setAuditError(null);
+      const body = await api<{ ok: boolean; deletedCount: number }>(clientId, "/api/blog-audit/reports", {
+        method: "DELETE",
+        body: JSON.stringify({ confirm: "CLEAR" }),
+      });
+      setAuditHistory([]);
+      setAuditReport(null);
+      setActiveReportId(null);
+      setReportModalOpen(false);
+      setClearHistoryDialogOpen(false);
+      setClearHistoryConfirm("");
+      setReportNotice(`Cleared ${body.deletedCount} saved report${body.deletedCount === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setAuditError(error instanceof Error ? error.message : "Unable to clear report history.");
+    } finally {
+      setClearingReports(false);
+    }
   }
 
   async function saveContext() {
@@ -2975,215 +3111,211 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
         />
       </div>
 
-      {!auditReport ? (
-        <section className="panel blog-audit-panel" aria-labelledby="blog-audit-form-title">
-          <div className="section-heading">
-            <div>
-              <span className="eyebrow">Draft input</span>
-              <h3 id="blog-audit-form-title">Upload or paste a blog draft.</h3>
+      <section className="panel blog-audit-panel" aria-labelledby="blog-audit-form-title">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Draft input</span>
+            <h3 id="blog-audit-form-title">Upload or paste a blog draft.</h3>
+          </div>
+        </div>
+
+        <form className="blog-audit-form" ref={auditFormRef} onSubmit={runAudit}>
+          <details className="brain-context-editor">
+            <summary>
+              <span>
+                <strong>Client context</strong>
+                <small>Sources, rules, tone profile, and claims Br(AI)N should respect.</small>
+              </span>
+              <span>{storageReady ? "Saved workspace" : "Temporary"}</span>
+            </summary>
+            <div className="brain-context-fields">
+              <label>
+                Editorial context
+                <textarea
+                  name="clientContext"
+                  value={contextText}
+                  onChange={(event) => setContextText(event.currentTarget.value)}
+                  rows={4}
+                  placeholder="Positioning notes, client-specific facts, approved language, audience context."
+                />
+              </label>
+              <label>
+                Approved sources
+                <textarea
+                  name="approvedSources"
+                  value={approvedSources}
+                  onChange={(event) => setApprovedSources(event.currentTarget.value)}
+                  rows={3}
+                  placeholder="One approved URL or source note per line."
+                />
+              </label>
+              <div className="brain-context-grid">
+                <label>
+                  Forbidden claims
+                  <textarea
+                    name="forbiddenClaims"
+                    value={forbiddenClaims}
+                    onChange={(event) => setForbiddenClaims(event.currentTarget.value)}
+                    rows={3}
+                    placeholder="Claims that should never ship without review."
+                  />
+                </label>
+                <label>
+                  Tone rules
+                  <textarea
+                    name="toneRules"
+                    value={toneRules}
+                    onChange={(event) => setToneRules(event.currentTarget.value)}
+                    rows={3}
+                    placeholder="Plainspoken, no hype, cite current data, etc."
+                  />
+                </label>
+              </div>
+              <div className="tone-profile-builder">
+                <div className="tone-profile-header">
+                  <div>
+                    <span className="eyebrow">Tone profile</span>
+                    <strong>{toneProfile ? "Generated from approved samples" : "Learn from approved samples"}</strong>
+                    <small>
+                      Paste approved blog excerpts. Separate multiple samples with <code>---</code>.
+                    </small>
+                  </div>
+                  {toneProfile ? (
+                    <button className="button" type="button" onClick={clearToneProfile}>
+                      Clear profile
+                    </button>
+                  ) : null}
+                </div>
+                {toneProfile ? <ToneProfileSummary profile={toneProfile} /> : null}
+                <label>
+                  Approved samples
+                  <textarea
+                    value={toneSampleText}
+                    onChange={(event) => setToneSampleText(event.currentTarget.value)}
+                    rows={5}
+                    placeholder="Paste two or more approved posts or excerpts here. Br(AI)N will infer common voice, structure, evidence style, and words to avoid."
+                  />
+                </label>
+                <div className="actions">
+                  <button className="button" type="button" onClick={generateToneProfile} disabled={generatingToneProfile || toneSampleText.trim().length < 120}>
+                    {generatingToneProfile ? "Generating..." : toneProfile ? "Regenerate profile" : "Generate tone profile"}
+                  </button>
+                  <span className="context-storage-note">This creates an editable style guide. It does not train a model.</span>
+                </div>
+              </div>
+              <div className="actions">
+                <button className="button" type="button" onClick={saveContext} disabled={savingContext || !storageReady}>
+                  {savingContext ? "Saving..." : "Save context"}
+                </button>
+                {!storageReady ? <span className="context-storage-note">Context will run with this audit, but will not persist yet.</span> : null}
+              </div>
             </div>
+          </details>
+
+          <input name="toneProfile" type="hidden" value={toneProfile ? JSON.stringify(toneProfile) : ""} />
+
+          <label className="audit-upload-card">
+            <input
+              name="file"
+              type="file"
+              accept=".md,.markdown,.mdx,.txt,.html,.htm,.csv,.docx,.zip,text/markdown,text/plain,text/html,text/csv,application/zip,application/x-zip-compressed,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              onChange={(event) => setSelectedFileName(event.currentTarget.files?.[0]?.name || null)}
+            />
+            <span className="eyebrow">Upload draft or ZIP</span>
+            <strong>{selectedFileName || "Choose a file"}</strong>
+            <small>Markdown, text, HTML, CSV, DOCX, and ZIP files are supported.</small>
+          </label>
+
+          <div className="audit-input-divider" aria-hidden="true">
+            <span>or paste it</span>
           </div>
 
-          <form className="blog-audit-form" ref={auditFormRef} onSubmit={runAudit}>
-            <details className="brain-context-editor">
-              <summary>
-                <span>
-                  <strong>Client context</strong>
-                  <small>Sources, rules, tone profile, and claims Br(AI)N should respect.</small>
-                </span>
-                <span>{storageReady ? "Saved workspace" : "Temporary"}</span>
-              </summary>
-              <div className="brain-context-fields">
-                <label>
-                  Editorial context
-                  <textarea
-                    name="clientContext"
-                    value={contextText}
-                    onChange={(event) => setContextText(event.currentTarget.value)}
-                    rows={4}
-                    placeholder="Positioning notes, client-specific facts, approved language, audience context."
-                  />
-                </label>
-                <label>
-                  Approved sources
-                  <textarea
-                    name="approvedSources"
-                    value={approvedSources}
-                    onChange={(event) => setApprovedSources(event.currentTarget.value)}
-                    rows={3}
-                    placeholder="One approved URL or source note per line."
-                  />
-                </label>
-                <div className="brain-context-grid">
-                  <label>
-                    Forbidden claims
-                    <textarea
-                      name="forbiddenClaims"
-                      value={forbiddenClaims}
-                      onChange={(event) => setForbiddenClaims(event.currentTarget.value)}
-                      rows={3}
-                      placeholder="Claims that should never ship without review."
-                    />
-                  </label>
-                  <label>
-                    Tone rules
-                    <textarea
-                      name="toneRules"
-                      value={toneRules}
-                      onChange={(event) => setToneRules(event.currentTarget.value)}
-                      rows={3}
-                      placeholder="Plainspoken, no hype, cite current data, etc."
-                    />
-                  </label>
-                </div>
-                <div className="tone-profile-builder">
-                  <div className="tone-profile-header">
-                    <div>
-                      <span className="eyebrow">Tone profile</span>
-                      <strong>{toneProfile ? "Generated from approved samples" : "Learn from approved samples"}</strong>
-                      <small>
-                        Paste approved blog excerpts. Separate multiple samples with <code>---</code>.
-                      </small>
-                    </div>
-                    {toneProfile ? (
-                      <button className="button" type="button" onClick={clearToneProfile}>
-                        Clear profile
-                      </button>
-                    ) : null}
-                  </div>
-                  {toneProfile ? <ToneProfileSummary profile={toneProfile} /> : null}
-                  <label>
-                    Approved samples
-                    <textarea
-                      value={toneSampleText}
-                      onChange={(event) => setToneSampleText(event.currentTarget.value)}
-                      rows={5}
-                      placeholder="Paste two or more approved posts or excerpts here. Br(AI)N will infer common voice, structure, evidence style, and words to avoid."
-                    />
-                  </label>
-                  <div className="actions">
-                    <button className="button" type="button" onClick={generateToneProfile} disabled={generatingToneProfile || toneSampleText.trim().length < 120}>
-                      {generatingToneProfile ? "Generating..." : toneProfile ? "Regenerate profile" : "Generate tone profile"}
-                    </button>
-                    <span className="context-storage-note">This creates an editable style guide. It does not train a model.</span>
-                  </div>
-                </div>
-                <div className="actions">
-                  <button className="button" type="button" onClick={saveContext} disabled={savingContext || !storageReady}>
-                    {savingContext ? "Saving..." : "Save context"}
-                  </button>
-                  {!storageReady ? <span className="context-storage-note">Context will run with this audit, but will not persist yet.</span> : null}
-                </div>
-              </div>
-            </details>
-
-            <input name="toneProfile" type="hidden" value={toneProfile ? JSON.stringify(toneProfile) : ""} />
-
-            <label className="audit-upload-card">
-              <input
-                name="file"
-                type="file"
-                accept=".md,.markdown,.mdx,.txt,.html,.htm,.csv,.docx,.zip,text/markdown,text/plain,text/html,text/csv,application/zip,application/x-zip-compressed,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                onChange={(event) => setSelectedFileName(event.currentTarget.files?.[0]?.name || null)}
-              />
-              <span className="eyebrow">Upload draft or ZIP</span>
-              <strong>{selectedFileName || "Choose a file"}</strong>
-              <small>Markdown, text, HTML, CSV, DOCX, and ZIP files are supported.</small>
-            </label>
-
-            <div className="audit-input-divider" aria-hidden="true">
-              <span>or paste it</span>
-            </div>
-
-            <label className="audit-paste-field">
-              Paste draft
-              <textarea
-                name="content"
-                placeholder="Paste the draft here."
-                ref={auditTextareaRef}
-                rows={14}
-              />
-            </label>
-            <div className="actions">
-              <button className="button button-primary" type="submit" disabled={auditing}>
-                {auditing ? "Auditing..." : "Audit Draft"}
+          <label className="audit-paste-field">
+            Paste draft
+            <textarea
+              name="content"
+              placeholder="Paste the draft here."
+              ref={auditTextareaRef}
+              rows={14}
+            />
+          </label>
+          <div className="actions">
+            <button className="button button-primary" type="submit" disabled={auditing}>
+              {auditing ? "Audit running" : "Audit Draft"}
+            </button>
+            {auditReport ? (
+              <button className="button" type="button" onClick={() => setReportModalOpen(true)}>
+                Open latest report
               </button>
-            </div>
-          </form>
+            ) : null}
+          </div>
+        </form>
 
-          {auditError ? (
-            <div className="alert" data-type="error" role="status">
-              {auditError}
-            </div>
-          ) : null}
-          {storageError ? (
-            <div className="alert" data-type={storageReady ? "info" : "error"} role="status">
-              {storageError}
-            </div>
-          ) : null}
-          {reportNotice && !auditReport ? (
-            <div className="alert" data-type="success" role="status">
-              {reportNotice}
-            </div>
-          ) : null}
-        </section>
+        {auditError ? (
+          <div className="alert" data-type="error" role="status">
+            {auditError}
+          </div>
+        ) : null}
+        {storageError ? (
+          <div className="alert" data-type={storageReady ? "info" : "error"} role="status">
+            {storageError}
+          </div>
+        ) : null}
+        {reportNotice ? (
+          <div className="alert" data-type="success" role="status">
+            {reportNotice}
+          </div>
+        ) : null}
+      </section>
+
+      {auditHistory.length ? (
+        <div className="audit-output-column" data-mode="history">
+          <AuditHistoryPanel
+            activeReportId={activeReportId}
+            canClearReports={isAdmin}
+            clearingReports={clearingReports}
+            items={auditHistory}
+            onClearReports={() => setClearHistoryDialogOpen(true)}
+            onSelectReport={(item) => {
+              setAuditReport(item.report);
+              setActiveReportId(item.id);
+              setReportStatus(item.status);
+              setReportNotice(null);
+              setReportModalOpen(true);
+            }}
+          />
+        </div>
       ) : null}
 
-      {auditReport || auditHistory.length ? (
-        <div className="audit-output-column" data-mode={auditReport ? "report" : "history"}>
-          {auditReport ? (
-            <section className="panel audit-report-panel" aria-labelledby="blog-audit-report-title">
-              <div className="section-heading">
-                <div>
-                  <span className="eyebrow">Structured report</span>
-                  <h3 id="blog-audit-report-title">Audit result</h3>
-                </div>
-                <div className="report-actions">
-                  <label className="report-status-control">
-                    Status
-                    <select
-                      value={reportStatus}
-                      onChange={(event) => updateActiveReportStatus(event.currentTarget.value as BlogAuditReportStatus)}
-                      disabled={!activeReportId || !storageReady}
-                    >
-                      <option value="needs_edits">Needs edits</option>
-                      <option value="ready_for_editor">Ready for editor</option>
-                      <option value="approved">Approved</option>
-                      <option value="rejected">Rejected</option>
-                      <option value="archived">Archived</option>
-                    </select>
-                  </label>
-                  <button className="button" type="button" onClick={copyCurrentReport}>
-                    Copy Markdown
-                  </button>
-                  <button className="button" type="button" onClick={startAnotherAudit}>
-                    New audit
-                  </button>
-                </div>
-              </div>
+      {auditing ? <AuditRunningModal sourceLabel={selectedFileName || "Draft audit"} /> : null}
 
-              <AuditReportView report={auditReport} />
-              {reportNotice ? (
-                <div className="alert" data-type="success" role="status">
-                  {reportNotice}
-                </div>
-              ) : null}
-            </section>
-          ) : null}
+      {auditReport && reportModalOpen ? (
+        <AuditReportModal
+          activeReportId={activeReportId}
+          onClose={() => setReportModalOpen(false)}
+          onCopyCurrentReport={copyCurrentReport}
+          onNewAudit={startAnotherAudit}
+          onUpdateStatus={updateActiveReportStatus}
+          report={auditReport}
+          reportNotice={reportNotice}
+          reportStatus={reportStatus}
+          storageReady={storageReady}
+        />
+      ) : null}
 
-          {auditHistory.length ? (
-            <AuditHistoryPanel
-              activeReportId={activeReportId}
-              items={auditHistory}
-              onSelectReport={(item) => {
-                setAuditReport(item.report);
-                setActiveReportId(item.id);
-                setReportStatus(item.status);
-                setReportNotice(null);
-              }}
-            />
-          ) : null}
-        </div>
+      {clearHistoryDialogOpen ? (
+        <ClearReportHistoryModal
+          clientName={activeClient?.name || clientId}
+          confirmValue={clearHistoryConfirm}
+          disabled={clearingReports || clearHistoryConfirm.trim().toUpperCase() !== "CLEAR"}
+          onCancel={() => {
+            setClearHistoryDialogOpen(false);
+            setClearHistoryConfirm("");
+          }}
+          onChangeConfirm={setClearHistoryConfirm}
+          onConfirm={clearReportHistory}
+          reportCount={auditHistory.length}
+        />
       ) : null}
     </PageWorkspace>
   );
@@ -3191,11 +3323,17 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
 
 function AuditHistoryPanel({
   activeReportId,
+  canClearReports,
+  clearingReports,
   items,
+  onClearReports,
   onSelectReport,
 }: {
   activeReportId: string | null;
+  canClearReports: boolean;
+  clearingReports: boolean;
   items: BlogAuditHistoryItem[];
+  onClearReports: () => void;
   onSelectReport: (item: BlogAuditHistoryItem) => void;
 }) {
   return (
@@ -3205,6 +3343,11 @@ function AuditHistoryPanel({
           <span className="eyebrow">Audit history</span>
           <h3 id="audit-history-title">Previous reports</h3>
         </div>
+        {canClearReports ? (
+          <button className="button button-danger" type="button" onClick={onClearReports} disabled={clearingReports || !items.length}>
+            {clearingReports ? "Clearing..." : "Clear history"}
+          </button>
+        ) : null}
       </div>
 
       <div className="audit-history-list">
@@ -3230,6 +3373,189 @@ function AuditHistoryPanel({
         ))}
       </div>
     </section>
+  );
+}
+
+function AuditRunningModal({ sourceLabel }: { sourceLabel: string }) {
+  return (
+    <div className="modal-backdrop audit-modal-backdrop" role="presentation">
+      <section
+        aria-busy="true"
+        aria-live="polite"
+        aria-modal="true"
+        aria-labelledby="audit-running-title"
+        className="audit-modal audit-running-modal"
+        role="dialog"
+      >
+        <div className="audit-modal-header">
+          <div>
+            <span className="eyebrow">Incoming report</span>
+            <h3 id="audit-running-title">Audit is running.</h3>
+          </div>
+          <span className="audit-live-badge">Live</span>
+        </div>
+        <div className="audit-report-loader" aria-hidden="true">
+          <div className="audit-loader-topline">
+            <span />
+            <span />
+          </div>
+          <div className="audit-loader-card" />
+          <div className="audit-loader-grid">
+            <span />
+            <span />
+            <span />
+          </div>
+          <div className="audit-loader-lines">
+            <span />
+            <span />
+            <span />
+          </div>
+        </div>
+        <div className="audit-modal-progress">
+          <span />
+        </div>
+        <p>
+          Building the structured report for <strong>{sourceLabel}</strong>. Br(AI)N is checking claims, evidence, tone, and publish risk.
+        </p>
+      </section>
+    </div>
+  );
+}
+
+function AuditReportModal({
+  activeReportId,
+  onClose,
+  onCopyCurrentReport,
+  onNewAudit,
+  onUpdateStatus,
+  report,
+  reportNotice,
+  reportStatus,
+  storageReady,
+}: {
+  activeReportId: string | null;
+  onClose: () => void;
+  onCopyCurrentReport: () => void;
+  onNewAudit: () => void;
+  onUpdateStatus: (status: BlogAuditReportStatus) => void;
+  report: BlogAuditReport;
+  reportNotice: string | null;
+  reportStatus: BlogAuditReportStatus;
+  storageReady: boolean;
+}) {
+  return (
+    <div className="modal-backdrop audit-modal-backdrop" onClick={onClose} role="presentation">
+      <section
+        aria-modal="true"
+        aria-labelledby="blog-audit-report-title"
+        className="audit-modal audit-result-modal"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="audit-modal-header">
+          <div>
+            <span className="eyebrow">Structured report</span>
+            <h3 id="blog-audit-report-title">Audit result</h3>
+          </div>
+          <button aria-label="Dismiss audit result" className="modal-close-button" onClick={onClose} type="button">
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M6 6l12 12" />
+              <path d="M18 6 6 18" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="audit-modal-toolbar">
+          <label className="report-status-control">
+            Status
+            <select
+              value={reportStatus}
+              onChange={(event) => onUpdateStatus(event.currentTarget.value as BlogAuditReportStatus)}
+              disabled={!activeReportId || !storageReady}
+            >
+              <option value="needs_edits">Needs edits</option>
+              <option value="ready_for_editor">Ready for editor</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+              <option value="archived">Archived</option>
+            </select>
+          </label>
+          <div className="report-actions">
+            <button className="button" type="button" onClick={onCopyCurrentReport}>
+              Copy Markdown
+            </button>
+            <button className="button" type="button" onClick={onNewAudit}>
+              New audit
+            </button>
+          </div>
+        </div>
+
+        <AuditReportView report={report} />
+        {reportNotice ? (
+          <div className="alert" data-type="success" role="status">
+            {reportNotice}
+          </div>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+function ClearReportHistoryModal({
+  clientName,
+  confirmValue,
+  disabled,
+  onCancel,
+  onChangeConfirm,
+  onConfirm,
+  reportCount,
+}: {
+  clientName: string;
+  confirmValue: string;
+  disabled: boolean;
+  onCancel: () => void;
+  onChangeConfirm: (value: string) => void;
+  onConfirm: () => void;
+  reportCount: number;
+}) {
+  return (
+    <div className="modal-backdrop audit-modal-backdrop" onClick={onCancel} role="presentation">
+      <section
+        aria-modal="true"
+        aria-labelledby="clear-report-history-title"
+        className="audit-modal clear-history-modal"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="audit-modal-header">
+          <div>
+            <span className="eyebrow">Admin cleanup</span>
+            <h3 id="clear-report-history-title">Clear saved Br(AI)N reports?</h3>
+          </div>
+          <button aria-label="Cancel clearing report history" className="modal-close-button" onClick={onCancel} type="button">
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M6 6l12 12" />
+              <path d="M18 6 6 18" />
+            </svg>
+          </button>
+        </div>
+        <p>
+          This deletes {reportCount} saved report{reportCount === 1 ? "" : "s"} for <strong>{clientName}</strong>. Client context and tone profiles stay in place.
+        </p>
+        <label>
+          Type CLEAR to confirm
+          <input value={confirmValue} onChange={(event) => onChangeConfirm(event.currentTarget.value)} placeholder="CLEAR" autoFocus />
+        </label>
+        <div className="report-actions">
+          <button className="button" type="button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="button button-danger" type="button" onClick={onConfirm} disabled={disabled}>
+            Clear reports
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
