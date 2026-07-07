@@ -1941,6 +1941,165 @@ select {
   margin-top: 16px;
 }
 
+.brain-context-editor {
+  border: 1px solid rgba(17, 18, 20, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.brain-context-editor summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.brain-context-editor summary::-webkit-details-marker {
+  display: none;
+}
+
+.brain-context-editor summary span:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.brain-context-editor summary strong {
+  color: var(--ink);
+  font-size: 0.94rem;
+  line-height: 1.2;
+}
+
+.brain-context-editor summary small,
+.brain-context-editor summary > span:last-child,
+.context-storage-note {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.brain-context-editor summary > span:last-child {
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.66);
+  white-space: nowrap;
+}
+
+.brain-context-fields {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding: 12px;
+}
+
+.brain-context-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tone-profile-builder {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.tone-profile-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.tone-profile-header > div,
+.tone-profile-summary,
+.tone-profile-summary > div:first-child {
+  display: grid;
+  gap: 6px;
+}
+
+.tone-profile-header strong,
+.tone-profile-summary strong {
+  color: var(--ink);
+  font-size: 0.94rem;
+  line-height: 1.2;
+}
+
+.tone-profile-header small,
+.tone-profile-summary small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.tone-profile-header code {
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 4px;
+  padding: 0 4px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--ink);
+  font-size: 0.72rem;
+}
+
+.tone-profile-summary {
+  border: 1px solid rgba(20, 92, 66, 0.16);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(245, 252, 249, 0.58);
+}
+
+.tone-profile-summary span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.tone-profile-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tone-profile-chips span {
+  border: 1px solid rgba(20, 92, 66, 0.16);
+  border-radius: 999px;
+  padding: 6px 9px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--good);
+  font-size: 0.7rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.tone-profile-rules {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  border-top: 1px solid rgba(17, 18, 20, 0.08);
+  padding-top: 10px;
+}
+
+.tone-profile-rules ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 .blog-audit-form label {
   display: grid;
   gap: 6px;
@@ -2199,6 +2358,38 @@ select {
   white-space: nowrap;
 }
 
+.report-actions,
+.claim-badge-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.report-status-control {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.report-status-control select {
+  min-height: 38px;
+  border: 1px solid rgba(17, 18, 20, 0.16);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--ink);
+  font: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .audit-evidence-summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2296,6 +2487,37 @@ select {
   font-weight: 850;
   text-transform: capitalize;
   white-space: nowrap;
+}
+
+.source-type-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.source-type-pill[data-source-type="vast_source"],
+.source-type-pill[data-source-type="client_context"] {
+  border-color: rgba(20, 92, 66, 0.18);
+  color: var(--good);
+}
+
+.source-type-pill[data-source-type="external_web"] {
+  border-color: rgba(20, 80, 160, 0.18);
+  color: #1f5b8f;
+}
+
+.source-type-pill[data-source-type="missing_source"],
+.source-type-pill[data-source-type="blocked"] {
+  border-color: rgba(122, 77, 18, 0.18);
+  color: var(--warn);
 }
 
 .audit-status[data-status="PASS"] {
@@ -4528,7 +4750,9 @@ select {
   }
 
   .audit-score-grid,
-  .audit-input-grid {
+  .audit-input-grid,
+  .brain-context-grid,
+  .tone-profile-rules {
     grid-template-columns: 1fr;
   }
 
@@ -4553,6 +4777,11 @@ select {
   .audit-evidence-meta {
     justify-content: flex-start;
     text-align: left;
+  }
+
+  .report-actions,
+  .claim-badge-group {
+    justify-content: flex-start;
   }
 }
 
@@ -4775,17 +5004,18 @@ select {
   .admin-user-controls,
   .admin-password-form,
   .admin-role-reference,
-	  .watch-mode-grid,
-	  .baseline-settings-grid,
-	  .job-index-readiness,
-	  .job-index-flow-grid,
-	  .visitor-metric-grid,
-	  .visitor-contract-grid,
-	  .visitor-observation-grid,
-	  .visitor-setup-grid,
-	  .visitor-event-row,
-	  .priority-add-row,
-	  .access-field-grid,
+  .watch-mode-grid,
+  .brain-context-grid,
+  .baseline-settings-grid,
+  .job-index-readiness,
+  .job-index-flow-grid,
+  .visitor-metric-grid,
+  .visitor-contract-grid,
+  .visitor-observation-grid,
+  .visitor-setup-grid,
+  .visitor-event-row,
+  .priority-add-row,
+  .access-field-grid,
   .credentialed-source-grid,
   .surface-result-grid,
   .tracker-result-grid,

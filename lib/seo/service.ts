@@ -1,5 +1,7 @@
 import crypto, { randomUUID } from "node:crypto";
 import { load } from "cheerio";
+import type { BlogAuditReport } from "../blog-audit";
+import { generateBlogToneProfile, normalizeToneProfile, type BlogToneProfile } from "../blog-tone-profile";
 import { decryptSecret, encryptSecret } from "./crypto";
 import { ensureSeoStorage, getSeoCollections, getSupabaseAdminClient } from "./db";
 import {
@@ -11,6 +13,9 @@ import {
 } from "./seo-change-tracker";
 import { notifySeoWatchSlack } from "./slack";
 import type {
+  SeoBrainContext,
+  SeoBrainReport,
+  SeoBrainReportStatus,
   SeoClient,
   SeoClientFeatureFlags,
   SeoClientFeatureKey,
@@ -53,6 +58,9 @@ const MAX_CRAWL_BYTES = 650_000;
 const MAX_CRAWL_PAGES_PER_SITE = 6;
 const MAX_COMPETITOR_SITES = 8;
 const SEO_CHANGE_RUN_LIMIT = 8;
+const BRAIN_REPORT_LIMIT = 12;
+const BRAIN_STORAGE_NOT_READY_MESSAGE =
+  "Br(AI)N storage tables are not installed yet. Apply supabase/migrations/20260707081229_brain_editorial_qa.sql to save client context and report history.";
 
 type IntegrationPayload = {
   integrationId?: string;
@@ -77,6 +85,25 @@ type ClientPayload = {
 
 type ClientFeatureFlagsPayload = {
   featureFlags?: unknown;
+};
+
+type BrainContextPayload = {
+  contextText?: string;
+  approvedSources?: unknown;
+  forbiddenClaims?: unknown;
+  toneRules?: unknown;
+  toneProfile?: unknown;
+};
+
+type BrainToneProfilePayload = {
+  sampleText?: string;
+  toneRules?: unknown;
+};
+
+type BrainReportPayload = {
+  sourceLabel: string;
+  draftExcerpt?: string | null;
+  report: BlogAuditReport;
 };
 
 export type ClientDedupeResult = {
@@ -773,6 +800,255 @@ export async function updateClientFeatureFlags(clientId: string, payload: Client
   return safeClient(next);
 }
 
+function safeBrainContext(context: SeoBrainContext): SeoBrainContext {
+  const { _id: _mongoId, ...row } = context;
+  return {
+    ...row,
+    context_text: row.context_text || "",
+    approved_sources_json: Array.isArray(row.approved_sources_json) ? row.approved_sources_json : [],
+    forbidden_claims_json: Array.isArray(row.forbidden_claims_json) ? row.forbidden_claims_json : [],
+    tone_rules_json: Array.isArray(row.tone_rules_json) ? row.tone_rules_json : [],
+    tone_profile_json: normalizeToneProfile(row.tone_profile_json),
+  };
+}
+
+function safeBrainReport(report: SeoBrainReport): SeoBrainReport {
+  const { _id: _mongoId, ...row } = report;
+  return row;
+}
+
+function defaultBrainContext(scope: SeoTenantScope): SeoBrainContext {
+  const timestamp = nowIso();
+  return {
+    id: `${scope.userId}-brain-context`,
+    user_id: scope.userId,
+    context_text: "",
+    approved_sources_json: [],
+    forbidden_claims_json: [],
+    tone_rules_json: [],
+    tone_profile_json: null,
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+}
+
+function normalizeBrainStringList(value: unknown, maxItems = 24) {
+  const rows = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/\r?\n|,/)
+      : [];
+
+  return Array.from(
+    new Set(
+      rows
+        .map((item) => asString(item).slice(0, 260))
+        .filter(Boolean)
+    )
+  ).slice(0, maxItems);
+}
+
+export async function getBrainState(scope: SeoTenantScope) {
+  try {
+    const { brainContexts, brainReports } = await getSeoCollections();
+    const [contextRow, reports] = await Promise.all([
+      brainContexts.findOne({ user_id: scope.userId }),
+      brainReports.find({ user_id: scope.userId }).sort({ created_at: -1 }).limit(BRAIN_REPORT_LIMIT).toArray(),
+    ]);
+
+    return {
+      context: safeBrainContext(contextRow || defaultBrainContext(scope)),
+      reports: reports.map(safeBrainReport),
+      storageReady: true,
+      storageError: null,
+    };
+  } catch (error) {
+    if (!isStorageUnavailableError(error)) {
+      throw error;
+    }
+
+    return {
+      context: defaultBrainContext(scope),
+      reports: [],
+      storageReady: false,
+      storageError: BRAIN_STORAGE_NOT_READY_MESSAGE,
+    };
+  }
+}
+
+export async function saveBrainContext(scope: SeoTenantScope, payload: BrainContextPayload) {
+  const { brainContexts } = await getSeoCollections();
+  const existing = await brainContexts.findOne({ user_id: scope.userId });
+  const timestamp = nowIso();
+  const context: SeoBrainContext = {
+    id: existing?.id || `${scope.userId}-brain-context`,
+    user_id: scope.userId,
+    context_text: asString(payload.contextText).slice(0, 6000),
+    approved_sources_json: normalizeBrainStringList(payload.approvedSources, 12),
+    forbidden_claims_json: normalizeBrainStringList(payload.forbiddenClaims, 24),
+    tone_rules_json: normalizeBrainStringList(payload.toneRules, 24),
+    tone_profile_json: Object.hasOwn(payload, "toneProfile") ? normalizeToneProfile(payload.toneProfile) : existing?.tone_profile_json || null,
+    created_at: existing?.created_at || timestamp,
+    updated_at: timestamp,
+  };
+
+  if (existing) {
+    await brainContexts.replaceOne({ id: existing.id, user_id: scope.userId }, context);
+  } else {
+    await brainContexts.insertOne(context);
+  }
+
+  await recordAuditEvent({
+    scope,
+    action: "brain.context.saved",
+    entityType: "system",
+    entityId: context.id,
+    metadata: {
+      approvedSources: context.approved_sources_json.length,
+      forbiddenClaims: context.forbidden_claims_json.length,
+      toneRules: context.tone_rules_json.length,
+      toneProfile: Boolean(context.tone_profile_json),
+    },
+  });
+
+  return safeBrainContext(context);
+}
+
+export async function generateAndSaveBrainToneProfile(scope: SeoTenantScope, payload: BrainToneProfilePayload) {
+  const toneRules = normalizeBrainStringList(payload.toneRules, 24);
+  const sampleText = asString(payload.sampleText);
+
+  if (sampleText.length < 120) {
+    throw new Error("Paste at least one approved content sample before generating a tone profile.");
+  }
+
+  const profile = generateBlogToneProfile({
+    sampleText,
+    toneRules,
+  });
+
+  try {
+    const context = await upsertBrainToneProfile(scope, profile, toneRules);
+    return { profile, context, storageReady: true, storageError: null };
+  } catch (error) {
+    if (!isStorageUnavailableError(error)) {
+      throw error;
+    }
+
+    return {
+      profile,
+      context: null,
+      storageReady: false,
+      storageError: BRAIN_STORAGE_NOT_READY_MESSAGE,
+    };
+  }
+}
+
+async function upsertBrainToneProfile(scope: SeoTenantScope, profile: BlogToneProfile, toneRules: string[]) {
+  const { brainContexts } = await getSeoCollections();
+  const existing = await brainContexts.findOne({ user_id: scope.userId });
+  const timestamp = nowIso();
+  const context: SeoBrainContext = {
+    ...(existing || defaultBrainContext(scope)),
+    id: existing?.id || `${scope.userId}-brain-context`,
+    user_id: scope.userId,
+    tone_rules_json: toneRules.length ? toneRules : existing?.tone_rules_json || [],
+    tone_profile_json: profile,
+    created_at: existing?.created_at || timestamp,
+    updated_at: timestamp,
+  };
+
+  if (existing) {
+    await brainContexts.replaceOne({ id: existing.id, user_id: scope.userId }, context);
+  } else {
+    await brainContexts.insertOne(context);
+  }
+
+  await recordAuditEvent({
+    scope,
+    action: "brain.tone_profile.generated",
+    entityType: "system",
+    entityId: context.id,
+    metadata: {
+      sampleCount: profile.sampleCount,
+      traits: profile.traits.length,
+      vocabulary: profile.vocabulary.length,
+    },
+  });
+
+  return safeBrainContext(context);
+}
+
+export async function saveBrainReport(scope: SeoTenantScope, payload: BrainReportPayload) {
+  const timestamp = nowIso();
+  const row: SeoBrainReport = {
+    id: randomUUID(),
+    user_id: scope.userId,
+    source_label: asString(payload.sourceLabel).slice(0, 180) || "Draft audit",
+    status: payload.report.recommendation === "PASS" ? "ready_for_editor" : "needs_edits",
+    recommendation: payload.report.recommendation,
+    truth_score: payload.report.truthScore,
+    brand_score: payload.report.brandScore,
+    claim_count: payload.report.claims.length,
+    report_json: payload.report as unknown as Record<string, unknown>,
+    draft_excerpt: asString(payload.draftExcerpt).slice(0, 320) || null,
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+
+  try {
+    const { brainReports } = await getSeoCollections();
+    await brainReports.insertOne(row);
+    await recordAuditEvent({
+      scope,
+      action: "brain.report.created",
+      entityType: "system",
+      entityId: row.id,
+      metadata: {
+        sourceLabel: row.source_label,
+        recommendation: row.recommendation,
+        claimCount: row.claim_count,
+      },
+    });
+
+    return { report: safeBrainReport(row), storageReady: true, storageError: null };
+  } catch (error) {
+    if (!isStorageUnavailableError(error)) {
+      throw error;
+    }
+
+    return { report: null, storageReady: false, storageError: BRAIN_STORAGE_NOT_READY_MESSAGE };
+  }
+}
+
+export async function updateBrainReportStatus(scope: SeoTenantScope, reportId: string, status: SeoBrainReportStatus) {
+  if (!["needs_edits", "ready_for_editor", "approved", "rejected", "archived"].includes(status)) {
+    throw new Error("Unsupported Br(AI)N report status.");
+  }
+
+  const { brainReports } = await getSeoCollections();
+  const existing = await brainReports.findOne({ id: reportId, user_id: scope.userId });
+  if (!existing) {
+    throw new Error("Br(AI)N report not found.");
+  }
+
+  const next: SeoBrainReport = {
+    ...existing,
+    status,
+    updated_at: nowIso(),
+  };
+  await brainReports.replaceOne({ id: reportId, user_id: scope.userId }, next);
+  await recordAuditEvent({
+    scope,
+    action: "brain.report.status.updated",
+    entityType: "system",
+    entityId: reportId,
+    metadata: { status },
+  });
+
+  return safeBrainReport(next);
+}
+
 function clientDedupeKey(client: SeoClient) {
   return client.name
     .trim()
@@ -785,6 +1061,11 @@ function clientDedupeKey(client: SeoClient) {
 function isMissingStorageTableError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || "");
   return /Could not find the table|schema cache|relation .* does not exist|relation .*seo_/i.test(message);
+}
+
+function isStorageUnavailableError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return isMissingStorageTableError(error) || /SUPABASE_URL|SUPABASE_SECRET_KEY|SUPABASE_SERVICE_ROLE_KEY/i.test(message);
 }
 
 async function collectionHasClientRows<T extends { id: string }>(
@@ -832,6 +1113,8 @@ async function clientHasSavedWork(collections: Awaited<ReturnType<typeof getSeoC
     collectionHasClientRows(collections.competitiveAnalyses, clientId),
     collectionHasClientRows(collections.watchBaselines, clientId),
     collectionHasClientRows(collections.changeRuns, clientId),
+    collectionHasClientRows(collections.brainReports, clientId),
+    collectionHasClientRows(collections.brainContexts, clientId),
     visitorEventsHasClientRows(clientId),
   ]);
 

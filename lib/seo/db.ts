@@ -2,6 +2,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type {
   SeoAuditEvent,
   SeoAppUser,
+  SeoBrainContext,
+  SeoBrainReport,
   SeoChangeRun,
   SeoClient,
   SeoCompetitiveAnalysis,
@@ -15,6 +17,8 @@ type RowWithId = { id: string; _id?: string };
 type SeoTableName =
   | "seo_audit_events"
   | "seo_app_users"
+  | "seo_brain_contexts"
+  | "seo_brain_reports"
   | "seo_clients"
   | "seo_competitive_analyses"
   | "seo_change_runs"
@@ -267,6 +271,8 @@ export async function getSeoCollections(): Promise<{
   clients: SupabaseCollection<SeoClient>;
   auditEvents: SupabaseCollection<SeoAuditEvent>;
   appUsers: SupabaseCollection<SeoAppUser>;
+  brainContexts: SupabaseCollection<SeoBrainContext>;
+  brainReports: SupabaseCollection<SeoBrainReport>;
 }> {
   return {
     integrations: new SupabaseCollection<SeoIntegration>("seo_integrations"),
@@ -278,6 +284,8 @@ export async function getSeoCollections(): Promise<{
     clients: new SupabaseCollection<SeoClient>("seo_clients"),
     auditEvents: new SupabaseCollection<SeoAuditEvent>("seo_audit_events"),
     appUsers: new SupabaseCollection<SeoAppUser>("seo_app_users"),
+    brainContexts: new SupabaseCollection<SeoBrainContext>("seo_brain_contexts"),
+    brainReports: new SupabaseCollection<SeoBrainReport>("seo_brain_reports"),
   };
 }
 

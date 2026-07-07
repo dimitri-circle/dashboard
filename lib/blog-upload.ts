@@ -16,6 +16,7 @@ type UploadedDraft = {
 export async function readBlogAuditFormPayload(form: FormData): Promise<BlogAuditInput> {
   const file = form.get("file");
   const pastedContent = asString(form.get("content"));
+  const context = readContextPayload(form);
 
   if (isUpload(file) && file.size > 0) {
     const uploaded = await readUploadedDraft(file);
@@ -23,12 +24,24 @@ export async function readBlogAuditFormPayload(form: FormData): Promise<BlogAudi
       title: uploaded.title,
       format: uploaded.format,
       content: uploaded.content,
+      ...context,
     };
   }
 
   return {
     format: "plain_text",
     content: pastedContent,
+    ...context,
+  };
+}
+
+function readContextPayload(form: FormData) {
+  return {
+    clientContext: asString(form.get("clientContext")),
+    approvedSources: parseList(form.get("approvedSources")),
+    forbiddenClaims: parseList(form.get("forbiddenClaims")),
+    toneRules: parseList(form.get("toneRules")),
+    toneProfile: parseJson(form.get("toneProfile")),
   };
 }
 
@@ -175,4 +188,22 @@ function isUpload(value: FormDataEntryValue | null): value is File {
 
 function asString(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function parseList(value: FormDataEntryValue | null) {
+  return asString(value)
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseJson(value: FormDataEntryValue | null) {
+  const text = asString(value);
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }

@@ -142,6 +142,8 @@ type MetricSnapshot = {
 
 type BlogAuditClaimStatus = "PASS" | "FAIL" | "UNSUPPORTED" | "STALE_RISK" | "BLOCKED";
 type BlogAuditExternalEvidenceStatus = "NOT_NEEDED" | "UNAVAILABLE" | "CHECKED" | "FAILED";
+type BlogAuditClaimSourceType = "vast_source" | "client_context" | "external_web" | "missing_source" | "blocked";
+type BlogAuditReportStatus = "needs_edits" | "ready_for_editor" | "approved" | "rejected" | "archived";
 
 type BlogAuditExternalEvidenceSummary = {
   status: BlogAuditExternalEvidenceStatus;
@@ -162,6 +164,7 @@ type BlogAuditReport = {
     reason: string;
     evidence: string[];
     suggestedRewrite: string;
+    sourceType?: BlogAuditClaimSourceType;
   }>;
   brandFindings: Array<{
     issue: string;
@@ -177,7 +180,65 @@ type BlogAuditHistoryItem = {
   id: string;
   createdAt: string;
   sourceLabel: string;
+  status: BlogAuditReportStatus;
   report: BlogAuditReport;
+};
+
+type BrainContext = {
+  id: string;
+  user_id: string;
+  context_text: string;
+  approved_sources_json: string[];
+  forbidden_claims_json: string[];
+  tone_rules_json: string[];
+  tone_profile_json: BrainToneProfile | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type BrainToneProfile = {
+  version: 1;
+  status: "generated" | "manual";
+  summary: string;
+  traits: string[];
+  do: string[];
+  avoid: string[];
+  evidenceStyle: string;
+  structureStyle: string;
+  vocabulary: string[];
+  sampleCount: number;
+  generatedAt: string | null;
+  signals: {
+    averageSentenceWords: number;
+    sentenceCount: number;
+    paragraphCount: number;
+    headingCount: number;
+    numberDensity: number;
+    technicalTermDensity: number;
+    hypeTermCount: number;
+  };
+};
+
+type BrainSavedReport = {
+  id: string;
+  user_id: string;
+  source_label: string;
+  status: BlogAuditReportStatus;
+  recommendation: BlogAuditReport["recommendation"];
+  truth_score: number;
+  brand_score: number;
+  claim_count: number;
+  report_json: BlogAuditReport;
+  draft_excerpt: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type BrainStateResponse = {
+  context: BrainContext;
+  reports: BrainSavedReport[];
+  storageReady: boolean;
+  storageError: string | null;
 };
 
 type WebsiteSurfaceIssue = {
@@ -2651,8 +2712,61 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
   const [auditing, setAuditing] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
+  const [loadingBrainState, setLoadingBrainState] = useState(true);
+  const [savingContext, setSavingContext] = useState(false);
+  const [storageReady, setStorageReady] = useState(true);
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const [activeReportId, setActiveReportId] = useState<string | null>(null);
+  const [reportStatus, setReportStatus] = useState<BlogAuditReportStatus>("needs_edits");
+  const [contextText, setContextText] = useState("");
+  const [approvedSources, setApprovedSources] = useState("");
+  const [forbiddenClaims, setForbiddenClaims] = useState("");
+  const [toneRules, setToneRules] = useState("");
+  const [toneSampleText, setToneSampleText] = useState("");
+  const [toneProfile, setToneProfile] = useState<BrainToneProfile | null>(null);
+  const [generatingToneProfile, setGeneratingToneProfile] = useState(false);
+  const [reportNotice, setReportNotice] = useState<string | null>(null);
   const auditFormRef = useRef<HTMLFormElement | null>(null);
   const auditTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadBrainState() {
+      try {
+        setLoadingBrainState(true);
+        setAuditError(null);
+        const body = await api<BrainStateResponse>(clientId, "/api/blog-audit");
+        if (cancelled) return;
+        setStorageReady(body.storageReady);
+        setStorageError(body.storageError);
+        setContextText(body.context.context_text || "");
+        setApprovedSources(listToTextarea(body.context.approved_sources_json));
+        setForbiddenClaims(listToTextarea(body.context.forbidden_claims_json));
+        setToneRules(listToTextarea(body.context.tone_rules_json));
+        setToneProfile(body.context.tone_profile_json || null);
+        setToneSampleText("");
+        setAuditHistory(body.reports.map(savedReportToHistoryItem));
+      } catch (error) {
+        if (cancelled) return;
+        setStorageReady(false);
+        setStorageError(error instanceof Error ? error.message : "Unable to load Br(AI)N history.");
+      } finally {
+        if (!cancelled) {
+          setLoadingBrainState(false);
+        }
+      }
+    }
+
+    setAuditReport(null);
+    setActiveReportId(null);
+    setReportNotice(null);
+    loadBrainState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
 
   async function runAudit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2671,6 +2785,8 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
       setAuditing(true);
       setAuditError(null);
       setAuditReport(null);
+      setActiveReportId(null);
+      setReportNotice(null);
       const response = await fetch("/api/blog-audit", {
         method: "POST",
         headers: {
@@ -2685,16 +2801,22 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
         throw new Error(body.error || "Unable to audit blog draft.");
       }
 
-      const nextReport = body as BlogAuditReport;
+      const nextReport = (body.report || body) as BlogAuditReport;
+      const savedReport = body.savedReport as BrainSavedReport | null | undefined;
       const historyItem: BlogAuditHistoryItem = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        createdAt: new Date().toISOString(),
-        sourceLabel,
+        id: savedReport?.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        createdAt: savedReport?.created_at || new Date().toISOString(),
+        sourceLabel: savedReport?.source_label || sourceLabel,
+        status: savedReport?.status || (nextReport.recommendation === "PASS" ? "ready_for_editor" : "needs_edits"),
         report: nextReport,
       };
 
       setAuditReport(nextReport);
-      setAuditHistory((items) => [historyItem, ...items].slice(0, 8));
+      setActiveReportId(historyItem.id);
+      setReportStatus(historyItem.status);
+      setStorageReady(typeof body.storageReady === "boolean" ? body.storageReady : true);
+      setStorageError(typeof body.storageError === "string" ? body.storageError : null);
+      setAuditHistory((items) => [historyItem, ...items.filter((item) => item.id !== historyItem.id)].slice(0, 12));
     } catch (error) {
       setAuditError(error instanceof Error ? error.message : "Unable to audit blog draft.");
     } finally {
@@ -2705,9 +2827,108 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
   function startAnotherAudit() {
     setAuditReport(null);
     setAuditError(null);
+    setActiveReportId(null);
+    setReportNotice(null);
     setSelectedFileName(null);
     auditFormRef.current?.reset();
     window.setTimeout(() => auditTextareaRef.current?.focus(), 0);
+  }
+
+  async function saveContext() {
+    try {
+      setSavingContext(true);
+      setAuditError(null);
+      const body = await api<{ context: BrainContext }>(clientId, "/api/blog-audit/context", {
+        method: "POST",
+        body: JSON.stringify({
+          contextText,
+          approvedSources,
+          forbiddenClaims,
+          toneRules,
+          toneProfile,
+        }),
+      });
+      setContextText(body.context.context_text || "");
+      setApprovedSources(listToTextarea(body.context.approved_sources_json));
+      setForbiddenClaims(listToTextarea(body.context.forbidden_claims_json));
+      setToneRules(listToTextarea(body.context.tone_rules_json));
+      setToneProfile(body.context.tone_profile_json || null);
+      setStorageReady(true);
+      setStorageError(null);
+      setReportNotice("Client context saved.");
+    } catch (error) {
+      setAuditError(error instanceof Error ? error.message : "Unable to save client context.");
+    } finally {
+      setSavingContext(false);
+    }
+  }
+
+  async function generateToneProfile() {
+    try {
+      setGeneratingToneProfile(true);
+      setAuditError(null);
+      setReportNotice(null);
+      const body = await api<{
+        profile: BrainToneProfile;
+        context: BrainContext | null;
+        storageReady: boolean;
+        storageError: string | null;
+      }>(clientId, "/api/blog-audit/tone-profile", {
+        method: "POST",
+        body: JSON.stringify({
+          sampleText: toneSampleText,
+          toneRules,
+        }),
+      });
+
+      setToneProfile(body.profile);
+      if (body.context) {
+        setToneRules(listToTextarea(body.context.tone_rules_json));
+      }
+      setStorageReady(body.storageReady);
+      setStorageError(body.storageError);
+      setReportNotice(body.storageReady ? "Tone profile generated and saved." : "Tone profile generated for this session.");
+    } catch (error) {
+      setAuditError(error instanceof Error ? error.message : "Unable to generate tone profile.");
+    } finally {
+      setGeneratingToneProfile(false);
+    }
+  }
+
+  function clearToneProfile() {
+    setToneProfile(null);
+    setReportNotice("Tone profile cleared. Save context to persist the change.");
+  }
+
+  async function updateActiveReportStatus(nextStatus: BlogAuditReportStatus) {
+    setReportStatus(nextStatus);
+
+    if (!activeReportId || !storageReady) {
+      return;
+    }
+
+    try {
+      const body = await api<{ report: BrainSavedReport }>(clientId, `/api/blog-audit/reports/${activeReportId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      const nextItem = savedReportToHistoryItem(body.report);
+      setAuditHistory((items) => items.map((item) => (item.id === nextItem.id ? nextItem : item)));
+      setReportNotice("Report status updated.");
+    } catch (error) {
+      setAuditError(error instanceof Error ? error.message : "Unable to update report status.");
+    }
+  }
+
+  async function copyCurrentReport() {
+    if (!auditReport) return;
+
+    try {
+      await navigator.clipboard.writeText(reportToMarkdown(auditReport));
+      setReportNotice("Report copied as Markdown.");
+    } catch {
+      setReportNotice("Copy failed. Browser clipboard access is unavailable.");
+    }
   }
 
   return (
@@ -2741,8 +2962,13 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
         />
         <DashboardStatusPill
           label="History"
-          value={`${auditHistory.length} saved`}
-          state={auditHistory.length ? "ready" : "idle"}
+          value={loadingBrainState ? "Loading" : `${auditHistory.length} saved`}
+          state={auditHistory.length ? "ready" : loadingBrainState ? "idle" : "missing"}
+        />
+        <DashboardStatusPill
+          label="Storage"
+          value={storageReady ? "Connected" : "Setup needed"}
+          state={storageReady ? "ready" : "missing"}
         />
       </div>
 
@@ -2756,6 +2982,100 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
           </div>
 
           <form className="blog-audit-form" ref={auditFormRef} onSubmit={runAudit}>
+            <details className="brain-context-editor" open={!contextText && !approvedSources && !forbiddenClaims && !toneProfile}>
+              <summary>
+                <span>
+                  <strong>Client context</strong>
+                  <small>Sources, rules, tone profile, and claims Br(AI)N should respect.</small>
+                </span>
+                <span>{storageReady ? "Saved workspace" : "Temporary"}</span>
+              </summary>
+              <div className="brain-context-fields">
+                <label>
+                  Editorial context
+                  <textarea
+                    name="clientContext"
+                    value={contextText}
+                    onChange={(event) => setContextText(event.currentTarget.value)}
+                    rows={4}
+                    placeholder="Positioning notes, client-specific facts, approved language, audience context."
+                  />
+                </label>
+                <label>
+                  Approved sources
+                  <textarea
+                    name="approvedSources"
+                    value={approvedSources}
+                    onChange={(event) => setApprovedSources(event.currentTarget.value)}
+                    rows={3}
+                    placeholder="One approved URL or source note per line."
+                  />
+                </label>
+                <div className="brain-context-grid">
+                  <label>
+                    Forbidden claims
+                    <textarea
+                      name="forbiddenClaims"
+                      value={forbiddenClaims}
+                      onChange={(event) => setForbiddenClaims(event.currentTarget.value)}
+                      rows={3}
+                      placeholder="Claims that should never ship without review."
+                    />
+                  </label>
+                  <label>
+                    Tone rules
+                    <textarea
+                      name="toneRules"
+                      value={toneRules}
+                      onChange={(event) => setToneRules(event.currentTarget.value)}
+                      rows={3}
+                      placeholder="Plainspoken, no hype, cite current data, etc."
+                    />
+                  </label>
+                </div>
+                <div className="tone-profile-builder">
+                  <div className="tone-profile-header">
+                    <div>
+                      <span className="eyebrow">Tone profile</span>
+                      <strong>{toneProfile ? "Generated from approved samples" : "Learn from approved samples"}</strong>
+                      <small>
+                        Paste approved blog excerpts. Separate multiple samples with <code>---</code>.
+                      </small>
+                    </div>
+                    {toneProfile ? (
+                      <button className="button" type="button" onClick={clearToneProfile}>
+                        Clear profile
+                      </button>
+                    ) : null}
+                  </div>
+                  {toneProfile ? <ToneProfileSummary profile={toneProfile} /> : null}
+                  <label>
+                    Approved samples
+                    <textarea
+                      value={toneSampleText}
+                      onChange={(event) => setToneSampleText(event.currentTarget.value)}
+                      rows={5}
+                      placeholder="Paste two or more approved posts or excerpts here. Br(AI)N will infer common voice, structure, evidence style, and words to avoid."
+                    />
+                  </label>
+                  <div className="actions">
+                    <button className="button" type="button" onClick={generateToneProfile} disabled={generatingToneProfile || toneSampleText.trim().length < 120}>
+                      {generatingToneProfile ? "Generating..." : toneProfile ? "Regenerate profile" : "Generate tone profile"}
+                    </button>
+                    <span className="context-storage-note">This creates an editable style guide. It does not train a model.</span>
+                  </div>
+                </div>
+                <div className="actions">
+                  <button className="button" type="button" onClick={saveContext} disabled={savingContext || !storageReady}>
+                    {savingContext ? "Saving..." : "Save context"}
+                  </button>
+                  {!storageReady ? <span className="context-storage-note">Context will run with this audit, but will not persist yet.</span> : null}
+                </div>
+              </div>
+            </details>
+
+            <input name="toneProfile" type="hidden" value={toneProfile ? JSON.stringify(toneProfile) : ""} />
+
             <label className="audit-upload-card">
               <input
                 name="file"
@@ -2793,6 +3113,16 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
               {auditError}
             </div>
           ) : null}
+          {storageError ? (
+            <div className="alert" data-type={storageReady ? "info" : "error"} role="status">
+              {storageError}
+            </div>
+          ) : null}
+          {reportNotice && !auditReport ? (
+            <div className="alert" data-type="success" role="status">
+              {reportNotice}
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -2805,17 +3135,50 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
                   <span className="eyebrow">Structured report</span>
                   <h3 id="blog-audit-report-title">Audit result</h3>
                 </div>
-                <button className="button" type="button" onClick={startAnotherAudit}>
-                  New audit
-                </button>
+                <div className="report-actions">
+                  <label className="report-status-control">
+                    Status
+                    <select
+                      value={reportStatus}
+                      onChange={(event) => updateActiveReportStatus(event.currentTarget.value as BlogAuditReportStatus)}
+                      disabled={!activeReportId || !storageReady}
+                    >
+                      <option value="needs_edits">Needs edits</option>
+                      <option value="ready_for_editor">Ready for editor</option>
+                      <option value="approved">Approved</option>
+                      <option value="rejected">Rejected</option>
+                      <option value="archived">Archived</option>
+                    </select>
+                  </label>
+                  <button className="button" type="button" onClick={copyCurrentReport}>
+                    Copy Markdown
+                  </button>
+                  <button className="button" type="button" onClick={startAnotherAudit}>
+                    New audit
+                  </button>
+                </div>
               </div>
 
               <AuditReportView report={auditReport} />
+              {reportNotice ? (
+                <div className="alert" data-type="success" role="status">
+                  {reportNotice}
+                </div>
+              ) : null}
             </section>
           ) : null}
 
           {auditHistory.length ? (
-            <AuditHistoryPanel activeReport={auditReport} items={auditHistory} onSelectReport={setAuditReport} />
+            <AuditHistoryPanel
+              activeReportId={activeReportId}
+              items={auditHistory}
+              onSelectReport={(item) => {
+                setAuditReport(item.report);
+                setActiveReportId(item.id);
+                setReportStatus(item.status);
+                setReportNotice(null);
+              }}
+            />
           ) : null}
         </div>
       ) : null}
@@ -2824,13 +3187,13 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
 }
 
 function AuditHistoryPanel({
-  activeReport,
+  activeReportId,
   items,
   onSelectReport,
 }: {
-  activeReport: BlogAuditReport | null;
+  activeReportId: string | null;
   items: BlogAuditHistoryItem[];
-  onSelectReport: (report: BlogAuditReport) => void;
+  onSelectReport: (item: BlogAuditHistoryItem) => void;
 }) {
   return (
     <section className="panel audit-history-panel" aria-labelledby="audit-history-title">
@@ -2845,16 +3208,17 @@ function AuditHistoryPanel({
         {items.map((item) => (
           <button
             className="audit-history-item"
-            data-active={activeReport === item.report}
+            data-active={activeReportId === item.id}
             key={item.id}
             type="button"
-            onClick={() => onSelectReport(item.report)}
+            onClick={() => onSelectReport(item)}
           >
             <span className="audit-history-copy">
               <strong>{item.sourceLabel}</strong>
               <small>{new Date(item.createdAt).toLocaleString()}</small>
             </span>
             <span className="audit-history-meta" aria-label="Report scores">
+              <span>{formatReportStatus(item.status)}</span>
               <span>{formatRecommendation(item.report.recommendation)}</span>
               <span>{item.report.truthScore} truth</span>
               <span>{item.report.claims.length} claims</span>
@@ -2863,6 +3227,49 @@ function AuditHistoryPanel({
         ))}
       </div>
     </section>
+  );
+}
+
+function ToneProfileSummary({ profile }: { profile: BrainToneProfile }) {
+  return (
+    <div className="tone-profile-summary">
+      <div>
+        <span>Profile</span>
+        <strong>{profile.summary}</strong>
+        <small>
+          {profile.sampleCount || 0} sample{profile.sampleCount === 1 ? "" : "s"} · {profile.signals.averageSentenceWords || 0} avg words/sentence
+        </small>
+      </div>
+      <div className="tone-profile-chips" aria-label="Tone traits">
+        {profile.traits.slice(0, 4).map((trait) => (
+          <span key={trait}>{trait}</span>
+        ))}
+      </div>
+      {profile.do.length || profile.avoid.length ? (
+        <div className="tone-profile-rules">
+          {profile.do.length ? (
+            <div>
+              <span>Do</span>
+              <ul>
+                {profile.do.slice(0, 3).map((rule) => (
+                  <li key={rule}>{rule}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {profile.avoid.length ? (
+            <div>
+              <span>Avoid</span>
+              <ul>
+                {profile.avoid.slice(0, 3).map((rule) => (
+                  <li key={rule}>{rule}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -2887,8 +3294,11 @@ function AuditReportView({ report }: { report: BlogAuditReport }) {
             report.claims.map((claim, index) => (
               <article className="audit-claim" data-status={claim.status} key={`${claim.claim}-${index}`}>
                 <div className="card-top">
-                  <span className="audit-status" data-status={claim.status}>
-                    {claim.status.replace(/_/g, " ")}
+                  <span className="claim-badge-group">
+                    <span className="audit-status" data-status={claim.status}>
+                      {claim.status.replace(/_/g, " ")}
+                    </span>
+                    <SourceTypePill type={claim.sourceType || sourceTypeFromClaim(claim)} />
                   </span>
                   <SourceLinks urls={claim.evidence} />
                 </div>
@@ -2936,6 +3346,14 @@ function ExternalEvidenceSummary({ evidence }: { evidence?: BlogAuditExternalEvi
   );
 }
 
+function SourceTypePill({ type }: { type: BlogAuditClaimSourceType }) {
+  return (
+    <span className="source-type-pill" data-source-type={type}>
+      {formatSourceType(type)}
+    </span>
+  );
+}
+
 function ScoreBlock({ label, tone, value }: { label: string; tone?: string; value: string }) {
   return (
     <div className="audit-score" data-tone={tone}>
@@ -2943,6 +3361,82 @@ function ScoreBlock({ label, tone, value }: { label: string; tone?: string; valu
       <strong>{value}</strong>
     </div>
   );
+}
+
+function listToTextarea(items: string[]) {
+  return Array.isArray(items) ? items.join("\n") : "";
+}
+
+function savedReportToHistoryItem(item: BrainSavedReport): BlogAuditHistoryItem {
+  return {
+    id: item.id,
+    createdAt: item.created_at,
+    sourceLabel: item.source_label,
+    status: item.status,
+    report: item.report_json,
+  };
+}
+
+function sourceTypeFromClaim(claim: BlogAuditReport["claims"][number]): BlogAuditClaimSourceType {
+  if (claim.status === "BLOCKED") return "blocked";
+  if (claim.evidence?.some((url) => url.startsWith("client-context://"))) return "client_context";
+  if (claim.evidence?.some((url) => /^https?:\/\//i.test(url) && !/vast\.ai/i.test(url))) return "external_web";
+  if (claim.evidence?.length) return "vast_source";
+  return "missing_source";
+}
+
+function formatSourceType(type: BlogAuditClaimSourceType) {
+  if (type === "vast_source") return "Vast source";
+  if (type === "client_context") return "Client context";
+  if (type === "external_web") return "External web";
+  if (type === "blocked") return "Blocked";
+  return "Needs source";
+}
+
+function formatReportStatus(status: BlogAuditReportStatus) {
+  return status.replace(/_/g, " ");
+}
+
+function reportToMarkdown(report: BlogAuditReport) {
+  const lines = [
+    `# Br(AI)N Audit Result`,
+    "",
+    `Recommendation: ${formatRecommendation(report.recommendation)}`,
+    `Truth score: ${report.truthScore}`,
+    `Brand score: ${report.brandScore}`,
+    `Claims: ${report.claims.length}`,
+    "",
+    report.summary,
+    "",
+    "## Claims",
+    ...report.claims.flatMap((claim, index) => [
+      "",
+      `${index + 1}. ${claim.claim}`,
+      `Status: ${claim.status.replace(/_/g, " ")}`,
+      `Source type: ${formatSourceType(claim.sourceType || sourceTypeFromClaim(claim))}`,
+      `Reason: ${claim.reason}`,
+      claim.suggestedRewrite && claim.suggestedRewrite !== "No rewrite required."
+        ? `Suggested rewrite: ${claim.suggestedRewrite}`
+        : "",
+      claim.evidence.length
+        ? `Sources: ${claim.evidence.filter((url) => /^https?:\/\//i.test(url)).join(", ") || "Client context"}`
+        : "",
+    ]),
+  ];
+
+  if (report.brandFindings.length) {
+    lines.push("", "## Brand Findings", ...report.brandFindings.map((item) => `- ${item.severity}: ${item.issue} ${item.suggestedRewrite}`));
+  }
+
+  if (report.missingEvidence.length) {
+    lines.push("", "## Missing Evidence", ...report.missingEvidence.map((item) => `- ${item}`));
+  }
+
+  if (report.publishRisks.length) {
+    lines.push("", "## Publish Risks", ...report.publishRisks.map((item) => `- ${item}`));
+  }
+
+  return lines.filter((line, index) => line || lines[index - 1]).join("\n");
 }
 
 const deepAuditGuidance: Record<
@@ -4958,10 +5452,11 @@ function confidenceLevelReason(score: number) {
 }
 
 function SourceLinks({ urls }: { urls: string[] }) {
-  const uniqueUrls = Array.from(new Set(urls.filter(Boolean))).slice(0, 5);
+  const uniqueUrls = Array.from(new Set(urls.filter((url) => /^https?:\/\//i.test(url)))).slice(0, 5);
+  const hasClientContext = urls.some((url) => url.startsWith("client-context://"));
 
   if (!uniqueUrls.length) {
-    return <span className="source-links">No source links attached</span>;
+    return <span className="source-links">{hasClientContext ? "Client context" : "No source links attached"}</span>;
   }
 
   return (

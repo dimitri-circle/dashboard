@@ -1,6 +1,12 @@
 import { lookup } from "node:dns/promises";
 import net from "node:net";
 import { load } from "cheerio";
+import {
+  normalizeToneProfile,
+  toneProfileToContextText,
+  toneProfileToRuleLines,
+  type BlogToneProfile,
+} from "./blog-tone-profile";
 
 export type BlogAuditRecommendation = "PASS" | "PASS_WITH_EDITS" | "DO_NOT_PUBLISH";
 export type BlogAuditClaimStatus = "PASS" | "FAIL" | "UNSUPPORTED" | "STALE_RISK" | "BLOCKED";
@@ -11,7 +17,14 @@ export type BlogAuditInput = {
   format?: string;
   content?: string;
   url?: string;
+  clientContext?: string;
+  approvedSources?: string[];
+  forbiddenClaims?: string[];
+  toneRules?: string[];
+  toneProfile?: BlogToneProfile | Record<string, unknown> | string | null;
 };
+
+export type BlogAuditClaimSourceType = "vast_source" | "client_context" | "external_web" | "missing_source" | "blocked";
 
 export type BlogAuditClaim = {
   claim: string;
@@ -19,6 +32,7 @@ export type BlogAuditClaim = {
   reason: string;
   evidence: string[];
   suggestedRewrite: string;
+  sourceType: BlogAuditClaimSourceType;
 };
 
 export type BlogAuditBrandFinding = {
@@ -218,7 +232,7 @@ export async function auditBlogDraft(input: BlogAuditInput, options: AuditOption
   const normalizedInput = validateBlogAuditInput(input);
   const cleanText = await extractBlogText(normalizedInput);
   const claims = splitFactualClaims(cleanText);
-  const sources = options.sources || (await fetchVastAuditSources());
+  const sources = appendClientContextSources(options.sources || (await fetchVastAuditSources()), normalizedInput);
   const baseClaimFindings = claims.map((claim) => auditClaim(claim, sources));
   const externalEvidence =
     options.externalEvidence
@@ -226,11 +240,12 @@ export async function auditBlogDraft(input: BlogAuditInput, options: AuditOption
       : await fetchExternalEvidenceForClaims(baseClaimFindings, sources);
   const claimFindings = applyExternalEvidence(baseClaimFindings, externalEvidence);
   const brandFindings = auditBrand(cleanText);
+  const clientBrandFindings = auditClientRules(cleanText, normalizedInput);
   const missingEvidence = buildMissingEvidence(claimFindings, sources, claims, externalEvidence);
-  const publishRisks = buildPublishRisks(claimFindings, brandFindings, sources, externalEvidence);
+  const publishRisks = buildPublishRisks(claimFindings, [...brandFindings, ...clientBrandFindings], sources, externalEvidence);
   const truthScore = scoreTruth(claimFindings, sources);
-  const brandScore = scoreBrand(brandFindings);
-  const recommendation = recommendPublication(truthScore, brandScore, claimFindings, brandFindings, sources);
+  const brandScore = scoreBrand([...brandFindings, ...clientBrandFindings]);
+  const recommendation = recommendPublication(truthScore, brandScore, claimFindings, [...brandFindings, ...clientBrandFindings], sources);
 
   return {
     recommendation,
@@ -238,7 +253,7 @@ export async function auditBlogDraft(input: BlogAuditInput, options: AuditOption
     brandScore,
     summary: summarizeAudit(recommendation, truthScore, brandScore, claimFindings, brandFindings),
     claims: claimFindings,
-    brandFindings,
+    brandFindings: [...brandFindings, ...clientBrandFindings],
     missingEvidence,
     publishRisks,
     externalEvidence: externalEvidenceSummary(externalEvidence),
@@ -249,6 +264,11 @@ export function validateBlogAuditInput(input: BlogAuditInput): BlogAuditInput & 
   format: BlogAuditFormat;
   content: string;
   url: string;
+  clientContext: string;
+  approvedSources: string[];
+  forbiddenClaims: string[];
+  toneRules: string[];
+  toneProfile: BlogToneProfile | null;
 } {
   const content = typeof input.content === "string" ? input.content.trim() : "";
   const url = typeof input.url === "string" ? input.url.trim() : "";
@@ -266,7 +286,17 @@ export function validateBlogAuditInput(input: BlogAuditInput): BlogAuditInput & 
     throw new Error(`Blog audit content must be ${BLOG_TEXT_LIMIT} characters or less.`);
   }
 
-  return { ...input, format, content, url };
+  return {
+    ...input,
+    format,
+    content,
+    url,
+    clientContext: sanitizeContextText(input.clientContext),
+    approvedSources: normalizeStringList(input.approvedSources, 12, 240),
+    forbiddenClaims: normalizeStringList(input.forbiddenClaims, 24, 220),
+    toneRules: normalizeStringList(input.toneRules, 24, 220),
+    toneProfile: normalizeToneProfile(input.toneProfile),
+  };
 }
 
 export function normalizeFormat(format: unknown): BlogAuditFormat {
@@ -343,6 +373,79 @@ export function splitFactualClaims(text: string) {
   return Array.from(new Set(candidates)).slice(0, MAX_CLAIMS);
 }
 
+function sanitizeContextText(value: unknown) {
+  return typeof value === "string" ? normalizeWhitespace(value).slice(0, 6000) : "";
+}
+
+function normalizeStringList(value: unknown, limit: number, itemLimit: number) {
+  const rows = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/\r?\n|,/)
+      : [];
+
+  return Array.from(
+    new Set(
+      rows
+        .map((item) => normalizeWhitespace(String(item || "")).slice(0, itemLimit))
+        .filter(Boolean)
+    )
+  ).slice(0, limit);
+}
+
+function appendClientContextSources(
+  sources: VastSourceResult[],
+  input: BlogAuditInput & {
+    clientContext: string;
+    approvedSources: string[];
+    forbiddenClaims: string[];
+    toneRules: string[];
+    toneProfile: BlogToneProfile | null;
+  }
+) {
+  const contextParts = [
+    input.clientContext,
+    input.forbiddenClaims.length ? `Forbidden claims: ${input.forbiddenClaims.join(". ")}` : "",
+    input.toneRules.length ? `Tone rules: ${input.toneRules.join(". ")}` : "",
+    toneProfileToContextText(input.toneProfile),
+  ].filter(Boolean);
+
+  if (!contextParts.length && !input.approvedSources.length) {
+    return sources;
+  }
+
+  const fetchedAt = new Date().toISOString();
+  const clientSources: VastSourceResult[] = [];
+
+  if (contextParts.length) {
+    clientSources.push({
+      id: "client-editorial-context",
+      name: "Client editorial context",
+      url: "client-context://editorial-context",
+      kind: "brand",
+      required: false,
+      status: "ok",
+      fetchedAt,
+      text: contextParts.join("\n"),
+    });
+  }
+
+  if (input.approvedSources.length) {
+    clientSources.push({
+      id: "client-approved-sources",
+      name: "Client approved source list",
+      url: "client-context://approved-sources",
+      kind: "brand",
+      required: false,
+      status: "ok",
+      fetchedAt,
+      text: input.approvedSources.join("\n"),
+    });
+  }
+
+  return [...sources, ...clientSources];
+}
+
 export async function fetchVastAuditSources() {
   const sourceResults: VastSourceResult[] = await Promise.all(
     getVastAuditSources().map(async (source) => {
@@ -397,6 +500,7 @@ function auditClaim(claim: string, sources: VastSourceResult[]): BlogAuditClaim 
   const isTimeSensitive = isTimeSensitiveClaim(claim);
   const hardOverpromise = HARD_OVERPROMISE_PATTERNS.some((pattern) => pattern.test(claim));
   const supportedByInventory = evidence.some((url) => url.includes("/api/vast-pricing"));
+  const sourceType = sourceTypeForEvidence(evidence);
 
   if (hardOverpromise) {
     return {
@@ -405,6 +509,7 @@ function auditClaim(claim: string, sources: VastSourceResult[]): BlogAuditClaim 
       reason: "The claim uses absolute or guaranteed language that cannot be safely proven from current Vast sources.",
       evidence,
       suggestedRewrite: softenClaim(claim),
+      sourceType,
     };
   }
 
@@ -415,6 +520,7 @@ function auditClaim(claim: string, sources: VastSourceResult[]): BlogAuditClaim 
       reason: "The claim depends on live pricing, GPU availability, or current inventory, but the live pricing source was not available.",
       evidence,
       suggestedRewrite: "Verify the current Vast inventory and pricing page, then state the claim with an audit date.",
+      sourceType: "blocked",
     };
   }
 
@@ -427,6 +533,7 @@ function auditClaim(claim: string, sources: VastSourceResult[]): BlogAuditClaim 
         : "The claim appears in current Vast sources, but it discusses pricing, GPU availability, or current market state.",
       evidence,
       suggestedRewrite: addTimeSensitivity(claim),
+      sourceType,
     };
   }
 
@@ -437,6 +544,7 @@ function auditClaim(claim: string, sources: VastSourceResult[]): BlogAuditClaim 
       reason: "The claim is observable in current Vast sources.",
       evidence,
       suggestedRewrite: "No rewrite required.",
+      sourceType,
     };
   }
 
@@ -447,6 +555,7 @@ function auditClaim(claim: string, sources: VastSourceResult[]): BlogAuditClaim 
       reason: "Required Vast sources could not be fetched, so the claim cannot be verified.",
       evidence: [],
       suggestedRewrite: "Hold this claim until the current Vast sources can be checked.",
+      sourceType: "blocked",
     };
   }
 
@@ -456,7 +565,20 @@ function auditClaim(claim: string, sources: VastSourceResult[]): BlogAuditClaim 
     reason: "The claim was not observed in the fetched Vast source set.",
     evidence: [],
     suggestedRewrite: softenClaim(claim),
+    sourceType: "missing_source",
   };
+}
+
+function sourceTypeForEvidence(evidence: string[]): BlogAuditClaimSourceType {
+  if (evidence.some((url) => url.startsWith("client-context://"))) {
+    return "client_context";
+  }
+
+  if (evidence.length) {
+    return "vast_source";
+  }
+
+  return "missing_source";
 }
 
 async function fetchExternalEvidenceForClaims(claims: BlogAuditClaim[], sources: VastSourceResult[]): Promise<ExternalEvidenceState> {
@@ -649,6 +771,7 @@ function applyExternalEvidence(claims: BlogAuditClaim[], externalEvidence: Exter
         return {
           ...claim,
           reason: "External evidence checked: no reviewable source found.",
+          sourceType: "missing_source",
         };
       }
 
@@ -658,6 +781,7 @@ function applyExternalEvidence(claims: BlogAuditClaim[], externalEvidence: Exter
           status: "BLOCKED",
           reason: externalEvidence.message,
           suggestedRewrite: "Hold this claim until external evidence can be checked.",
+          sourceType: "blocked",
         };
       }
 
@@ -668,6 +792,7 @@ function applyExternalEvidence(claims: BlogAuditClaim[], externalEvidence: Exter
       return {
         ...claim,
         reason: "External evidence checked: no reviewable source found.",
+        sourceType: "missing_source",
       };
     }
 
@@ -677,6 +802,7 @@ function applyExternalEvidence(claims: BlogAuditClaim[], externalEvidence: Exter
       reason: `External evidence check: ${external.reason}`,
       evidence: external.evidence,
       suggestedRewrite: external.suggestedRewrite || (external.status === "PASS" ? "No rewrite required." : softenClaim(claim.claim)),
+      sourceType: "external_web",
     };
   });
 }
@@ -900,6 +1026,70 @@ function auditBrand(text: string) {
   }
 
   return findings.slice(0, 12);
+}
+
+function auditClientRules(
+  text: string,
+  input: BlogAuditInput & {
+    forbiddenClaims: string[];
+    toneRules: string[];
+    toneProfile: BlogToneProfile | null;
+  }
+) {
+  const findings: BlogAuditBrandFinding[] = [];
+  const normalizedText = normalizeForSearch(text);
+  const profileRules = toneProfileToRuleLines(input.toneProfile);
+  const combinedToneRules = [...input.toneRules, ...profileRules];
+
+  for (const forbidden of input.forbiddenClaims) {
+    const normalizedForbidden = normalizeForSearch(forbidden);
+    if (normalizedForbidden && normalizedText.includes(normalizedForbidden)) {
+      findings.push({
+        issue: `Client-specific forbidden claim appears: "${forbidden}".`,
+        severity: "high",
+        suggestedRewrite: "Remove or rewrite this claim before sending the draft forward.",
+      });
+    }
+  }
+
+  if (combinedToneRules.length && /\b(revolutionary|game[- ]changing|insane|magic)\b/i.test(text)) {
+    findings.push({
+      issue: "Draft contains hype language that may conflict with client tone rules.",
+      severity: "medium",
+      suggestedRewrite: `Align the draft with: ${combinedToneRules.slice(0, 2).join("; ")}.`,
+    });
+  }
+
+  const longSentence = longestSentenceWordCount(text);
+  if (input.toneProfile?.signals.averageSentenceWords && input.toneProfile.signals.averageSentenceWords <= 18 && longSentence >= 38) {
+    findings.push({
+      issue: `Draft has a ${longSentence}-word sentence, but the approved tone profile is concise.`,
+      severity: "low",
+      suggestedRewrite: "Split the sentence into shorter steps so it matches the approved rhythm.",
+    });
+  }
+
+  if (
+    input.toneProfile?.vocabulary.length &&
+    !input.toneProfile.vocabulary.some((term) => normalizedText.includes(normalizeForSearch(term))) &&
+    text.length > 700
+  ) {
+    findings.push({
+      issue: "Draft does not use the recurring vocabulary from the approved tone profile.",
+      severity: "low",
+      suggestedRewrite: `Check whether terms like ${input.toneProfile.vocabulary.slice(0, 3).join(", ")} belong in this draft.`,
+    });
+  }
+
+  return findings.slice(0, 12);
+}
+
+function longestSentenceWordCount(text: string) {
+  return text
+    .replace(/([.!?])\s+(?=[A-Z0-9])/g, "$1\n")
+    .split(/\n+/)
+    .map((sentence) => (sentence.match(/\b[\w'-]+\b/g) || []).length)
+    .reduce((max, count) => Math.max(max, count), 0);
 }
 
 function isTimeSensitiveClaim(claim: string) {

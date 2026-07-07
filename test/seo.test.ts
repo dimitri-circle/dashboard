@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import JSZip from "jszip";
 import { auditBlogDraft, cleanExtractedText, splitFactualClaims, type VastSourceResult } from "../lib/blog-audit";
+import { generateBlogToneProfile } from "../lib/blog-tone-profile";
 import { readBlogAuditFormPayload } from "../lib/blog-upload";
 import { getCurrentAppSession, hashPassword, verifyPassword } from "../lib/seo/auth";
 import { decryptSecret, encryptSecret } from "../lib/seo/crypto";
@@ -371,6 +372,59 @@ test("blog audit attaches reviewable OpenAI source URLs when evidence array is e
       process.env.OPENAI_API_KEY = originalApiKey;
     }
   }
+});
+
+test("brain tone profile infers reusable client style from approved samples", () => {
+  const profile = generateBlogToneProfile({
+    sampleText: [
+      "Vast.ai gives builders a practical way to rent GPU compute without locking into a single cloud.",
+      "The useful question is simple: what can the developer run today, what does it cost, and where is the proof?",
+      "---",
+      "A good GPU workflow should make the infrastructure visible. Start with pricing, verify the instance, then move the model.",
+    ].join("\n\n"),
+    toneRules: ["No unsupported superlatives."],
+  });
+
+  assert.equal(profile.sampleCount, 2);
+  assert.ok(profile.traits.some((trait) => /technical|plain-language|proof|concise|balanced/i.test(trait)));
+  assert.ok(profile.do.some((rule) => /source|number|claim|technical|sentence|plain/i.test(rule)));
+  assert.ok(profile.avoid.some((rule) => /superlatives|claims|hype/i.test(rule)));
+});
+
+test("blog audit applies generated tone profile as a brand rule", async () => {
+  const profile = generateBlogToneProfile({
+    sampleText:
+      "Vast.ai explains GPU infrastructure in direct, practical terms. Claims stay tied to pricing, docs, or concrete examples. Sentences are short and useful.",
+  });
+
+  const report = await auditBlogDraft(
+    {
+      title: "Tone profile test",
+      format: "plain_text",
+      content:
+        "Vast.ai is a revolutionary game-changing GPU platform that gives developers practical access to cloud GPU instances for model work.",
+      toneProfile: profile,
+    },
+    { sources: auditSourceFixture }
+  );
+
+  assert.ok(report.brandFindings.some((finding) => /tone profile|tone rules|hype/i.test(finding.issue)));
+});
+
+test("blog audit form carries tone profile JSON into the server payload", async () => {
+  const profile = generateBlogToneProfile({
+    sampleText:
+      "Vast.ai blog posts are practical and direct. They explain GPU compute clearly, use evidence carefully, and avoid broad unsupported claims.",
+  });
+  const form = new FormData();
+
+  form.set("content", "Vast.ai offers on-demand GPU instances for AI workloads.");
+  form.set("toneProfile", JSON.stringify(profile));
+
+  const payload = await readBlogAuditFormPayload(form);
+  const parsedProfile = payload.toneProfile as { summary?: string } | null;
+
+  assert.equal(parsedProfile?.summary, profile.summary);
 });
 
 test("blog audit form accepts ZIP uploads with draft files", async () => {

@@ -1,3 +1,5 @@
+import type { BlogToneProfile } from "../blog-tone-profile";
+
 export type SeoProvider = "ga4" | "gtm" | "hotjar" | "openai" | "mcp" | "gsc" | "semrush" | "ahrefs";
 
 export type SeoStatus = "disconnected" | "connected" | "error";
@@ -102,6 +104,37 @@ export type SeoChangeRun = {
   previous_captured_at: string | null;
   checked_at: string;
   created_at: string;
+};
+
+export type SeoBrainReportStatus = "needs_edits" | "ready_for_editor" | "approved" | "rejected" | "archived";
+
+export type SeoBrainContext = {
+  _id?: string;
+  id: string;
+  user_id: string;
+  context_text: string;
+  approved_sources_json: string[];
+  forbidden_claims_json: string[];
+  tone_rules_json: string[];
+  tone_profile_json: BlogToneProfile | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SeoBrainReport = {
+  _id?: string;
+  id: string;
+  user_id: string;
+  source_label: string;
+  status: SeoBrainReportStatus;
+  recommendation: "PASS" | "PASS_WITH_EDITS" | "DO_NOT_PUBLISH";
+  truth_score: number;
+  brand_score: number;
+  claim_count: number;
+  report_json: Record<string, unknown>;
+  draft_excerpt: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type SeoCompetitiveFeatureEvidence = {
