@@ -1790,7 +1790,7 @@ select {
 
 .brain-workspace {
   display: grid;
-  grid-template-columns: minmax(320px, 0.78fr) minmax(0, 1.22fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
@@ -1924,8 +1924,8 @@ select {
 }
 
 .blog-audit-panel {
-  position: sticky;
-  top: 18px;
+  position: relative;
+  top: auto;
 }
 
 .blog-audit-form,
@@ -1993,6 +1993,14 @@ select {
   gap: 12px;
   border-top: 1px solid var(--line);
   padding: 12px;
+}
+
+.brain-context-editor textarea {
+  min-height: 104px;
+}
+
+.tone-profile-builder textarea {
+  min-height: 148px;
 }
 
 .brain-context-grid {
@@ -2585,6 +2593,14 @@ select {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
+}
+
+.brain-status-strip {
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+}
+
+.brain-status-strip .watch-status-pill {
+  padding: 9px 11px;
 }
 
 .watch-status-strip {

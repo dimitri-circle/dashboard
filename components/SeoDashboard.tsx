@@ -978,7 +978,12 @@ export function SeoDashboard() {
     setSeoTrackerStorageError(null);
     setVisitorIntelligence(EMPTY_VISITOR_INTELLIGENCE_SUMMARY);
     setSeoHealthChecks(null);
-    setNotice({ type: "info", message: `Viewing client workspace: ${nextClient?.name || nextClientId}` });
+    setNotice(null);
+    showToastNotice({
+      type: "info",
+      title: "Workspace changed",
+      message: `Viewing ${nextClient?.name || nextClientId}.`,
+    });
     loadDashboard(nextClientId);
   }
 
@@ -2952,9 +2957,7 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
         </div>
       </section>
 
-      <div className="dashboard-status-strip" aria-label="Br(AI)N audit status">
-        <DashboardStatusPill label="Workspace" value={activeClient?.name || "Client"} state={activeClient ? "ready" : "idle"} />
-        <DashboardStatusPill label="Mode" value="Audit only" state="ready" />
+      <div className="dashboard-status-strip brain-status-strip" aria-label="Br(AI)N audit status">
         <DashboardStatusPill
           label="Current report"
           value={auditing ? "Running" : auditReport ? "Ready" : "Not run"}
@@ -2982,7 +2985,7 @@ function BrainView({ activeClient, clientId }: { activeClient?: Client; clientId
           </div>
 
           <form className="blog-audit-form" ref={auditFormRef} onSubmit={runAudit}>
-            <details className="brain-context-editor" open={!contextText && !approvedSources && !forbiddenClaims && !toneProfile}>
+            <details className="brain-context-editor">
               <summary>
                 <span>
                   <strong>Client context</strong>
