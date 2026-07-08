@@ -7,7 +7,15 @@ import {
 } from "../lib/seo/website-surface";
 import { normalizeSocialSurfaceInput, runSocialSurfaceScan } from "../lib/seo/social-surface";
 import { runSeoChangeTracker } from "../lib/seo/seo-change-tracker";
-import { buildSeoWatchSlackPayload, notifySeoWatchSlack, shouldSendSeoWatchSlackAlert } from "../lib/seo/slack";
+import { compareVastJobIndexSnapshots, parseVastJobIndexHtml } from "../lib/seo/job-index";
+import {
+  buildSeoWatchSlackPayload,
+  buildVastJobIndexSlackPayload,
+  notifySeoWatchSlack,
+  notifyVastJobIndexSlack,
+  shouldSendSeoWatchSlackAlert,
+  shouldSendVastJobIndexSlackAlert,
+} from "../lib/seo/slack";
 
 test("website surface check rejects local and private targets", () => {
   assert.throws(() => validatePublicWebsiteUrl("http://localhost:3000"), /local, private/);
@@ -351,6 +359,109 @@ test("seo watch Slack alerts only for baselines and changed scans", async () => 
       status: "sent",
     });
     assert.equal(sentPayloads.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("vast job index Slack alerts for baselines, changes, and failed scans", async () => {
+  const jobsHtml = (jobs: Array<Record<string, unknown>>) => `<!doctype html>
+    <html>
+      <head>
+        <title>Vast Jobs</title>
+        <link rel="canonical" href="https://vast.ai/jobs">
+      </head>
+      <body>
+        <script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { jobs } } })}</script>
+      </body>
+    </html>`;
+  const firstSnapshot = parseVastJobIndexHtml(
+    jobsHtml([
+      {
+        id: "eng-1",
+        slug: "software-engineer",
+        title: "Software Engineer",
+        team: "Engineering",
+        location: "San Francisco",
+        workplace: "On-site",
+        compensation: "$120K - $180K",
+        applyUrl: "/jobs/software-engineer",
+      },
+    ]),
+    "https://vast.ai/jobs",
+    "2026-07-08T18:00:00.000Z"
+  );
+  const nextSnapshot = parseVastJobIndexHtml(
+    jobsHtml([
+      {
+        id: "eng-1",
+        slug: "software-engineer",
+        title: "Software Engineer",
+        team: "Engineering",
+        location: "San Francisco",
+        workplace: "On-site",
+        compensation: "$120K - $180K",
+        applyUrl: "/jobs/software-engineer",
+      },
+      {
+        id: "ai-1",
+        slug: "ai-agent-researcher",
+        title: "AI Agent Researcher",
+        team: "Research",
+        location: "San Francisco",
+        workplace: "On-site",
+        compensation: "$160K - $320K",
+        applyUrl: "/jobs/ai-agent-researcher",
+      },
+    ]),
+    "https://vast.ai/jobs",
+    "2026-07-08T19:00:00.000Z"
+  );
+  const baselineRun = compareVastJobIndexSnapshots(firstSnapshot, null);
+  const unchangedRun = compareVastJobIndexSnapshots(firstSnapshot, firstSnapshot);
+  const changedRun = compareVastJobIndexSnapshots(nextSnapshot, firstSnapshot);
+  const failedRun = compareVastJobIndexSnapshots({ ...firstSnapshot, ok: false, roles: [] }, firstSnapshot);
+
+  assert.equal(shouldSendVastJobIndexSlackAlert(baselineRun), true);
+  assert.equal(shouldSendVastJobIndexSlackAlert(unchangedRun), false);
+  assert.equal(shouldSendVastJobIndexSlackAlert(changedRun), true);
+  assert.equal(shouldSendVastJobIndexSlackAlert(failedRun), true);
+
+  const baselinePayload = buildVastJobIndexSlackPayload({
+    dashboardUrl: "https://dashboard.example/seo",
+    result: baselineRun,
+    scope: { userId: "vast" },
+  });
+  assert.match(baselinePayload.text, /Vast Job Index baseline captured/);
+  assert.match(JSON.stringify(baselinePayload.blocks), /Google index/);
+  assert.match(JSON.stringify(baselinePayload.blocks), /Open dashboard/);
+
+  const changedPayload = buildVastJobIndexSlackPayload({
+    result: changedRun,
+    scope: { userId: "vast" },
+  });
+  assert.match(changedPayload.text, /Vast Job Index changes detected/);
+  assert.match(JSON.stringify(changedPayload.blocks), /Top job changes/);
+  assert.match(JSON.stringify(changedPayload.blocks), /AI Agent Researcher/);
+
+  const originalFetch = globalThis.fetch;
+  const sentPayloads: unknown[] = [];
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    sentPayloads.push(JSON.parse(String(init?.body || "{}")));
+    return new Response("ok", { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    assert.deepEqual(await notifyVastJobIndexSlack({ result: unchangedRun, scope: { userId: "vast" }, webhookUrl: "https://hooks.slack.test/jobs" }), {
+      status: "skipped",
+      reason: "No Slack alert is needed for this Vast Job Index status.",
+    });
+    assert.equal(sentPayloads.length, 0);
+
+    assert.deepEqual(await notifyVastJobIndexSlack({ result: changedRun, scope: { userId: "vast" }, webhookUrl: "https://hooks.slack.test/jobs" }), {
+      status: "sent",
+    });
+    assert.equal(sentPayloads.length, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }

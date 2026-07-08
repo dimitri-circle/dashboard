@@ -9,6 +9,8 @@ import type {
   SeoCompetitiveAnalysis,
   SeoInsight,
   SeoIntegration,
+  SeoJobIndexRun,
+  SeoJobIndexSnapshot,
   SeoMetricSnapshot,
   SeoWatchBaseline,
 } from "./types";
@@ -24,6 +26,8 @@ type SeoTableName =
   | "seo_change_runs"
   | "seo_insights"
   | "seo_integrations"
+  | "seo_job_index_runs"
+  | "seo_job_index_snapshots"
   | "seo_metric_snapshots"
   | "seo_watch_baselines";
 
@@ -267,6 +271,8 @@ export async function getSeoCollections(): Promise<{
   metricSnapshots: SupabaseCollection<SeoMetricSnapshot>;
   watchBaselines: SupabaseCollection<SeoWatchBaseline>;
   changeRuns: SupabaseCollection<SeoChangeRun>;
+  jobIndexSnapshots: SupabaseCollection<SeoJobIndexSnapshot>;
+  jobIndexRuns: SupabaseCollection<SeoJobIndexRun>;
   competitiveAnalyses: SupabaseCollection<SeoCompetitiveAnalysis>;
   clients: SupabaseCollection<SeoClient>;
   auditEvents: SupabaseCollection<SeoAuditEvent>;
@@ -280,6 +286,8 @@ export async function getSeoCollections(): Promise<{
     metricSnapshots: new SupabaseCollection<SeoMetricSnapshot>("seo_metric_snapshots"),
     watchBaselines: new SupabaseCollection<SeoWatchBaseline>("seo_watch_baselines"),
     changeRuns: new SupabaseCollection<SeoChangeRun>("seo_change_runs"),
+    jobIndexSnapshots: new SupabaseCollection<SeoJobIndexSnapshot>("seo_job_index_snapshots"),
+    jobIndexRuns: new SupabaseCollection<SeoJobIndexRun>("seo_job_index_runs"),
     competitiveAnalyses: new SupabaseCollection<SeoCompetitiveAnalysis>("seo_competitive_analyses"),
     clients: new SupabaseCollection<SeoClient>("seo_clients"),
     auditEvents: new SupabaseCollection<SeoAuditEvent>("seo_audit_events"),

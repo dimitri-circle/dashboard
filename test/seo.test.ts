@@ -6,12 +6,19 @@ import { generateBlogToneProfile } from "../lib/blog-tone-profile";
 import { readBlogAuditFormPayload } from "../lib/blog-upload";
 import { getCurrentAppSession, hashPassword, verifyPassword } from "../lib/seo/auth";
 import { decryptSecret, encryptSecret } from "../lib/seo/crypto";
+import {
+  compareVastJobIndexSnapshots,
+  normalizeVastJobIndexInput,
+  parseVastJobIndexHtml,
+} from "../lib/seo/job-index";
 import { rateLimit, resetRateLimitsForTests } from "../lib/seo/rate-limit";
 import { APP_SESSION_COOKIE, signAppSession, verifyAppSessionCookie } from "../lib/seo/session";
 import {
   compareCompetitiveWebsites,
+  DEFAULT_CLIENT_FEATURE_FLAGS,
   extractWebsiteFacts,
   mergeCompetitiveBriefAutofill,
+  normalizeClientFeatureFlags,
   normalizeCompetitiveAnalysis,
   normalizeInsights,
   parseCompetitors,
@@ -724,6 +731,91 @@ test("tenant client ids are validated", () => {
   assert.equal(normalizeClientId("acme-client_1"), "acme-client_1");
   assert.equal(normalizeClientId(""), "demo-client");
   assert.throws(() => normalizeClientId("../other-client"), /Client id/);
+});
+
+test("client feature flags keep Landing Layer opt-in", () => {
+  const flags = normalizeClientFeatureFlags({ brain: true, watch: true });
+
+  assert.equal(flags.landing, false);
+  assert.equal(DEFAULT_CLIENT_FEATURE_FLAGS.landing, false);
+  assert.equal(normalizeClientFeatureFlags({ landing: true }).landing, true);
+});
+
+test("vast job index parser reads Next.js jobs payload", () => {
+  const jobs = [
+    {
+      id: "role-1",
+      slug: "systems-engineer-role-1",
+      title: "Systems Engineer",
+      team: "Engineering",
+      department: "Engineering",
+      location: "San Francisco",
+      workplace: "On-site",
+      employmentType: "Full-time",
+      compensation: "$120K – $180K",
+      compensationSummary: "$120K – $180K • Offers Equity",
+      salaryDetails: { minValue: 120000, maxValue: 180000, currencyCode: "USD" },
+      summary: "Build reliable GPU systems.",
+      descriptionHtml: "<p>Build reliable GPU systems.</p>",
+      applyUrl: "https://jobs.ashbyhq.com/vastai/role-1/application",
+    },
+  ];
+  const html = `<!doctype html><html><head><title>Jobs | Vast.ai</title><link rel="canonical" href="https://vast.ai/jobs" /></head><body><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { jobs } } })}</script></body></html>`;
+
+  const snapshot = parseVastJobIndexHtml(html, "https://vast.ai/jobs", "2026-07-08T00:00:00.000Z", 200);
+
+  assert.equal(snapshot.roles.length, 1);
+  assert.equal(snapshot.roles[0].title, "Systems Engineer");
+  assert.equal(snapshot.roles[0].salaryMin, 120000);
+  assert.equal(snapshot.roles[0].applyUrl, "https://jobs.ashbyhq.com/vastai/role-1/application");
+  assert.equal(snapshot.canonical, "https://vast.ai/jobs");
+  assert.equal(snapshot.nextDataJobs, true);
+  assert.equal(snapshot.googleIndexStatus, "unknown");
+});
+
+test("vast job index diff reports added and compensation changes", () => {
+  const previous = parseVastJobIndexHtml(
+    `<!doctype html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+      props: {
+        pageProps: {
+          jobs: [
+            { id: "role-1", slug: "systems", title: "Systems Engineer", compensation: "$120K – $180K", descriptionHtml: "<p>Old</p>" },
+          ],
+        },
+      },
+    })}</script>`,
+    "https://vast.ai/jobs",
+    "2026-07-07T00:00:00.000Z",
+    200
+  );
+  const current = parseVastJobIndexHtml(
+    `<!doctype html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+      props: {
+        pageProps: {
+          jobs: [
+            { id: "role-1", slug: "systems", title: "Systems Engineer", compensation: "$140K – $190K", descriptionHtml: "<p>Old</p>" },
+            { id: "role-2", slug: "security", title: "Security Engineer", compensation: "$145K – $185K", descriptionHtml: "<p>New</p>" },
+          ],
+        },
+      },
+    })}</script>`,
+    "https://vast.ai/jobs",
+    "2026-07-08T00:00:00.000Z",
+    200
+  );
+
+  const result = compareVastJobIndexSnapshots(current, previous);
+
+  assert.equal(result.status, "changed");
+  assert.equal(result.summary.openRoles, 2);
+  assert.equal(result.summary.addedRoles, 1);
+  assert.equal(result.summary.compensationChanges, 1);
+  assert.equal(result.changes.some((change) => change.kind === "role_added" && change.title === "Security Engineer"), true);
+});
+
+test("vast job index input is restricted to the reviewed jobs URL", () => {
+  assert.equal(normalizeVastJobIndexInput({ sourceUrl: "https://vast.ai/jobs" }).sourceUrl, "https://vast.ai/jobs");
+  assert.throws(() => normalizeVastJobIndexInput({ sourceUrl: "https://example.com/jobs" }), /only supports/);
 });
 
 test("rate limiter blocks after configured limit", () => {

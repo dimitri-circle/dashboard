@@ -140,7 +140,8 @@ select {
 .page-workspace > .admin-feature-panel,
 .page-workspace > .watch-status-strip,
 .page-workspace > .watch-mode-grid,
-.page-workspace > .watch-tool-stage {
+.page-workspace > .watch-tool-stage,
+.page-workspace > .landing-layer-grid {
   position: relative;
   z-index: 1;
 }
@@ -3091,6 +3092,150 @@ select {
   border-color: rgba(122, 77, 18, 0.22);
 }
 
+.landing-layer-workspace {
+  display: grid;
+  gap: 16px;
+}
+
+.landing-command-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 0.78fr) minmax(300px, 0.42fr);
+  gap: 18px;
+  align-items: center;
+}
+
+.landing-command-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.landing-command-actions .button {
+  width: auto;
+}
+
+.landing-layer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(320px, 0.88fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.landing-phase-panel {
+  grid-row: span 2;
+}
+
+.landing-phase-list,
+.landing-evidence-list,
+.landing-model-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.landing-phase-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.landing-phase-row[data-state="ready"],
+.landing-evidence-row[data-state="ready"] {
+  border-color: rgba(20, 92, 66, 0.24);
+}
+
+.landing-phase-row[data-state="missing"],
+.landing-evidence-row[data-state="missing"] {
+  border-color: rgba(122, 77, 18, 0.24);
+}
+
+.landing-phase-index {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid rgba(17, 18, 20, 0.12);
+  border-radius: 8px;
+  background: rgba(17, 18, 20, 0.88);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.landing-phase-row span,
+.landing-evidence-row span,
+.landing-model-list dt {
+  display: block;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.landing-phase-row strong,
+.landing-evidence-row strong,
+.landing-contract-grid strong {
+  display: block;
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1.15;
+}
+
+.landing-phase-row p,
+.landing-evidence-row p,
+.landing-contract-grid span,
+.landing-model-list dd {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.landing-contract-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.landing-contract-grid div,
+.landing-evidence-row,
+.landing-model-list div {
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.landing-evidence-row {
+  display: grid;
+  grid-template-columns: minmax(132px, 0.34fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.landing-evidence-row strong {
+  overflow-wrap: anywhere;
+}
+
+.landing-model-panel {
+  grid-column: 1 / -1;
+}
+
+.landing-model-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.landing-model-list dd {
+  margin: 6px 0 0;
+}
+
 .watch-command-panel {
   display: grid;
   grid-template-columns: minmax(0, 0.68fr) minmax(360px, 1fr);
@@ -3454,6 +3599,112 @@ select {
 
 .job-index-actions .button {
   width: auto;
+}
+
+.job-index-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.job-index-form label {
+  min-width: 0;
+}
+
+.job-index-results {
+  display: grid;
+  gap: 14px;
+}
+
+.job-index-empty,
+.job-index-change-list,
+.job-index-role-list,
+.job-index-history {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.job-index-empty span,
+.job-index-change-list p,
+.job-index-role-row span,
+.job-index-role-row dd,
+.job-index-change-row span,
+.job-index-change-row p {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.job-index-change-list h4,
+.job-index-role-list h4,
+.job-index-history h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.job-index-role-list h4 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.job-index-role-list h4 span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.job-index-change-row,
+.job-index-role-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.38fr);
+  gap: 12px;
+  align-items: center;
+  border: 1px solid rgba(17, 18, 20, 0.08);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.job-index-change-row[data-severity="high"] {
+  border-color: rgba(159, 31, 23, 0.2);
+}
+
+.job-index-change-row > div,
+.job-index-role-row > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.job-index-change-row strong,
+.job-index-role-row strong {
+  font-size: 0.96rem;
+  line-height: 1.25;
+}
+
+.job-index-role-row dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.job-index-role-row dt {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.job-index-role-row dd {
+  margin: 3px 0 0;
+  font-weight: 780;
 }
 
 .visitor-contract-panel {
@@ -5336,6 +5587,8 @@ select {
 
 @media (max-width: 1180px) {
   .page-command-panel,
+  .landing-command-panel,
+  .landing-layer-grid,
   .watch-command-panel,
   .tool-page-layout,
   .insights-layout,
@@ -5343,8 +5596,15 @@ select {
     grid-template-columns: 1fr;
   }
 
-  .page-command-actions {
+  .page-command-actions,
+  .landing-command-actions {
     justify-content: flex-start;
+  }
+
+  .landing-phase-panel,
+  .landing-model-panel {
+    grid-column: auto;
+    grid-row: auto;
   }
 }
 
@@ -5442,6 +5702,17 @@ select {
   .client-fit-summary,
   .human-edit-summary {
     grid-template-columns: 1fr;
+  }
+
+  .landing-phase-row,
+  .landing-evidence-row,
+  .landing-contract-grid,
+  .landing-model-list {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-phase-row .button {
+    width: 100%;
   }
 
   .client-fit-summary ul {
@@ -5687,6 +5958,11 @@ select {
   .watch-hero,
   .watch-layout,
   .watch-command-panel,
+  .landing-command-panel,
+  .landing-layer-grid,
+  .landing-contract-grid,
+  .landing-model-list,
+  .landing-evidence-row,
   .watch-status-strip,
   .dashboard-status-strip,
   .page-command-panel,
@@ -5698,8 +5974,11 @@ select {
   .watch-mode-grid,
   .brain-context-grid,
   .baseline-settings-grid,
+  .job-index-form,
   .job-index-readiness,
   .job-index-flow-grid,
+  .job-index-change-row,
+  .job-index-role-row,
   .visitor-metric-grid,
   .visitor-contract-grid,
   .visitor-observation-grid,

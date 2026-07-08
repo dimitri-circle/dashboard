@@ -6,11 +6,11 @@ import { Joyride, STATUS, type EventData, type Step, type TooltipRenderProps } f
 
 type Provider = "ga4" | "gtm" | "hotjar" | "openai" | "mcp";
 type Status = "disconnected" | "connected" | "error";
-type View = "clients" | "admin" | "overview" | "brain" | "watch" | "integrations" | "analysis" | "insights";
-type FeatureKey = "overview" | "brain" | "watch" | "integrations" | "analysis" | "insights";
+type View = "clients" | "admin" | "overview" | "brain" | "landing" | "watch" | "integrations" | "analysis" | "insights";
+type FeatureKey = "overview" | "brain" | "landing" | "watch" | "integrations" | "analysis" | "insights";
 type FeatureFlags = Record<FeatureKey, boolean>;
 type AppRole = "admin" | "operator" | "viewer";
-type NavIconName = "clients" | "admin" | "overview" | "brain" | "watch" | "tools" | "analysis" | "insights" | "menu" | "close" | "signout";
+type NavIconName = "clients" | "admin" | "overview" | "brain" | "landing" | "watch" | "tools" | "analysis" | "insights" | "menu" | "close" | "signout";
 type WebsiteWatchTool = "surface" | "tracker" | "social" | "visitors" | "jobIndex" | "deep";
 type DeepAuditAccess = "public" | "vercel" | "basic" | "login" | "custom";
 type ToastNoticeState = {
@@ -331,6 +331,111 @@ type SocialSurfaceResult = {
   issues: WebsiteSurfaceIssue[];
 };
 
+type VastJobIndexRole = {
+  id: string;
+  slug: string;
+  title: string;
+  team: string | null;
+  department: string | null;
+  location: string | null;
+  workplace: string | null;
+  employmentType: string | null;
+  compensation: string | null;
+  compensationSummary: string | null;
+  applyUrl: string | null;
+  summary: string | null;
+  descriptionHash: string;
+  descriptionSample: string | null;
+  salaryMin: number | null;
+  salaryMax: number | null;
+  currencyCode: string | null;
+};
+
+type VastJobIndexSnapshot = {
+  version: 1;
+  sourceUrl: string;
+  sourceOrigin: string;
+  capturedAt: string;
+  httpStatus: number | null;
+  ok: boolean;
+  pageTitle: string | null;
+  canonical: string | null;
+  robots: string | null;
+  noindex: boolean;
+  structuredJobPosting: boolean;
+  nextDataJobs: boolean;
+  googleIndexStatus: "unknown";
+  roles: VastJobIndexRole[];
+};
+
+type VastJobIndexChange = {
+  kind:
+    | "role_added"
+    | "role_removed"
+    | "title"
+    | "location"
+    | "workplace"
+    | "employment_type"
+    | "compensation"
+    | "apply_url"
+    | "description";
+  severity: WebsiteSurfaceIssue["severity"];
+  roleId: string;
+  title: string;
+  label: string;
+  detail: string;
+  before: string | null;
+  after: string | null;
+};
+
+type VastJobIndexResult = {
+  sourceUrl: string;
+  checkedAt: string;
+  status: "baseline" | "unchanged" | "changed" | "failed";
+  summary: {
+    openRoles: number;
+    addedRoles: number;
+    removedRoles: number;
+    changedRoles: number;
+    compensationChanges: number;
+    locationChanges: number;
+    applyUrlChanges: number;
+    missingApplyUrls: number;
+    noindex: boolean;
+    googleIndexKnown: boolean;
+  };
+  snapshot: VastJobIndexSnapshot;
+  changes: VastJobIndexChange[];
+};
+
+type VastJobIndexRun = {
+  id: string;
+  source_url: string;
+  source_origin: string;
+  status: VastJobIndexResult["status"];
+  summary_json: VastJobIndexResult["summary"];
+  changes_json: VastJobIndexChange[];
+  previous_captured_at: string | null;
+  checked_at: string;
+  created_at: string;
+};
+
+type VastJobIndexState = {
+  sourceUrl: string;
+  snapshot: VastJobIndexSnapshot | null;
+  runs: VastJobIndexRun[];
+  storageReady?: boolean;
+  storageError?: string | null;
+};
+
+type VastJobIndexRunResponse = {
+  result: VastJobIndexResult;
+  snapshot: VastJobIndexSnapshot | null;
+  run: VastJobIndexRun | null;
+  storageReady?: boolean;
+  storageError?: string | null;
+};
+
 type SeoChangeKind = "status" | "title" | "metaDescription" | "canonical" | "robots" | "h1" | "openGraph" | "copy" | "page";
 
 type SeoPageSnapshot = {
@@ -501,11 +606,12 @@ const providerDetails: Record<Provider, { title: string; description: string }> 
 
 const providerOrder = Object.keys(providerLabels) as Provider[];
 
-const featureKeys: FeatureKey[] = ["brain", "overview", "watch", "integrations", "analysis", "insights"];
+const featureKeys: FeatureKey[] = ["brain", "landing", "overview", "watch", "integrations", "analysis", "insights"];
 
 const defaultFeatureFlags: FeatureFlags = {
   overview: false,
   brain: true,
+  landing: false,
   watch: false,
   integrations: false,
   analysis: false,
@@ -517,6 +623,11 @@ const featureDetails: Record<FeatureKey, { label: string; description: string; a
     label: "Br(AI)N",
     description: "Content review and editorial QA with client-specific context.",
     audience: "client",
+  },
+  landing: {
+    label: "Landing Layer",
+    description: "Build-and-watch service command center for marketing pages.",
+    audience: "internal",
   },
   overview: {
     label: "Overview",
@@ -549,17 +660,22 @@ const featurePresets: Array<{ id: string; label: string; flags: FeatureFlags }> 
   {
     id: "content",
     label: "Content only",
-    flags: { brain: true, overview: false, watch: false, integrations: false, analysis: false, insights: false },
+    flags: { brain: true, landing: false, overview: false, watch: false, integrations: false, analysis: false, insights: false },
   },
   {
     id: "seo-core",
     label: "SEO core",
-    flags: { brain: true, overview: true, watch: true, integrations: false, analysis: false, insights: false },
+    flags: { brain: true, landing: false, overview: true, watch: true, integrations: false, analysis: false, insights: false },
+  },
+  {
+    id: "marketing-layer",
+    label: "Marketing layer",
+    flags: { brain: true, landing: true, overview: true, watch: true, integrations: true, analysis: true, insights: true },
   },
   {
     id: "full",
     label: "Full dashboard",
-    flags: { brain: true, overview: true, watch: true, integrations: true, analysis: true, insights: true },
+    flags: { brain: true, landing: true, overview: true, watch: true, integrations: true, analysis: true, insights: true },
   },
 ];
 
@@ -584,6 +700,7 @@ const navItems: Array<{ id: View; label: string; description: string; icon: NavI
   { id: "clients", label: "Clients", description: "Choose workspace", icon: "clients" },
   { id: "admin", label: "Admin", description: "Feature visibility", icon: "admin" },
   { id: "brain", label: "Br(AI)N", description: "Content review", icon: "brain", feature: "brain" },
+  { id: "landing", label: "Landing Layer", description: "Build and watch pages", icon: "landing", feature: "landing" },
   { id: "overview", label: "Overview", description: "Health and report coverage", icon: "overview", feature: "overview" },
   { id: "watch", label: "Website Watch", description: "Surface checks and audit setup", icon: "watch", feature: "watch" },
   { id: "integrations", label: "Tool Setup", description: "Connect keys and metadata", icon: "tools", feature: "integrations" },
@@ -596,7 +713,7 @@ const websiteWatchTools: Array<{ id: WebsiteWatchTool; label: string; descriptio
   { id: "tracker", label: "Baseline Watch", description: "Public site changes" },
   { id: "social", label: "Social Surface", description: "Public profile scan" },
   { id: "visitors", label: "Viewership", description: "Visitor and bot telemetry" },
-  { id: "jobIndex", label: "Vast Job Index", description: "Automation WIP" },
+  { id: "jobIndex", label: "Vast Job Index", description: "Jobs page monitor" },
   { id: "deep", label: "Deep Audit", description: "Protected access setup" },
 ];
 
@@ -614,6 +731,14 @@ const AI_SETUP_NOTIFICATION: SetupNotification = {
 };
 
 const productChangelog: ChangelogEntry[] = [
+  {
+    id: "landing-layer-service",
+    date: "Jul 8, 2026",
+    dateTime: "2026-07-08",
+    title: "Landing Layer command center",
+    summary: "Operators can now package build, instrumentation, monitoring, and improvement work into a single landing-page marketing layer.",
+    tags: ["Landing Layer", "Service"],
+  },
   {
     id: "brain-audit-modal-flow",
     date: "Jul 7, 2026",
@@ -657,6 +782,7 @@ const productChangelog: ChangelogEntry[] = [
 ];
 
 const DEFAULT_WATCH_SITE_URL = "https://vast.ai";
+const DEFAULT_VAST_JOB_INDEX_URL = "https://vast.ai/jobs";
 const DEFAULT_PRIORITY_PAGES = ["/", "/pricing", "/services", "/blog", "/contact"];
 
 const EMPTY_VISITOR_INTELLIGENCE_SUMMARY: VisitorIntelligenceSummary = {
@@ -704,6 +830,12 @@ const tourSteps: Step[] = [
     target: "[data-tour='nav-brain']",
     title: "Audit Vast blog drafts",
     content: "Br(AI)N checks a draft against current Vast truth sources and brand rules before publication.",
+    placement: "right",
+  },
+  {
+    target: "[data-tour='nav-landing']",
+    title: "Run the landing layer",
+    content: "Use this service view to build the page, connect measurement, watch changes, and decide the next marketing action.",
     placement: "right",
   },
   {
@@ -861,6 +993,12 @@ export function SeoDashboard() {
   const [surfaceResult, setSurfaceResult] = useState<WebsiteSurfaceResult | null>(null);
   const [socialScanning, setSocialScanning] = useState(false);
   const [socialResult, setSocialResult] = useState<SocialSurfaceResult | null>(null);
+  const [jobIndexScanning, setJobIndexScanning] = useState(false);
+  const [jobIndexSnapshot, setJobIndexSnapshot] = useState<VastJobIndexSnapshot | null>(null);
+  const [jobIndexResult, setJobIndexResult] = useState<VastJobIndexResult | null>(null);
+  const [jobIndexRuns, setJobIndexRuns] = useState<VastJobIndexRun[]>([]);
+  const [jobIndexStorageReady, setJobIndexStorageReady] = useState(true);
+  const [jobIndexStorageError, setJobIndexStorageError] = useState<string | null>(null);
   const [seoTracking, setSeoTracking] = useState(false);
   const [seoTrackerBaseline, setSeoTrackerBaseline] = useState<SeoChangeTrackerBaseline | null>(null);
   const [seoTrackerResult, setSeoTrackerResult] = useState<SeoChangeTrackerResult | null>(null);
@@ -975,6 +1113,11 @@ export function SeoDashboard() {
         setMetricSnapshots([]);
         setSurfaceResult(null);
         setSocialResult(null);
+        setJobIndexSnapshot(null);
+        setJobIndexResult(null);
+        setJobIndexRuns([]);
+        setJobIndexStorageReady(true);
+        setJobIndexStorageError(null);
         setSeoTrackerBaseline(null);
         setSeoTrackerResult(null);
         setSeoChangeRuns([]);
@@ -992,7 +1135,7 @@ export function SeoDashboard() {
         setClientId(resolvedClientId);
       }
 
-      const [integrationBody, insightBody, competitiveBody, metricBody, watchBody, visitorBody, healthBody] = await Promise.all([
+      const [integrationBody, insightBody, competitiveBody, metricBody, watchBody, jobIndexBody, visitorBody, healthBody] = await Promise.all([
         api<{ integrations: Integration[] }>(resolvedClientId, "/api/seo/integrations"),
         api<{ insights: Insight[] }>(resolvedClientId, "/api/seo/insights"),
         api<{ analyses: CompetitiveAnalysis[] }>(resolvedClientId, "/api/seo/competitive-analysis"),
@@ -1002,6 +1145,13 @@ export function SeoDashboard() {
           runs: [],
           storageReady: false,
           storageError: error instanceof Error ? error.message : "SEO Watch storage state could not be loaded.",
+        })),
+        api<VastJobIndexState>(resolvedClientId, "/api/seo/website-watch/job-index").catch((error) => ({
+          sourceUrl: DEFAULT_VAST_JOB_INDEX_URL,
+          snapshot: null,
+          runs: [],
+          storageReady: false,
+          storageError: error instanceof Error ? error.message : "Vast Job Index state could not be loaded.",
         })),
         api<VisitorIntelligenceSummary>(resolvedClientId, "/api/seo/visitor-intelligence").catch((error) => ({
           ...EMPTY_VISITOR_INTELLIGENCE_SUMMARY,
@@ -1018,6 +1168,10 @@ export function SeoDashboard() {
       setSeoChangeRuns(watchBody.runs);
       setSeoTrackerStorageReady(watchBody.storageReady !== false);
       setSeoTrackerStorageError(watchBody.storageError || null);
+      setJobIndexSnapshot(jobIndexBody.snapshot);
+      setJobIndexRuns(jobIndexBody.runs);
+      setJobIndexStorageReady(jobIndexBody.storageReady !== false);
+      setJobIndexStorageError(jobIndexBody.storageError || null);
       setVisitorIntelligence(visitorBody);
       setSeoHealthChecks(healthBody.checks);
 
@@ -1075,6 +1229,11 @@ export function SeoDashboard() {
     setCompetitiveAnalyses([]);
     setSurfaceResult(null);
     setSocialResult(null);
+    setJobIndexSnapshot(null);
+    setJobIndexResult(null);
+    setJobIndexRuns([]);
+    setJobIndexStorageReady(true);
+    setJobIndexStorageError(null);
     setSeoTrackerBaseline(null);
     setSeoTrackerResult(null);
     setSeoChangeRuns([]);
@@ -1361,6 +1520,36 @@ export function SeoDashboard() {
     }
   }
 
+  async function runVastJobIndex(payload: { sourceUrl: string }) {
+    try {
+      setJobIndexScanning(true);
+      const body = await api<VastJobIndexRunResponse>(clientId, "/api/seo/website-watch/job-index", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setJobIndexResult(body.result);
+      setJobIndexSnapshot(body.snapshot || body.result.snapshot);
+      setJobIndexStorageReady(body.storageReady !== false);
+      setJobIndexStorageError(body.storageError || null);
+      if (body.run) {
+        const persistedRun = body.run;
+        setJobIndexRuns((current) => [persistedRun, ...current.filter((run) => run.id !== persistedRun.id)].slice(0, 8));
+      }
+      setNotice({
+        type: body.storageReady === false ? "info" : body.result.status === "changed" ? "info" : "success",
+        message: body.storageReady === false
+          ? body.storageError || "Vast Job Index ran temporarily, but storage is not ready yet."
+          : body.result.status === "baseline"
+            ? `Vast Job Index baseline captured for ${body.result.summary.openRoles} open role${body.result.summary.openRoles === 1 ? "" : "s"}.`
+            : `Vast Job Index checked ${body.result.summary.openRoles} open role${body.result.summary.openRoles === 1 ? "" : "s"} and found ${body.result.changes.length} change${body.result.changes.length === 1 ? "" : "s"}.`,
+      });
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to run Vast Job Index scan." });
+    } finally {
+      setJobIndexScanning(false);
+    }
+  }
+
   async function runSeoChangeTracker(payload: { siteUrl: string; pages: string }) {
     try {
       setSeoTracking(true);
@@ -1525,6 +1714,8 @@ export function SeoDashboard() {
                   data-tour={
                     item.id === "brain"
                       ? "nav-brain"
+                      : item.id === "landing"
+                        ? "nav-landing"
                       : item.id === "watch"
                         ? "nav-watch"
                       : item.id === "integrations"
@@ -1675,6 +1866,29 @@ export function SeoDashboard() {
 
             {view === "brain" ? <BrainView activeClient={activeClient} clientId={clientId} currentUser={currentUser} /> : null}
 
+            {view === "landing" ? (
+              <LandingLayerView
+                activeClient={activeClient}
+                competitiveAnalyses={competitiveAnalyses}
+                insights={insights}
+                latestByProvider={latestByProvider}
+                metricSnapshots={metricSnapshots}
+                onOpenAnalysis={() => setView("analysis")}
+                onOpenBrain={() => setView("brain")}
+                onOpenIntegrations={() => setView("integrations")}
+                onOpenInsights={() => setView("insights")}
+                onOpenWatch={(tool) => {
+                  setActiveWatchTool(tool);
+                  setView("watch");
+                }}
+                seoTrackerBaseline={seoTrackerBaseline}
+                seoTrackerStorageReady={seoTrackerStorageReady}
+                socialResult={socialResult}
+                surfaceResult={surfaceResult}
+                visitorIntelligence={visitorIntelligence}
+              />
+            ) : null}
+
             {view === "watch" ? (
               <WebsiteWatchView
                 activeTool={activeWatchTool}
@@ -1682,12 +1896,19 @@ export function SeoDashboard() {
                 latestSiteUrl={competitiveAnalyses.find((analysis) => analysis.website_url)?.website_url || ""}
                 aiAnalysisConnected={Boolean(latestByProvider.openai || seoHealthChecks?.openai_api_key)}
                 onResetSeoTrackerBaseline={resetSeoTrackerBaseline}
+                onRunJobIndex={runVastJobIndex}
                 onRunSeoChangeTracker={runSeoChangeTracker}
                 onRunSocialSurfaceScan={runSocialSurfaceScan}
                 onRunSurfaceCheck={runWebsiteSurfaceCheck}
                 onSelectTool={setActiveWatchTool}
                 onConnectApiKey={openOpenAiSetup}
                 seoChangeRuns={seoChangeRuns}
+                jobIndexResult={jobIndexResult}
+                jobIndexRuns={jobIndexRuns}
+                jobIndexScanning={jobIndexScanning}
+                jobIndexSnapshot={jobIndexSnapshot}
+                jobIndexStorageError={jobIndexStorageError}
+                jobIndexStorageReady={jobIndexStorageReady}
                 visitorIntelligence={visitorIntelligence}
                 slackConnected={Boolean(seoHealthChecks?.slack_webhook)}
                 socialResult={socialResult}
@@ -1879,6 +2100,16 @@ function NavIcon({ name }: { name: NavIconName }) {
           <path {...common} d="M9 14h6" />
         </>
       ) : null}
+      {name === "landing" ? (
+        <>
+          <path {...common} d="M4 18.5V7.8a1.8 1.8 0 0 1 1.8-1.8h12.4A1.8 1.8 0 0 1 20 7.8v10.7" />
+          <path {...common} d="M4 10h16" />
+          <path {...common} d="M7.5 14h5" />
+          <path {...common} d="M7.5 16.5h3.5" />
+          <path {...common} d="M15 14.2l1.4 1.4 2.2-2.6" />
+          <path {...common} d="M3 20h18" />
+        </>
+      ) : null}
       {name === "watch" ? (
         <>
           <path {...common} d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z" />
@@ -1940,6 +2171,7 @@ function viewTitle(view: View, provider: Provider) {
   if (view === "clients") return "Clients";
   if (view === "admin") return "Admin";
   if (view === "brain") return "Br(AI)N";
+  if (view === "landing") return "Landing Layer";
   if (view === "watch") return "Website Watch";
   if (view === "integrations") return providerDetails[provider].title;
   if (view === "analysis") return "Competitive Analysis";
@@ -1951,6 +2183,7 @@ function viewDescription(view: View, clientName: string, provider: Provider) {
   if (view === "clients") return "Choose or create the active client workspace.";
   if (view === "admin") return "Manage logins, roles, and client feature visibility.";
   if (view === "brain") return `${clientName}: review drafts for truth, evidence, brand fit, and client-specific context.`;
+  if (view === "landing") return `${clientName}: build the marketing page, instrument it, watch it, and improve it from evidence.`;
   if (view === "watch") return `${clientName}: internal surface checks and deeper audit setup.`;
   if (view === "integrations") return `${clientName}: ${providerDetails[provider].description}`;
   if (view === "analysis") return `Generate competitive briefs for ${clientName}.`;
@@ -2656,6 +2889,293 @@ function ClientFeatureAccessMatrix({
         </table>
       </div>
     </div>
+  );
+}
+
+function LandingLayerView({
+  activeClient,
+  competitiveAnalyses,
+  insights,
+  latestByProvider,
+  metricSnapshots,
+  onOpenAnalysis,
+  onOpenBrain,
+  onOpenIntegrations,
+  onOpenInsights,
+  onOpenWatch,
+  seoTrackerBaseline,
+  seoTrackerStorageReady,
+  socialResult,
+  surfaceResult,
+  visitorIntelligence,
+}: {
+  activeClient?: Client;
+  competitiveAnalyses: CompetitiveAnalysis[];
+  insights: Insight[];
+  latestByProvider: Partial<Record<Provider, Integration>>;
+  metricSnapshots: MetricSnapshot[];
+  onOpenAnalysis: () => void;
+  onOpenBrain: () => void;
+  onOpenIntegrations: () => void;
+  onOpenInsights: () => void;
+  onOpenWatch: (tool: WebsiteWatchTool) => void;
+  seoTrackerBaseline: SeoChangeTrackerBaseline | null;
+  seoTrackerStorageReady: boolean;
+  socialResult: SocialSurfaceResult | null;
+  surfaceResult: WebsiteSurfaceResult | null;
+  visitorIntelligence: VisitorIntelligenceSummary;
+}) {
+  const ga4Summary = getGa4Summary(metricSnapshots);
+  const ga4Ready = latestByProvider.ga4?.status === "connected" || metricSnapshots.some((item) => item.provider === "ga4");
+  const tagReady = latestByProvider.gtm?.status === "connected";
+  const behaviorReady = latestByProvider.hotjar?.status === "connected";
+  const aiReady = latestByProvider.openai?.status === "connected";
+  const baselineReady = Boolean(seoTrackerBaseline && seoTrackerStorageReady);
+  const watchReady = baselineReady || Boolean(surfaceResult);
+  const socialReady = Boolean(socialResult);
+  const visitorReady = visitorIntelligence.totalEvents > 0;
+  const competitiveReady = competitiveAnalyses.length > 0;
+  const insightReady = insights.length > 0;
+  const trackedSiteUrl =
+    seoTrackerBaseline?.siteUrl ||
+    surfaceResult?.siteUrl ||
+    socialResult?.siteUrl ||
+    competitiveAnalyses.find((analysis) => analysis.website_url)?.website_url ||
+    "";
+  const readinessSignals = [
+    Boolean(activeClient),
+    competitiveReady,
+    ga4Ready,
+    tagReady,
+    watchReady,
+    socialReady,
+    visitorReady,
+    insightReady,
+  ];
+  const readinessScore = Math.round((readinessSignals.filter(Boolean).length / readinessSignals.length) * 100);
+  const readinessState = readinessScore >= 70 ? "ready" : readinessScore > 0 ? "idle" : "missing";
+  const connectedTools = [ga4Ready, tagReady, behaviorReady, aiReady].filter(Boolean).length;
+  const latestAnalysis = competitiveAnalyses[0];
+
+  const phases = [
+    {
+      name: "Build",
+      status: competitiveReady ? "Offer mapped" : "Needs offer map",
+      detail: competitiveReady
+        ? `${latestAnalysis.client_name} has a competitive evidence report.`
+        : "Define audience, promise, proof, and page sections before production.",
+      action: "Map Offer",
+      state: competitiveReady ? "ready" : "missing",
+      onClick: onOpenAnalysis,
+    },
+    {
+      name: "Instrument",
+      status: ga4Ready && tagReady ? "Analytics ready" : ga4Ready ? "GA4 partial" : "Needs analytics",
+      detail: ga4Ready
+        ? `${formatNumber(ga4Summary.pageViews)} page views are available from synced GA4 snapshots.`
+        : "Connect GA4 and tag routing so traffic can be tied to the landing page.",
+      action: "Connect Tools",
+      state: ga4Ready && tagReady ? "ready" : ga4Ready ? "idle" : "missing",
+      onClick: onOpenIntegrations,
+    },
+    {
+      name: "Watch",
+      status: baselineReady ? "Baseline active" : surfaceResult ? "Surface checked" : "Needs baseline",
+      detail: baselineReady
+        ? `${seoTrackerBaseline?.pages.length || 0} public page${seoTrackerBaseline?.pages.length === 1 ? "" : "s"} are under baseline watch.`
+        : "Capture the page state so future SEO, copy, and technical changes are visible.",
+      action: baselineReady ? "Open Watch" : "Capture Baseline",
+      state: baselineReady ? "ready" : surfaceResult ? "idle" : "missing",
+      onClick: () => onOpenWatch(baselineReady ? "surface" : "tracker"),
+    },
+    {
+      name: "Improve",
+      status: insightReady ? "Actions queued" : "Needs action set",
+      detail: insightReady
+        ? `${insights.length} saved recommendation${insights.length === 1 ? "" : "s"} can guide the next iteration.`
+        : "Generate recommendations only after the page, traffic, and watch signals exist.",
+      action: "Review Insights",
+      state: insightReady ? "ready" : "idle",
+      onClick: onOpenInsights,
+    },
+  ] satisfies Array<{
+    name: string;
+    status: string;
+    detail: string;
+    action: string;
+    state: "ready" | "idle" | "missing";
+    onClick: () => void;
+  }>;
+
+  const evidenceRows = [
+    {
+      label: "Tracked site",
+      value: trackedSiteUrl || "Not set",
+      detail: trackedSiteUrl ? "Used by crawl, social, and watch checks." : "Add a client URL through Competitive Analysis or Website Watch.",
+      state: trackedSiteUrl ? "ready" : "missing",
+    },
+    {
+      label: "Traffic",
+      value: ga4Ready ? `${formatNumber(ga4Summary.activeUsers)} users` : "Missing",
+      detail: "Landing page performance needs GA4 or equivalent pageview and conversion evidence.",
+      state: ga4Ready ? "ready" : "missing",
+    },
+    {
+      label: "Visitor evidence",
+      value: visitorReady ? `${visitorIntelligence.totalEvents} events` : "No events",
+      detail: "Server-side visitor and bot evidence proves whether crawlers and humans are reaching the site.",
+      state: visitorReady ? "ready" : "idle",
+    },
+    {
+      label: "Social surface",
+      value: socialResult ? socialResult.status : "Not run",
+      detail: socialResult
+        ? `${socialResult.summary.checkedProfiles} profile${socialResult.summary.checkedProfiles === 1 ? "" : "s"} checked.`
+        : "Run Social Surface to verify public profile metadata and blocked coverage.",
+      state: socialResult ? (socialResult.status === "healthy" ? "ready" : "idle") : "missing",
+    },
+  ] satisfies Array<{ label: string; value: string; detail: string; state: "ready" | "idle" | "missing" }>;
+
+  return (
+    <PageWorkspace className="landing-layer-workspace" tourId="landing-layer">
+      <PageHero
+        eyebrow="Landing page service"
+        title="Build the page, then watch the market response."
+        description="Package page production, measurement, crawl monitoring, social checks, and improvement work into one repeatable client service."
+        stats={[
+          { label: "service readiness", value: `${readinessScore}%` },
+          { label: "connected tools", value: `${connectedTools}/4`, helper: "GA4, GTM, Hotjar, OpenAI" },
+          { label: "watch state", value: baselineReady ? "Baseline" : surfaceResult ? "Checked" : "Missing" },
+        ]}
+      />
+
+      <div className="dashboard-status-strip landing-status-strip" aria-label="Landing Layer status">
+        <DashboardStatusPill label="Readiness" value={`${readinessScore}%`} state={readinessState} />
+        <DashboardStatusPill label="Offer" value={competitiveReady ? "Mapped" : "Missing"} state={competitiveReady ? "ready" : "missing"} />
+        <DashboardStatusPill label="Analytics" value={ga4Ready ? "GA4 ready" : "Missing"} state={ga4Ready ? "ready" : "missing"} />
+        <DashboardStatusPill label="Watch" value={baselineReady ? "Baseline" : surfaceResult ? "Surface" : "Missing"} state={watchReady ? "ready" : "missing"} />
+        <DashboardStatusPill label="Demand" value={visitorReady ? `${visitorIntelligence.totalEvents} events` : "No events"} state={visitorReady ? "ready" : "idle"} />
+      </div>
+
+      <section className="panel landing-command-panel" aria-labelledby="landing-command-title">
+        <div className="page-command-copy">
+          <span className="eyebrow">Service command</span>
+          <h3 id="landing-command-title">Launch the build-and-watch workflow.</h3>
+          <p>
+            The service works when the page promise, instrumentation, baseline watch, and improvement loop are all visible in one client workspace.
+          </p>
+        </div>
+        <div className="landing-command-actions">
+          <button className="button button-primary" type="button" onClick={() => onOpenWatch(baselineReady ? "surface" : "tracker")}>
+            {baselineReady ? "Open Website Watch" : "Capture Baseline"}
+          </button>
+          <button className="button" type="button" onClick={onOpenIntegrations}>
+            Connect Tools
+          </button>
+          <button className="button" type="button" onClick={onOpenBrain}>
+            Audit Copy
+          </button>
+        </div>
+      </section>
+
+      <div className="landing-layer-grid">
+        <section className="panel landing-phase-panel" aria-labelledby="landing-phases-title">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Operating loop</span>
+              <h3 id="landing-phases-title">Build, instrument, watch, improve.</h3>
+            </div>
+          </div>
+          <div className="landing-phase-list">
+            {phases.map((phase, index) => (
+              <article className="landing-phase-row" data-state={phase.state} key={phase.name}>
+                <div className="landing-phase-index" aria-hidden="true">
+                  {index + 1}
+                </div>
+                <div>
+                  <span>{phase.name}</span>
+                  <strong>{phase.status}</strong>
+                  <p>{phase.detail}</p>
+                </div>
+                <button className="button button-compact" type="button" onClick={phase.onClick}>
+                  {phase.action}
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel landing-contract-panel" aria-labelledby="landing-contract-title">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Client promise</span>
+              <h3 id="landing-contract-title">What the service includes.</h3>
+            </div>
+          </div>
+          <div className="landing-contract-grid">
+            <div>
+              <strong>Landing page</strong>
+              <span>Offer, proof, CTA, tracking plan, and launch checklist.</span>
+            </div>
+            <div>
+              <strong>Marketing layer</strong>
+              <span>GA4, tags, social preview checks, visitor evidence, and search/crawl signals.</span>
+            </div>
+            <div>
+              <strong>Watch plan</strong>
+              <span>Baseline scans, surface checks, social coverage, and alert-ready change history.</span>
+            </div>
+            <div>
+              <strong>Improvement loop</strong>
+              <span>Br(AI)N copy review, competitive gaps, insight cards, and next-action ownership.</span>
+            </div>
+          </div>
+        </section>
+
+        <section className="panel landing-evidence-panel" aria-labelledby="landing-evidence-title">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Evidence</span>
+              <h3 id="landing-evidence-title">Current proof surface.</h3>
+            </div>
+          </div>
+          <div className="landing-evidence-list">
+            {evidenceRows.map((row) => (
+              <div className="landing-evidence-row" data-state={row.state} key={row.label}>
+                <div>
+                  <span>{row.label}</span>
+                  <strong>{row.value}</strong>
+                </div>
+                <p>{row.detail}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel landing-model-panel" aria-labelledby="landing-model-title">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">System model</span>
+              <h3 id="landing-model-title">How the engine thinks.</h3>
+            </div>
+          </div>
+          <dl className="landing-model-list">
+            <div>
+              <dt>Inputs</dt>
+              <dd>Offer, page URL, content, analytics, tags, public crawl output, social profiles, and visitor events.</dd>
+            </div>
+            <div>
+              <dt>Processing</dt>
+              <dd>Compare promised page state against observed traffic, crawl health, social visibility, and content quality.</dd>
+            </div>
+            <div>
+              <dt>Outputs</dt>
+              <dd>One landing-page status, a watch plan, and the next measurable improvement action.</dd>
+            </div>
+          </dl>
+        </section>
+      </div>
+    </PageWorkspace>
   );
 }
 
@@ -4131,9 +4651,16 @@ function WebsiteWatchView({
   activeTool,
   activeClient,
   aiAnalysisConnected,
+  jobIndexResult,
+  jobIndexRuns,
+  jobIndexScanning,
+  jobIndexSnapshot,
+  jobIndexStorageError,
+  jobIndexStorageReady,
   latestSiteUrl,
   onConnectApiKey,
   onResetSeoTrackerBaseline,
+  onRunJobIndex,
   onRunSeoChangeTracker,
   onRunSocialSurfaceScan,
   onRunSurfaceCheck,
@@ -4154,9 +4681,16 @@ function WebsiteWatchView({
   activeTool: WebsiteWatchTool;
   activeClient?: Client;
   aiAnalysisConnected: boolean;
+  jobIndexResult: VastJobIndexResult | null;
+  jobIndexRuns: VastJobIndexRun[];
+  jobIndexScanning: boolean;
+  jobIndexSnapshot: VastJobIndexSnapshot | null;
+  jobIndexStorageError: string | null;
+  jobIndexStorageReady: boolean;
   latestSiteUrl: string;
   onConnectApiKey: () => void;
   onResetSeoTrackerBaseline: () => void;
+  onRunJobIndex: (payload: { sourceUrl: string }) => void;
   onRunSeoChangeTracker: (payload: { siteUrl: string; pages: string }) => void;
   onRunSocialSurfaceScan: (payload: { siteUrl: string; profileUrls: string }) => void;
   onRunSurfaceCheck: (payload: { siteUrl: string; pages: string; expectedText: string }) => void;
@@ -4179,14 +4713,21 @@ function WebsiteWatchView({
   const [priorityPages, setPriorityPages] = useState(DEFAULT_PRIORITY_PAGES.join("\n"));
   const [customPriorityPage, setCustomPriorityPage] = useState("");
   const [socialProfileUrls, setSocialProfileUrls] = useState("");
+  const [jobIndexSourceUrl, setJobIndexSourceUrl] = useState(jobIndexSnapshot?.sourceUrl || DEFAULT_VAST_JOB_INDEX_URL);
   const guidance = deepAuditGuidance[accessMethod];
   const normalizedPriorityPages = priorityPagesText(priorityPages) || DEFAULT_PRIORITY_PAGES.join("\n");
-  const lastRunAt = seoChangeRuns[0]?.checked_at || seoTrackerResult?.checkedAt || socialResult?.checkedAt || surfaceResult?.checkedAt || null;
+  const lastRunAt = jobIndexRuns[0]?.checked_at || jobIndexResult?.checkedAt || seoChangeRuns[0]?.checked_at || seoTrackerResult?.checkedAt || socialResult?.checkedAt || surfaceResult?.checkedAt || null;
   const baselineStatus = !seoTrackerStorageReady
     ? "Setup needed"
     : seoTrackerBaseline
       ? "Captured"
       : "Missing";
+  const jobIndexRoleCount = jobIndexResult?.summary.openRoles ?? jobIndexSnapshot?.roles.length ?? null;
+  const jobIndexStatus = jobIndexRoleCount !== null
+      ? `${jobIndexRoleCount} roles`
+    : !jobIndexStorageReady
+      ? "Setup needed"
+      : "Not run";
   const visitorStatus = visitorIntelligence.storageReady === false
     ? "Setup needed"
     : visitorIntelligence.totalEvents
@@ -4226,6 +4767,14 @@ function WebsiteWatchView({
     });
   }
 
+  function handleJobIndexSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    onRunJobIndex({
+      sourceUrl: String(formData.get("sourceUrl") || jobIndexSourceUrl),
+    });
+  }
+
   function runSurfaceFromCommand() {
     onSelectTool("surface");
     onRunSurfaceCheck({
@@ -4249,6 +4798,11 @@ function WebsiteWatchView({
       siteUrl: watchSiteUrl,
       profileUrls: socialProfileUrls,
     });
+  }
+
+  function runJobIndexFromCommand() {
+    onSelectTool("jobIndex");
+    onRunJobIndex({ sourceUrl: jobIndexSourceUrl });
   }
 
   function addPriorityPage(path: string) {
@@ -4277,7 +4831,7 @@ function WebsiteWatchView({
       <PageHero
         eyebrow="Website monitoring"
         title="Check what changed or broke."
-        description="Run fast public checks, capture public baselines, and prepare deeper audits or Vast Job Index automation when the runner is ready."
+        description="Run fast public checks, capture public baselines, scan public social profiles, and monitor the Vast jobs page."
       />
 
       <div className="watch-status-strip" aria-label="Website Watch setup status">
@@ -4290,7 +4844,7 @@ function WebsiteWatchView({
           state={socialResult ? (socialResult.status === "healthy" ? "ready" : "missing") : "idle"}
         />
         <WatchStatusPill label="Viewership" value={visitorStatus} state={visitorIntelligence.totalEvents ? "ready" : visitorIntelligence.storageReady === false ? "missing" : "idle"} />
-        <WatchStatusPill label="Job Index" value="WIP" state="idle" />
+        <WatchStatusPill label="Job Index" value={jobIndexStatus} state={jobIndexRoleCount !== null && jobIndexStorageReady ? "ready" : jobIndexStorageReady ? "idle" : "missing"} />
         <WatchStatusPill label="Last Run" value={lastRunAt ? new Date(lastRunAt).toLocaleString() : "Never"} state={lastRunAt ? "ready" : "idle"} />
       </div>
 
@@ -4320,6 +4874,9 @@ function WebsiteWatchView({
             </button>
             <button className="button" type="button" onClick={runSocialFromCommand} disabled={socialScanning}>
               {socialScanning ? "Scanning..." : "Scan Social"}
+            </button>
+            <button className="button" type="button" onClick={runJobIndexFromCommand} disabled={jobIndexScanning}>
+              {jobIndexScanning ? "Scanning..." : "Scan Jobs"}
             </button>
             <button className="button" type="button" disabled title="Scheduling needs the next backend runner connection.">
               Schedule Watch
@@ -4368,10 +4925,11 @@ function WebsiteWatchView({
         <WatchModeCard
           active={activeTool === "jobIndex"}
           title="Vast Job Index"
-          subtitle="Automation WIP"
-          description="Define the watched job-index feed before enabling a runner."
-          cta="Review setup"
-          onClick={() => onSelectTool("jobIndex")}
+          subtitle="Jobs page monitor"
+          description="Track open roles, compensation, locations, and application URL changes."
+          cta={jobIndexScanning ? "Scanning..." : "Run scanner"}
+          onClick={runJobIndexFromCommand}
+          disabled={jobIndexScanning}
         />
         <WatchModeCard
           active={activeTool === "deep"}
@@ -4579,7 +5137,20 @@ function WebsiteWatchView({
           </section>
         ) : null}
 
-        {activeTool === "jobIndex" ? <VastJobIndexAutomationPanel onOpenBaseline={() => onSelectTool("tracker")} /> : null}
+        {activeTool === "jobIndex" ? (
+          <VastJobIndexPanel
+            jobIndexResult={jobIndexResult}
+            jobIndexRuns={jobIndexRuns}
+            jobIndexScanning={jobIndexScanning}
+            jobIndexSnapshot={jobIndexSnapshot}
+            sourceUrl={jobIndexSourceUrl}
+            storageError={jobIndexStorageError}
+            storageReady={jobIndexStorageReady}
+            onOpenBaseline={() => onSelectTool("tracker")}
+            onSourceUrlChange={setJobIndexSourceUrl}
+            onSubmit={handleJobIndexSubmit}
+          />
+        ) : null}
 
         {activeTool === "visitors" ? (
           <VisitorIntelligencePanel
@@ -4968,86 +5539,242 @@ function visitorCategoryLabel(category: VisitorIntelligenceEvent["botCategory"])
   return "Unknown automation";
 }
 
-function VastJobIndexAutomationPanel({ onOpenBaseline }: { onOpenBaseline: () => void }) {
-  const automationFlow = [
-    {
-      title: "Inputs",
-      detail: "Exact Vast job-index URL, watched fields, expected refresh cadence, and any required allowlist.",
-    },
-    {
-      title: "Processing",
-      detail: "Fetch the public job index, normalize the rows, compare against the last snapshot, then classify material changes.",
-    },
-    {
-      title: "Outputs",
-      detail: "Dashboard status, saved history, and Slack alerts when index shape, availability, or key job signals change.",
-    },
-    {
-      title: "Dependencies",
-      detail: "Reviewed runner, durable storage, Slack webhook, and a rollback path that disables only this automation.",
-    },
-  ];
-
-  const activationSteps = [
-    "Confirm the exact public source and fields the automation should watch.",
-    "Add a read-only runner endpoint or scheduled workflow.",
-    "Persist snapshots separately from the current page baseline tables.",
-    "Add a dry-run result before enabling Slack alerts.",
-  ];
+function VastJobIndexPanel({
+  jobIndexResult,
+  jobIndexRuns,
+  jobIndexScanning,
+  jobIndexSnapshot,
+  onOpenBaseline,
+  onSourceUrlChange,
+  onSubmit,
+  sourceUrl,
+  storageError,
+  storageReady,
+}: {
+  jobIndexResult: VastJobIndexResult | null;
+  jobIndexRuns: VastJobIndexRun[];
+  jobIndexScanning: boolean;
+  jobIndexSnapshot: VastJobIndexSnapshot | null;
+  onOpenBaseline: () => void;
+  onSourceUrlChange: (sourceUrl: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  sourceUrl: string;
+  storageError: string | null;
+  storageReady: boolean;
+}) {
+  const latestSnapshot = jobIndexResult?.snapshot || jobIndexSnapshot;
+  const latestResult =
+    jobIndexResult ||
+    (latestSnapshot
+      ? {
+          sourceUrl: latestSnapshot.sourceUrl,
+          checkedAt: latestSnapshot.capturedAt,
+          status: "unchanged" as const,
+          summary: {
+            openRoles: latestSnapshot.roles.length,
+            addedRoles: 0,
+            removedRoles: 0,
+            changedRoles: 0,
+            compensationChanges: 0,
+            locationChanges: 0,
+            applyUrlChanges: 0,
+            missingApplyUrls: latestSnapshot.roles.filter((role) => !role.applyUrl).length,
+            noindex: latestSnapshot.noindex,
+            googleIndexKnown: false,
+          },
+          snapshot: latestSnapshot,
+          changes: [],
+        }
+      : null);
 
   return (
     <section className="panel job-index-panel" aria-labelledby="job-index-title">
       <div className="section-heading">
         <div>
-          <span className="eyebrow">Vast Job Index automation</span>
-          <h3 id="job-index-title">Track job-index drift without claiming it is live.</h3>
-          <p>This is a WIP control surface. It shows the automation contract, but it does not run a job-index crawler yet.</p>
+          <span className="eyebrow">Vast Job Index</span>
+          <h3 id="job-index-title">Track the public jobs page.</h3>
+          <p>Scan the server-rendered jobs data, compare it to the last saved snapshot, and flag role, compensation, location, and apply-link changes.</p>
         </div>
-        <span className="job-index-badge">WIP</span>
+        <span className="job-index-badge">{storageReady ? "Runner ready" : "Temporary"}</span>
       </div>
 
-      <div className="job-index-readiness" aria-label="Job index readiness">
+      <form className="watch-form job-index-form" onSubmit={onSubmit}>
+        <label>
+          Source URL
+          <input
+            name="sourceUrl"
+            type="url"
+            value={sourceUrl}
+            onChange={(event) => onSourceUrlChange(event.target.value)}
+            required
+          />
+        </label>
+        <div className="job-index-actions">
+          <button className="button button-primary" type="submit" disabled={jobIndexScanning}>
+            {jobIndexScanning ? "Scanning jobs..." : "Run Job Index Scan"}
+          </button>
+          <button className="button" type="button" onClick={onOpenBaseline}>
+            Open Baseline Watch
+          </button>
+        </div>
+      </form>
+
+      {!storageReady ? (
+        <div className="tracker-baseline-note" data-ready="false">
+          <strong>Storage setup needed</strong>
+          <span>{storageError || "Scans can run temporarily, but saved snapshots and history need the Job Index storage migration."}</span>
+        </div>
+      ) : null}
+
+      {latestResult ? <VastJobIndexResults result={latestResult} /> : <VastJobIndexEmptyState storageReady={storageReady} />}
+      <VastJobIndexRunHistory runs={jobIndexRuns} storageError={storageError} storageReady={storageReady} />
+    </section>
+  );
+}
+
+function VastJobIndexEmptyState({ storageReady }: { storageReady: boolean }) {
+  return (
+    <div className="job-index-empty">
+      <strong>No job scan yet.</strong>
+      <span>
+        {storageReady
+          ? "Run the first scan to capture a baseline for https://vast.ai/jobs."
+          : "Run a temporary scan to verify parsing before the storage migration is applied."}
+      </span>
+    </div>
+  );
+}
+
+function VastJobIndexResults({ result }: { result: VastJobIndexResult }) {
+  const visibleChanges = result.changes.slice(0, 6);
+  const visibleRoles = result.snapshot.roles.slice(0, 12);
+  const totalRoleCount = Math.max(result.summary.openRoles, result.snapshot.roles.length);
+  const roleListSummary = visibleRoles.length === totalRoleCount ? `${visibleRoles.length} shown` : `${visibleRoles.length} shown of ${totalRoleCount}`;
+
+  return (
+    <div className="job-index-results" aria-label="Vast Job Index result">
+      <div className="job-index-readiness" aria-label="Job index metrics">
         <div>
-          <span>Runner</span>
-          <strong>Not connected</strong>
+          <span>Open roles</span>
+          <strong>{result.summary.openRoles}</strong>
         </div>
         <div>
-          <span>Storage</span>
-          <strong>Not defined</strong>
+          <span>Changed roles</span>
+          <strong>{result.summary.changedRoles}</strong>
         </div>
         <div>
-          <span>Alerts</span>
-          <strong>Hold until dry run</strong>
+          <span>Google index</span>
+          <strong>{result.summary.googleIndexKnown ? "Known" : "Unknown"}</strong>
         </div>
       </div>
 
-      <div className="job-index-flow-grid" aria-label="Job index system breakdown">
-        {automationFlow.map((item) => (
-          <article key={item.title}>
-            <span>{item.title}</span>
-            <p>{item.detail}</p>
+      <div className="job-index-flow-grid" aria-label="Job index diagnostics">
+        <article>
+          <span>Source</span>
+          <p>{result.snapshot.nextDataJobs ? "Next.js jobs payload parsed" : "Visible HTML fallback parsed"}</p>
+        </article>
+        <article>
+          <span>Indexability</span>
+          <p>{result.snapshot.noindex ? "Page is marked noindex" : "No noindex metadata found"}</p>
+        </article>
+        <article>
+          <span>Canonical</span>
+          <p>{result.snapshot.canonical || "No canonical found"}</p>
+        </article>
+        <article>
+          <span>Checked</span>
+          <p>{new Date(result.checkedAt).toLocaleString()}</p>
+        </article>
+      </div>
+
+      <div className="job-index-change-list" aria-label="Job index changes">
+        <h4>Changes</h4>
+        {visibleChanges.length ? (
+          visibleChanges.map((change) => (
+            <article className="job-index-change-row" data-severity={change.severity} key={`${change.kind}-${change.roleId}-${change.label}`}>
+              <div>
+                <strong>{change.label}</strong>
+                <span>{change.title}</span>
+              </div>
+              <p>{change.after || change.before || change.detail}</p>
+            </article>
+          ))
+        ) : (
+          <p>No role changes detected against the current saved snapshot.</p>
+        )}
+      </div>
+
+      <div className="job-index-role-list" aria-label="Current open roles">
+        <h4>
+          Current roles
+          <span>{roleListSummary}</span>
+        </h4>
+        {visibleRoles.map((role) => (
+          <article className="job-index-role-row" key={role.id}>
+            <div>
+              <strong>{role.title}</strong>
+              <span>{[role.team, role.location, role.workplace].filter(Boolean).join(" · ") || "Role metadata pending"}</span>
+            </div>
+            <dl>
+              <div>
+                <dt>Comp</dt>
+                <dd>{role.compensation || "Not listed"}</dd>
+              </div>
+              <div>
+                <dt>Apply</dt>
+                <dd>{role.applyUrl ? "Present" : "Missing"}</dd>
+              </div>
+            </dl>
           </article>
         ))}
       </div>
+    </div>
+  );
+}
 
-      <div className="job-index-checklist" aria-label="Activation checklist">
-        <h4>Activation checklist</h4>
-        <ol>
-          {activationSteps.map((step) => (
-            <li key={step}>{step}</li>
+function VastJobIndexRunHistory({
+  runs,
+  storageError,
+  storageReady,
+}: {
+  runs: VastJobIndexRun[];
+  storageError: string | null;
+  storageReady: boolean;
+}) {
+  return (
+    <div className="job-index-history" aria-label="Vast Job Index run history">
+      <h4>Recent job scans</h4>
+      {runs.length ? (
+        <div className="seo-run-list">
+          {runs.map((run) => (
+            <article className="seo-run-row" data-status={run.status} key={run.id}>
+              <div>
+                <strong>{seoChangeStatusLabel(run.status)}</strong>
+                <span>{run.source_url}</span>
+              </div>
+              <dl>
+                <div>
+                  <dt>Checked</dt>
+                  <dd>{new Date(run.checked_at).toLocaleString()}</dd>
+                </div>
+                <div>
+                  <dt>Open roles</dt>
+                  <dd>{run.summary_json.openRoles}</dd>
+                </div>
+                <div>
+                  <dt>Changes</dt>
+                  <dd>{Array.isArray(run.changes_json) ? run.changes_json.length : 0}</dd>
+                </div>
+              </dl>
+            </article>
           ))}
-        </ol>
-      </div>
-
-      <div className="job-index-actions">
-        <button className="button button-primary" type="button" disabled title="The Vast Job Index runner is not connected yet.">
-          Runner not connected yet
-        </button>
-        <button className="button" type="button" onClick={onOpenBaseline}>
-          Open Baseline Watch
-        </button>
-      </div>
-    </section>
+        </div>
+      ) : (
+        <div className="empty-state">
+          {storageReady ? "No saved job scans yet." : storageError || "Job Index storage is not ready yet."}
+        </div>
+      )}
+    </div>
   );
 }
 

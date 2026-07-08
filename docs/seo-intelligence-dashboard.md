@@ -43,7 +43,7 @@ For Vercel, add the same values under Project Settings → Environment Variables
 - `SEO_APP_SESSION_TOKEN` (recommended random signing secret for the HTTP-only login cookie; falls back to `CRON_SECRET` if omitted)
 - `WEBSITE_WATCH_GITHUB_OWNER`, `WEBSITE_WATCH_GITHUB_REPO`, `WEBSITE_WATCH_GITHUB_WORKFLOW`, `WEBSITE_WATCH_GITHUB_REF`, and `WEBSITE_WATCH_GITHUB_TOKEN` (optional future deep-audit workflow dispatch settings)
 - `SLACK_WEBHOOK_URL` (optional shared deep-audit or alert delivery target)
-- `SEO_WATCH_SLACK_WEBHOOK_URL` (optional SEO Watch-specific Slack incoming webhook; falls back to `SLACK_WEBHOOK_URL`)
+- `SEO_WATCH_SLACK_WEBHOOK_URL` (optional SEO Watch-specific Slack incoming webhook for SEO Change Tracker and Vast Job Index alerts; falls back to `SLACK_WEBHOOK_URL`)
 - `SEO_VISITOR_INGEST_SECRET` (optional shared server-side secret for signed visitor and bot telemetry ingestion)
 - `SEO_VISITOR_IP_HASH_SALT` (optional salt for visitor IP hashes; falls back to `SEO_VISITOR_INGEST_SECRET`)
 
@@ -74,7 +74,7 @@ curl http://localhost:3000/api/seo/health
 
 ## Client Workspaces
 
-The dashboard opens with a client selection stage. If no clients exist, it only asks for the first client. After a client exists, the dashboard shows Overview, Tool Setup, Competitive Analysis, and Insights. Tool Setup is split into focused setup pages for GA4, GTM, Hotjar, ChatGPT / OpenAI, and MCP so users can configure one connector at a time. The selected client id is sent to every SEO API request as `x-seo-client-id`, and Supabase reads/writes are filtered by that value. This means each client workspace has separate:
+The dashboard opens with a client selection stage. If no clients exist, it only asks for the first client. After a client exists, the dashboard can show Br(AI)N, Landing Layer, Overview, Website Watch, Tool Setup, Competitive Analysis, and Insights based on the workspace feature flags. Tool Setup is split into focused setup pages for GA4, GTM, Hotjar, ChatGPT / OpenAI, and MCP so users can configure one connector at a time. The selected client id is sent to every SEO API request as `x-seo-client-id`, and Supabase reads/writes are filtered by that value. This means each client workspace has separate:
 
 - integration metadata
 - encrypted API keys
@@ -92,6 +92,17 @@ For temporary controlled deployments, set `SEO_ALLOWED_CLIENT_IDS` to a comma-se
 
 The dashboard includes a built-in product tour powered by React Joyride. It highlights the overview, sidebar, client switcher, focused Tool Setup entry point, tool page picker, competitive analysis, and insight feed. The implementation uses configured steps and a dark overlay so users can learn the workflow in place. The tutorial copy now explains that connector setup is separated by tool instead of showing every setup form on one screen.
 
+## Landing Layer
+
+Landing Layer packages the managed landing-page service into one operator view. It does not generate or deploy a website by itself. Instead, it gives the team a build-and-watch command center for a client workspace:
+
+- Build: map the offer, audience, proof, CTA, and competitive context.
+- Instrument: connect GA4, GTM, Hotjar, and OpenAI where available.
+- Watch: run Website Watch surface checks, capture a public baseline, review Social Surface coverage, receive visitor evidence, and monitor Vast job-index changes.
+- Improve: use Br(AI)N, Competitive Analysis, and Insights to decide the next measurable action.
+
+The module derives readiness from existing workspace data such as metric snapshots, SEO baselines, visitor events, social scans, competitive reports, and saved insights. Missing data is shown as missing or partial. This keeps the service promise separate from unverified analytics or deployment claims.
+
 ## Website Watch
 
 The dashboard includes Website Watch for two levels of site review:
@@ -100,7 +111,7 @@ The dashboard includes Website Watch for two levels of site review:
 - Deep Audit is a setup worksheet for the heavier browser path. Use it when a site requires Vercel protection bypass, basic auth, a test login, or a custom access header. Store secrets in GitHub or Vercel, not in public client code. The actual browser runner should execute in GitHub Actions or a worker when those credentials are configured.
 - SEO Change Tracker stores the latest baseline per client and site URL in `seo_watch_baselines`, stores each scan in `seo_change_runs`, and compares every new public crawl against the latest saved baseline. It uses sitemap URLs first, falls back to homepage navigation when a sitemap is unavailable, and lets users add optional priority paths that must be included. When a baseline is first created or a later scan detects changes, the backend posts a Slack incoming-webhook alert if `SEO_WATCH_SLACK_WEBHOOK_URL` or `SLACK_WEBHOOK_URL` is configured. Unchanged scans stay in the dashboard history without creating Slack noise.
 - Viewership / Visitor Intelligence stores signed request events in `seo_visitor_events`. A tracked site sends server-side or edge-side events to `/api/seo/visitor-intelligence` with `x-seo-client-id` and `x-seo-visitor-secret`. The dashboard hashes visitor IPs before storage, keeps only safe request headers, classifies known bot User-Agents, flags common scanner paths, and stores the classification reasons with each event. Browser-only beacons are not enough for bot visibility because many bots do not run JavaScript.
-- Vast Job Index is represented as a WIP Website Watch module. The dashboard shows the intended inputs, processing, outputs, dependencies, and activation checklist, but it does not expose a live runner until the source contract, storage shape, dry-run behavior, and alert policy are reviewed.
+- Vast Job Index scans `https://vast.ai/jobs`, reads the server-rendered Next.js jobs payload, stores the latest snapshot in `seo_job_index_snapshots`, stores each scan in `seo_job_index_runs`, and reports added, removed, compensation, location, description, and apply URL changes. Baseline, changed, and failed scans post to the configured SEO Watch Slack incoming webhook; unchanged scans stay in the dashboard history without Slack noise. It can verify crawlability signals such as canonical and `noindex`, but it does not prove Google indexing until Google Search Console is connected.
 
 ### Visitor Intelligence Contract
 

@@ -5,13 +5,18 @@ import { generateBlogToneProfile, normalizeToneProfile, type BlogToneProfile } f
 import { decryptSecret, encryptSecret } from "./crypto";
 import { ensureSeoStorage, getSeoCollections, getSupabaseAdminClient } from "./db";
 import {
+  normalizeVastJobIndexInput,
+  runVastJobIndexScan,
+  type VastJobIndexSnapshot,
+} from "./job-index";
+import {
   normalizeSeoChangeTrackerSite,
   runSeoChangeTracker,
   type SeoChangeTrackerBaseline,
   type SeoChangeTrackerInput,
   type SeoChangeTrackerResult,
 } from "./seo-change-tracker";
-import { notifySeoWatchSlack } from "./slack";
+import { notifySeoWatchSlack, notifyVastJobIndexSlack } from "./slack";
 import type {
   SeoBrainContext,
   SeoBrainReport,
@@ -28,6 +33,8 @@ import type {
   SafeSeoIntegration,
   SeoInsight,
   SeoIntegration,
+  SeoJobIndexRun,
+  SeoJobIndexSnapshot,
   SeoMetricSnapshot,
   SeoPriority,
   SeoProvider,
@@ -314,6 +321,7 @@ const KEY_PAGE_PATTERNS = [
 export const CLIENT_FEATURE_KEYS: SeoClientFeatureKey[] = [
   "overview",
   "brain",
+  "landing",
   "watch",
   "integrations",
   "analysis",
@@ -323,6 +331,7 @@ export const CLIENT_FEATURE_KEYS: SeoClientFeatureKey[] = [
 export const DEFAULT_CLIENT_FEATURE_FLAGS: SeoClientFeatureFlags = {
   overview: false,
   brain: true,
+  landing: false,
   watch: false,
   integrations: false,
   analysis: false,
@@ -1126,6 +1135,8 @@ async function clientHasSavedWork(collections: Awaited<ReturnType<typeof getSeoC
     collectionHasClientRows(collections.competitiveAnalyses, clientId),
     collectionHasClientRows(collections.watchBaselines, clientId),
     collectionHasClientRows(collections.changeRuns, clientId),
+    collectionHasClientRows(collections.jobIndexSnapshots, clientId),
+    collectionHasClientRows(collections.jobIndexRuns, clientId),
     collectionHasClientRows(collections.brainReports, clientId),
     collectionHasClientRows(collections.brainContexts, clientId),
     visitorEventsHasClientRows(clientId),
@@ -2519,14 +2530,40 @@ function baselineFromRow(row: SeoWatchBaseline | null): SeoChangeTrackerBaseline
   return row.baseline_json as unknown as SeoChangeTrackerBaseline;
 }
 
+function cleanSeoJobIndexSnapshot(row: SeoJobIndexSnapshot) {
+  const { _id: _mongoId, ...cleaned } = row;
+  return cleaned;
+}
+
+function cleanSeoJobIndexRun(row: SeoJobIndexRun) {
+  const { _id: _mongoId, ...cleaned } = row;
+  return cleaned;
+}
+
+function jobIndexSnapshotFromRow(row: SeoJobIndexSnapshot | null): VastJobIndexSnapshot | null {
+  if (!row) return null;
+  return row.snapshot_json as unknown as VastJobIndexSnapshot;
+}
+
 const SEO_WATCH_STORAGE_NOT_READY_MESSAGE =
   "SEO Watch storage tables are not installed yet. Apply supabase/migrations/20260630153849_seo_watch_persistence.sql to save baselines and run history.";
+const JOB_INDEX_STORAGE_NOT_READY_MESSAGE =
+  "Vast Job Index storage is not ready. Configure Supabase storage and apply supabase/migrations/20260708184115_job_index_watch_storage.sql to save snapshots and run history.";
 
 function isSeoWatchStorageMissing(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || "");
   return (
     /Could not find the table|schema cache/i.test(message) &&
     /seo_watch_baselines|seo_change_runs/i.test(message)
+  );
+}
+
+function isJobIndexStorageMissing(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return (
+    (/Could not find the table|schema cache/i.test(message) &&
+      /seo_job_index_snapshots|seo_job_index_runs/i.test(message)) ||
+    /required for SEO Intelligence storage/i.test(message)
   );
 }
 
@@ -2564,6 +2601,163 @@ export async function getSeoChangeTrackerState(scope: SeoTenantScope, rawSiteUrl
       storageError: SEO_WATCH_STORAGE_NOT_READY_MESSAGE,
     };
   }
+}
+
+export async function getVastJobIndexState(scope: SeoTenantScope, rawSourceUrl?: string | null) {
+  const source = normalizeVastJobIndexInput({ sourceUrl: rawSourceUrl || undefined });
+  try {
+    const { jobIndexSnapshots, jobIndexRuns } = await getSeoCollections();
+    const snapshotRows = await jobIndexSnapshots
+      .find({ user_id: scope.userId, source_url: source.sourceUrl })
+      .limit(1)
+      .toArray();
+    const snapshotRow = snapshotRows[0] || null;
+    const runs = await jobIndexRuns
+      .find({ user_id: scope.userId, source_url: source.sourceUrl })
+      .sort({ checked_at: -1 })
+      .limit(SEO_CHANGE_RUN_LIMIT)
+      .toArray();
+
+    return {
+      sourceUrl: source.sourceUrl,
+      snapshot: jobIndexSnapshotFromRow(snapshotRow),
+      snapshotRow: snapshotRow ? cleanSeoJobIndexSnapshot(snapshotRow) : null,
+      runs: runs.map(cleanSeoJobIndexRun),
+      storageReady: true,
+      storageError: null,
+    };
+  } catch (error) {
+    if (!isJobIndexStorageMissing(error)) {
+      throw error;
+    }
+
+    return {
+      sourceUrl: source.sourceUrl,
+      snapshot: null,
+      snapshotRow: null,
+      runs: [],
+      storageReady: false,
+      storageError: JOB_INDEX_STORAGE_NOT_READY_MESSAGE,
+    };
+  }
+}
+
+export async function runPersistedVastJobIndex(scope: SeoTenantScope, input: unknown) {
+  const source = normalizeVastJobIndexInput(input);
+  let collections: Awaited<ReturnType<typeof getSeoCollections>> | null = null;
+  let existingSnapshot: SeoJobIndexSnapshot | null = null;
+
+  try {
+    collections = await getSeoCollections();
+    existingSnapshot = await collections.jobIndexSnapshots.findOne({ user_id: scope.userId, source_url: source.sourceUrl });
+  } catch (error) {
+    if (!isJobIndexStorageMissing(error)) {
+      throw error;
+    }
+
+    const result = await runVastJobIndexScan(source, null);
+    return {
+      result,
+      snapshot: result.snapshot,
+      run: null,
+      storageReady: false,
+      storageError: JOB_INDEX_STORAGE_NOT_READY_MESSAGE,
+    };
+  }
+  if (!collections) {
+    throw new Error("Vast Job Index storage could not be initialized.");
+  }
+
+  const { jobIndexSnapshots, jobIndexRuns } = collections;
+  const previousSnapshot = jobIndexSnapshotFromRow(existingSnapshot);
+  const result = await runVastJobIndexScan(source, previousSnapshot);
+  const checkedAt = result.checkedAt;
+  const snapshotRow: SeoJobIndexSnapshot = {
+    id: existingSnapshot?.id || randomUUID(),
+    user_id: scope.userId,
+    source_url: result.snapshot.sourceUrl,
+    source_origin: result.snapshot.sourceOrigin,
+    snapshot_json: result.snapshot as unknown as Record<string, unknown>,
+    role_count: result.snapshot.roles.length,
+    captured_at: result.snapshot.capturedAt,
+    created_at: existingSnapshot?.created_at || checkedAt,
+    updated_at: checkedAt,
+  };
+  const run: SeoJobIndexRun = {
+    id: randomUUID(),
+    user_id: scope.userId,
+    snapshot_id: snapshotRow.id,
+    source_url: result.snapshot.sourceUrl,
+    source_origin: result.snapshot.sourceOrigin,
+    status: result.status,
+    summary_json: result.summary as unknown as Record<string, unknown>,
+    changes_json: result.changes,
+    roles_json: result.snapshot.roles,
+    previous_captured_at: existingSnapshot?.captured_at || null,
+    checked_at: checkedAt,
+    created_at: checkedAt,
+  };
+
+  try {
+    if (existingSnapshot) {
+      await jobIndexSnapshots.replaceOne({ id: existingSnapshot.id, user_id: scope.userId }, snapshotRow);
+    } else {
+      await jobIndexSnapshots.insertOne(snapshotRow);
+    }
+
+    await jobIndexRuns.insertOne(run);
+    await recordAuditEvent({
+      scope,
+      action: "website_watch.job_index_scanned",
+      entityType: "sync",
+      entityId: run.id,
+      metadata: {
+        source_url: result.snapshot.sourceUrl,
+        status: result.status,
+        open_roles: result.summary.openRoles,
+        changes: result.changes.length,
+        previous_captured_at: run.previous_captured_at,
+      },
+    });
+  } catch (error) {
+    if (!isJobIndexStorageMissing(error)) {
+      throw error;
+    }
+
+    return {
+      result,
+      snapshot: result.snapshot,
+      run: null,
+      storageReady: false,
+      storageError: JOB_INDEX_STORAGE_NOT_READY_MESSAGE,
+    };
+  }
+
+  const slackAlert = await notifyVastJobIndexSlack({ scope, result });
+  if (slackAlert.status !== "skipped") {
+    await recordAuditEvent({
+      scope,
+      action: slackAlert.status === "sent" ? "website_watch.job_index_slack_alert_sent" : "website_watch.job_index_slack_alert_failed",
+      entityType: "sync",
+      entityId: run.id,
+      metadata: {
+        source_url: result.snapshot.sourceUrl,
+        job_index_status: result.status,
+        open_roles: result.summary.openRoles,
+        changes: result.changes.length,
+        slack_status: slackAlert.status,
+        error: slackAlert.status === "failed" ? slackAlert.error : null,
+      },
+    }).catch(() => undefined);
+  }
+
+  return {
+    result,
+    snapshot: jobIndexSnapshotFromRow(snapshotRow),
+    run: cleanSeoJobIndexRun(run),
+    storageReady: true,
+    storageError: null,
+  };
 }
 
 export async function runPersistedSeoChangeTracker(scope: SeoTenantScope, input: SeoChangeTrackerInput) {

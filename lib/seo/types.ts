@@ -8,7 +8,7 @@ export type SeoPriority = "low" | "medium" | "high";
 
 export type SeoAppRole = "admin" | "operator" | "viewer";
 
-export type SeoClientFeatureKey = "overview" | "brain" | "watch" | "integrations" | "analysis" | "insights";
+export type SeoClientFeatureKey = "overview" | "brain" | "landing" | "watch" | "integrations" | "analysis" | "insights";
 
 export type SeoClientFeatureFlags = Record<SeoClientFeatureKey, boolean>;
 
@@ -101,6 +101,35 @@ export type SeoChangeRun = {
   summary_json: Record<string, unknown>;
   changes_json: unknown[];
   pages_json: unknown[];
+  previous_captured_at: string | null;
+  checked_at: string;
+  created_at: string;
+};
+
+export type SeoJobIndexSnapshot = {
+  _id?: string;
+  id: string;
+  user_id: string;
+  source_url: string;
+  source_origin: string;
+  snapshot_json: Record<string, unknown>;
+  role_count: number;
+  captured_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SeoJobIndexRun = {
+  _id?: string;
+  id: string;
+  user_id: string;
+  snapshot_id: string | null;
+  source_url: string;
+  source_origin: string;
+  status: "baseline" | "unchanged" | "changed" | "failed";
+  summary_json: Record<string, unknown>;
+  changes_json: unknown[];
+  roles_json: unknown[];
   previous_captured_at: string | null;
   checked_at: string;
   created_at: string;
