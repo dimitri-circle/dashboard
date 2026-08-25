@@ -40,7 +40,7 @@ For Vercel, add the same values under Project Settings → Environment Variables
 - `SEO_ADMIN_SECRET` (optional bearer token for `/api/seo/bootstrap`)
 - `SEO_APP_EMAIL` (dashboard login email, defaults to `dimitri@circleclick.com`)
 - `SEO_APP_PASSWORD` (recommended dashboard login password; falls back to `CRON_SECRET` if omitted)
-- `SEO_APP_SESSION_TOKEN` (recommended random signing secret for the HTTP-only login cookie; falls back to `CRON_SECRET` if omitted)
+- `SEO_APP_SESSION_TOKEN` (recommended random signing secret for the HTTP-only login cookie; falls back to `CRON_SECRET`, then a domain-separated digest of the server-only Supabase secret if omitted)
 - `WEBSITE_WATCH_GITHUB_OWNER`, `WEBSITE_WATCH_GITHUB_REPO`, `WEBSITE_WATCH_GITHUB_WORKFLOW`, `WEBSITE_WATCH_GITHUB_REF`, and `WEBSITE_WATCH_GITHUB_TOKEN` (optional future deep-audit workflow dispatch settings)
 - `SLACK_WEBHOOK_URL` (optional shared deep-audit or alert delivery target)
 - `SEO_WATCH_SLACK_WEBHOOK_URL` (optional SEO Watch-specific Slack incoming webhook; falls back to `SLACK_WEBHOOK_URL`)
@@ -82,7 +82,7 @@ The dashboard opens with a client selection stage. If no clients exist, it only 
 - metric snapshots
 - generated insights
 
-The current MVP includes a simple email/password login backed by Supabase table `seo_app_users`. Passwords are stored as salted hashes, not plaintext. Admin users can create app-managed logins, assign `admin`, `operator`, or `viewer` roles, rotate passwords, and disable access without deleting the account. Existing rows are promoted to `admin` by the role migration so the current operator does not get locked out. The env vars `SEO_APP_EMAIL`, `SEO_APP_PASSWORD`, and `SEO_APP_SESSION_TOKEN` remain as a fallback so existing deployments do not lock themselves out.
+The current MVP includes a simple email/password login backed by Supabase table `seo_app_users`. Passwords are stored as salted hashes, not plaintext. Admin users can create app-managed logins, assign `admin`, `operator`, or `viewer` roles, rotate passwords, and disable access without deleting the account. Existing rows are promoted to `admin` by the role migration so the current operator does not get locked out. Database users authenticate without the legacy fallback login being configured. The env vars `SEO_APP_EMAIL` and `SEO_APP_PASSWORD` remain as an optional fallback admin, while `SEO_APP_SESSION_TOKEN` can override the domain-separated session secret derived from the server-only Supabase credential.
 
 Roles protect the Admin screen and `/api/admin/users` routes. The existing SEO data routes still use the app-wide dashboard session plus `x-seo-client-id` workspace scope, so do not treat these roles as tenant-level client authorization yet.
 

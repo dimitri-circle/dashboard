@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authenticateAppUser } from "@/lib/seo/auth";
-import { APP_SESSION_COOKIE, APP_SESSION_MAX_AGE_SECONDS, signAppSession } from "@/lib/seo/session";
+import { APP_SESSION_COOKIE, APP_SESSION_MAX_AGE_SECONDS, getAppSessionSecret, signAppSession } from "@/lib/seo/session";
 
 export async function POST(request: Request) {
   const formData = await request.formData();
@@ -9,10 +9,10 @@ export async function POST(request: Request) {
   const nextPath = String(formData.get("next") || "/");
   const expectedEmail = (process.env.SEO_APP_EMAIL || "dimitri@circleclick.com").trim().toLowerCase();
   const expectedPassword = process.env.SEO_APP_PASSWORD || process.env.CRON_SECRET;
-  const sessionToken = process.env.SEO_APP_SESSION_TOKEN || process.env.CRON_SECRET;
+  const sessionToken = getAppSessionSecret();
   const redirectUrl = new URL(nextPath.startsWith("/") ? nextPath : "/", request.url);
 
-  if (!expectedPassword || !sessionToken) {
+  if (!sessionToken) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("error", "not-configured");
     return NextResponse.redirect(loginUrl, { status: 303 });
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     authenticatedUser = null;
   }
 
-  if (!authenticatedUser && email === expectedEmail && password === expectedPassword) {
+  if (!authenticatedUser && expectedPassword && email === expectedEmail && password === expectedPassword) {
     authenticatedUser = { id: "env-admin", email: expectedEmail, role: "admin" };
   }
 

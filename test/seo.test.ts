@@ -7,7 +7,7 @@ import { readBlogAuditFormPayload } from "../lib/blog-upload";
 import { getCurrentAppSession, hashPassword, verifyPassword } from "../lib/seo/auth";
 import { decryptSecret, encryptSecret } from "../lib/seo/crypto";
 import { rateLimit, resetRateLimitsForTests } from "../lib/seo/rate-limit";
-import { APP_SESSION_COOKIE, signAppSession, verifyAppSessionCookie } from "../lib/seo/session";
+import { APP_SESSION_COOKIE, getAppSessionSecret, signAppSession, verifyAppSessionCookie } from "../lib/seo/session";
 import {
   compareCompetitiveWebsites,
   extractWebsiteFacts,
@@ -761,6 +761,34 @@ test("app auth legacy static session remains admin fallback", () => {
 
   assert.equal(session?.role, "admin");
   assert.equal(session?.legacy, true);
+});
+
+test("app auth derives a domain-separated session secret from the Supabase server key", () => {
+  const originalSessionToken = process.env.SEO_APP_SESSION_TOKEN;
+  const originalCronSecret = process.env.CRON_SECRET;
+  const originalSupabaseSecret = process.env.SUPABASE_SECRET_KEY;
+  const originalServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  delete process.env.SEO_APP_SESSION_TOKEN;
+  delete process.env.CRON_SECRET;
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_SECRET_KEY = "supabase-server-secret";
+
+  try {
+    const secret = getAppSessionSecret();
+    assert.ok(secret);
+    assert.notEqual(secret, process.env.SUPABASE_SECRET_KEY);
+    assert.equal(secret, getAppSessionSecret());
+  } finally {
+    if (originalSessionToken === undefined) delete process.env.SEO_APP_SESSION_TOKEN;
+    else process.env.SEO_APP_SESSION_TOKEN = originalSessionToken;
+    if (originalCronSecret === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = originalCronSecret;
+    if (originalSupabaseSecret === undefined) delete process.env.SUPABASE_SECRET_KEY;
+    else process.env.SUPABASE_SECRET_KEY = originalSupabaseSecret;
+    if (originalServiceRole === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRole;
+  }
 });
 
 test("app auth signed env fallback remains admin without database lookup", async () => {
