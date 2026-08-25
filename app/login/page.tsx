@@ -27,36 +27,69 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         className: "login-background-ribbon",
         source: "/dots-pattern.webp",
       })}
-      <section className="login-card" aria-labelledby="login-title">
-        <div className="login-brand-lockup">
-          <CircleClickLogo className="login-brand-mark" />
-          <div>
-            <p className="eyebrow">CircleClick SEO</p>
-            <h1 id="login-title">Sign in to continue.</h1>
-            <p>Use your workspace account to open client analytics, encrypted tools, and AI reports.</p>
+      <section className="login-shell" aria-labelledby="login-title">
+        <div className="login-intro">
+          <div className="login-brand-lockup">
+            <CircleClickLogo className="login-brand-mark" />
+            <div>
+              <p className="eyebrow">CircleClick SEO</p>
+              <p className="login-wordmark">Workspace</p>
+            </div>
+          </div>
+
+          <div className="login-intro-copy">
+            <p className="login-kicker">Private client intelligence</p>
+            <h1 id="login-title">Welcome back.</h1>
+            <p>Review client analytics, protected tools, and AI-assisted reports from one workspace.</p>
+          </div>
+
+          <div className="login-access-note">
+            <span aria-hidden="true" />
+            <p>
+              <strong>Authorized access</strong>
+              <small>Use your CircleClick workspace credentials.</small>
+            </p>
           </div>
         </div>
 
-        {message ? (
-          <div className="alert" data-type="error" role="status">
-            {message}
+        <div className="login-panel">
+          <div className="login-panel-heading">
+            <p className="eyebrow">Workspace access</p>
+            <h2>Sign in</h2>
+            <p>Enter your account details to continue.</p>
           </div>
-        ) : null}
 
-        <form className="login-form" action="/api/auth/login" method="post">
-          <input name="next" type="hidden" value={nextPath} />
-          <label>
-            Email
-            <input name="email" type="email" placeholder="dimitri@circleclick.com" required autoComplete="email" />
-          </label>
-          <label>
-            Password
-            <input name="password" type="password" placeholder="Enter password" required autoComplete="current-password" />
-          </label>
-          <button className="button button-primary" type="submit">
-            Continue
-          </button>
-        </form>
+          {message ? (
+            <div className="alert" data-type="error" role="status">
+              {message}
+            </div>
+          ) : null}
+
+          <form className="login-form" action="/api/auth/login" method="post">
+            <input name="next" type="hidden" value={nextPath} />
+            <label>
+              <span>Email</span>
+              <input
+                aria-describedby="login-email-hint"
+                autoCapitalize="none"
+                autoComplete="username"
+                inputMode="email"
+                name="email"
+                required
+                spellCheck={false}
+                type="email"
+              />
+              <small id="login-email-hint">Use your CircleClick workspace email.</small>
+            </label>
+            <label>
+              <span>Password</span>
+              <input name="password" type="password" placeholder="Enter password" required autoComplete="current-password" />
+            </label>
+            <button className="button button-primary" type="submit">
+              Sign in
+            </button>
+          </form>
+        </div>
       </section>
     </main>
   );
