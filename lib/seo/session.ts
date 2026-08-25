@@ -24,8 +24,17 @@ type SessionPayload = {
 
 const ROLES = new Set<SeoAppRole>(["admin", "operator", "viewer"]);
 
+function getSupabaseSessionSecret() {
+  const secret = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!secret) {
+    return "";
+  }
+
+  return crypto.createHash("sha256").update(`circleclick-dashboard-session:${secret}`).digest("base64url");
+}
+
 export function getAppSessionSecret() {
-  return process.env.SEO_APP_SESSION_TOKEN || process.env.CRON_SECRET || "";
+  return process.env.SEO_APP_SESSION_TOKEN || process.env.CRON_SECRET || getSupabaseSessionSecret();
 }
 
 function getFallbackEmail() {

@@ -14,7 +14,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const nextPath = params?.next || "/";
   const message =
     error === "not-configured"
-      ? "Login is not configured. Add SEO_APP_EMAIL, SEO_APP_PASSWORD, and SEO_APP_SESSION_TOKEN in Vercel."
+      ? "Login is not configured. Add a dashboard session token or connect the server-side Supabase credentials in Vercel."
       : error === "invalid"
         ? "That email or password did not match."
         : null;
