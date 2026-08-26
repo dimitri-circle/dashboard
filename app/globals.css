@@ -1936,30 +1936,38 @@ select {
 .brain-brief-panel {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.48fr);
-  gap: clamp(18px, 3vw, 36px);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.46fr);
+  gap: clamp(20px, 3vw, 32px);
   align-items: center;
-  padding: clamp(18px, 2.4vw, 26px);
+  padding: 18px 20px;
 }
 
 .brain-brief-copy {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   max-width: 760px;
 }
 
-.brain-brief-copy h3 {
+.brain-brief-copy h2 {
+  display: block;
+  min-height: 0;
   margin: 0;
-  font-size: clamp(1.25rem, 1.9vw, 1.62rem);
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  font-size: clamp(1.35rem, 2vw, 1.72rem);
   font-weight: 850;
-  line-height: 1.08;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
 }
 
 .brain-brief-copy p {
-  max-width: 70ch;
+  max-width: 68ch;
+  margin: 0;
   color: var(--muted);
-  font-size: 0.98rem;
-  line-height: 1.55;
+  font-size: 0.9rem;
+  line-height: 1.48;
 }
 
 .brain-brief-meta {
@@ -1972,12 +1980,10 @@ select {
   min-width: 0;
   display: grid;
   align-content: center;
-  gap: 5px;
-  min-height: 82px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 14px;
-  background: rgba(255, 255, 255, 0.62);
+  gap: 4px;
+  min-height: 54px;
+  border-left: 1px solid var(--line);
+  padding-left: 14px;
 }
 
 .brain-brief-meta span,
@@ -1995,8 +2001,8 @@ select {
 .brain-brief-meta strong {
   overflow: hidden;
   color: var(--ink);
-  font-size: clamp(1.12rem, 1.8vw, 1.35rem);
-  line-height: 1.05;
+  font-size: 1rem;
+  line-height: 1.12;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2064,6 +2070,29 @@ select {
 .blog-audit-panel {
   position: relative;
   top: auto;
+  padding: clamp(18px, 2vw, 24px);
+}
+
+.brain-section-heading > div {
+  display: grid;
+  gap: 5px;
+}
+
+.brain-section-heading h3,
+.brain-section-heading p {
+  margin: 0;
+}
+
+.brain-section-heading h3 {
+  font-size: 1.2rem;
+  line-height: 1.15;
+}
+
+.brain-section-heading p {
+  max-width: 68ch;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
 }
 
 .blog-audit-form,
@@ -2076,7 +2105,7 @@ select {
 }
 
 .blog-audit-form {
-  margin-top: 16px;
+  margin-top: 14px;
 }
 
 .brain-context-editor {
@@ -2277,103 +2306,132 @@ select {
   resize: vertical;
 }
 
-.audit-upload-card {
-  position: relative;
-  min-height: 94px;
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
-  grid-template-areas:
-    "icon eyebrow"
-    "icon title"
-    "icon helper";
+.audit-source-bar {
+  display: flex;
   align-items: center;
-  column-gap: 14px;
-  row-gap: 4px;
-  border: 1px dashed rgba(20, 92, 66, 0.26);
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.audit-source-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.audit-source-copy strong {
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.2;
+}
+
+.audit-source-copy small,
+.brain-audit-actions > small {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.blog-audit-form .audit-upload-control {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 2px 10px;
+  min-width: min(100%, 310px);
+  min-height: 46px;
+  border: 1px solid rgba(17, 18, 20, 0.14);
   border-radius: 8px;
-  padding: 16px;
-  background: rgba(245, 252, 249, 0.58);
-  text-align: left;
+  padding: 7px 10px;
+  background: rgba(255, 255, 255, 0.78);
   cursor: pointer;
   transition:
-    border-color 160ms ease,
     background 160ms ease,
+    border-color 160ms ease,
     box-shadow 160ms ease;
 }
 
-.audit-upload-card::before {
+.audit-upload-control::before {
   content: "";
-  grid-area: icon;
-  width: 46px;
-  height: 46px;
-  border: 1px solid rgba(20, 92, 66, 0.2);
-  border-radius: 8px;
+  display: inline-flex;
+  grid-row: 1 / 3;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
   background:
-    linear-gradient(135deg, rgba(20, 92, 66, 0.16) 0 13px, transparent 13px) top right / 18px 18px no-repeat,
-    linear-gradient(rgba(20, 92, 66, 0.34), rgba(20, 92, 66, 0.34)) 12px 26px / 22px 2px no-repeat,
-    linear-gradient(rgba(20, 92, 66, 0.22), rgba(20, 92, 66, 0.22)) 12px 32px / 18px 2px no-repeat,
-    rgba(255, 255, 255, 0.72);
+    linear-gradient(#ffffff, #ffffff) center / 12px 2px no-repeat,
+    linear-gradient(#ffffff, #ffffff) center / 2px 12px no-repeat,
+    var(--ink);
 }
 
-.audit-upload-card .eyebrow {
-  grid-area: eyebrow;
+.audit-upload-control:hover,
+.audit-upload-control:focus-within {
+  border-color: rgba(12, 105, 112, 0.42);
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(31, 20, 10, 0.06);
 }
 
-.audit-upload-card:hover,
-.audit-upload-card:focus-within {
-  border-color: rgba(20, 92, 66, 0.5);
-  background: rgba(245, 252, 249, 0.82);
-  box-shadow: 0 18px 34px rgba(20, 92, 66, 0.08);
+.audit-upload-control:focus-within {
+  outline: 3px solid rgba(12, 145, 154, 0.18);
+  outline-offset: 2px;
 }
 
-.audit-upload-card input {
+.audit-upload-control input {
   position: absolute;
   inset: 0;
   opacity: 0;
   cursor: pointer;
 }
 
-.audit-upload-card strong {
-  grid-area: title;
-  max-width: 100%;
+.audit-upload-control span,
+.audit-upload-control small {
+  grid-column: 2;
+  min-width: 0;
   overflow: hidden;
-  color: var(--ink);
-  font-size: clamp(1.08rem, 1.6vw, 1.28rem);
-  line-height: 1.12;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.audit-upload-card small {
-  grid-area: helper;
+.audit-upload-control span {
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.audit-upload-control small {
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: 0.68rem;
   font-weight: 650;
-  line-height: 1.45;
-}
-
-.audit-input-divider {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  gap: 16px;
-  align-items: center;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 850;
-  letter-spacing: 0.16em;
-  text-align: center;
-  text-transform: uppercase;
-}
-
-.audit-input-divider::before,
-.audit-input-divider::after {
-  content: "";
-  height: 1px;
-  background: var(--line);
+  line-height: 1.25;
 }
 
 .audit-paste-field textarea {
-  min-height: clamp(280px, 34vh, 520px);
+  height: clamp(180px, 20vh, 320px);
+  min-height: clamp(180px, 20vh, 320px);
+}
+
+.brain-audit-actions {
+  align-items: center;
+}
+
+.brain-audit-actions > small {
+  max-width: 54ch;
+}
+
+.brain-audit-actions > small strong {
+  color: var(--ink);
+}
+
+.brain-audit-actions > div {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
 }
 
 .audit-report-panel {
@@ -3009,11 +3067,26 @@ select {
 }
 
 .brain-status-strip {
+  gap: 0;
   grid-template-columns: repeat(3, minmax(150px, 1fr));
+  overflow: hidden;
+  border: 1px solid rgba(17, 18, 20, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 10px 26px rgba(31, 20, 10, 0.05);
 }
 
 .brain-status-strip .watch-status-pill {
-  padding: 9px 11px;
+  border: 0;
+  border-left: 1px solid rgba(17, 18, 20, 0.08);
+  border-radius: 0;
+  padding: 10px 12px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.brain-status-strip .watch-status-pill:first-child {
+  border-left: 0;
 }
 
 .watch-status-strip {
@@ -5351,7 +5424,6 @@ select {
 @media (max-width: 980px) {
   .brain-workspace,
   .brain-brief-panel,
-  .brain-brief-meta,
   .brain-hero,
   .competitive-workspace,
   .competitive-hero,
@@ -6040,6 +6112,35 @@ select {
   .actions {
     flex-wrap: wrap;
     justify-content: flex-start;
+  }
+
+  .audit-source-bar,
+  .brain-audit-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .audit-upload-control {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .brain-audit-actions > div {
+    width: 100%;
+    flex-direction: column-reverse;
+  }
+
+  .brain-audit-actions .button {
+    min-height: 44px;
+  }
+
+  .brain-status-strip .watch-status-pill {
+    border-top: 1px solid rgba(17, 18, 20, 0.08);
+    border-left: 0;
+  }
+
+  .brain-status-strip .watch-status-pill:first-child {
+    border-top: 0;
   }
 
   .button {
