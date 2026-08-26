@@ -3149,8 +3149,7 @@ function BrainView({ activeClient, clientId, currentUser }: { activeClient?: Cli
     <PageWorkspace className="brain-workspace">
       <section className="panel brain-brief-panel" aria-label="Vast Blog Audit">
         <div className="brain-brief-copy">
-          <span className="eyebrow">Content Review</span>
-          <h3>Client-specific edits before publishing.</h3>
+          <h2>Audit a draft before it ships.</h2>
           <p>Checks draft claims, brand fit, weak logic, and evidence gaps before a writer or editor sends content forward.</p>
         </div>
         <div className="brain-brief-meta" aria-label="Audit context">
@@ -3185,10 +3184,10 @@ function BrainView({ activeClient, clientId, currentUser }: { activeClient?: Cli
       </div>
 
       <section className="panel blog-audit-panel" aria-labelledby="blog-audit-form-title">
-        <div className="section-heading">
+        <div className="section-heading brain-section-heading">
           <div>
-            <span className="eyebrow">Draft input</span>
-            <h3 id="blog-audit-form-title">Upload or paste a blog draft.</h3>
+            <h3 id="blog-audit-form-title">New content audit</h3>
+            <p>Paste draft text or upload a supported document, then run one client-scoped review.</p>
           </div>
         </div>
 
@@ -3288,20 +3287,21 @@ function BrainView({ activeClient, clientId, currentUser }: { activeClient?: Cli
           <input name="toneProfile" type="hidden" value={toneProfile ? JSON.stringify(toneProfile) : ""} />
           <input name="clientName" type="hidden" value={activeClient?.name || clientId} />
 
-          <label className="audit-upload-card">
-            <input
-              name="file"
-              type="file"
-              accept=".md,.markdown,.mdx,.txt,.html,.htm,.csv,.docx,.zip,text/markdown,text/plain,text/html,text/csv,application/zip,application/x-zip-compressed,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              onChange={(event) => setSelectedFileName(event.currentTarget.files?.[0]?.name || null)}
-            />
-            <span className="eyebrow">Upload draft or ZIP</span>
-            <strong>{selectedFileName || "Choose a file"}</strong>
-            <small>Markdown, text, HTML, CSV, DOCX, and ZIP files are supported.</small>
-          </label>
-
-          <div className="audit-input-divider" aria-hidden="true">
-            <span>or paste it</span>
+          <div className="audit-source-bar">
+            <div className="audit-source-copy">
+              <strong>Draft source</strong>
+              <small>Paste below or upload a supported document.</small>
+            </div>
+            <label className="audit-upload-control">
+              <input
+                name="file"
+                type="file"
+                accept=".md,.markdown,.mdx,.txt,.html,.htm,.csv,.docx,.zip,text/markdown,text/plain,text/html,text/csv,application/zip,application/x-zip-compressed,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={(event) => setSelectedFileName(event.currentTarget.files?.[0]?.name || null)}
+              />
+              <span>{selectedFileName ? "Replace file" : "Upload file"}</span>
+              <small>{selectedFileName || "MD, TXT, HTML, CSV, DOCX, ZIP"}</small>
+            </label>
           </div>
 
           <label className="audit-paste-field">
@@ -3313,15 +3313,20 @@ function BrainView({ activeClient, clientId, currentUser }: { activeClient?: Cli
               rows={14}
             />
           </label>
-          <div className="actions">
-            <button className="button button-primary" type="submit" disabled={auditing}>
-              {auditing ? "Audit running" : "Audit Draft"}
-            </button>
-            {auditReport ? (
-              <button className="button" type="button" onClick={() => setReportModalOpen(true)}>
-                Open latest report
+          <div className="actions brain-audit-actions">
+            <small>
+              Runs against <strong>{activeClient?.name || clientId}</strong>. Human approval remains required.
+            </small>
+            <div>
+              {auditReport ? (
+                <button className="button" type="button" onClick={() => setReportModalOpen(true)}>
+                  Open latest report
+                </button>
+              ) : null}
+              <button className="button button-primary" type="submit" disabled={auditing}>
+                {auditing ? "Audit running" : "Run client audit"}
               </button>
-            ) : null}
+            </div>
           </div>
         </form>
 
