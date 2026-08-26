@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import JSZip from "jszip";
+import { NextRequest } from "next/server";
 import { auditBlogDraft, cleanExtractedText, splitFactualClaims, type VastSourceResult } from "../lib/blog-audit";
 import { generateBlogToneProfile } from "../lib/blog-tone-profile";
 import { readBlogAuditFormPayload } from "../lib/blog-upload";
@@ -20,6 +21,7 @@ import {
   validateHttpUrl,
 } from "../lib/seo/service";
 import { normalizeClientId } from "../lib/seo/tenant";
+import { getConfiguredSessionSecret, proxy as dashboardProxy } from "../proxy";
 
 process.env.SEO_SECRET_ENCRYPTION_KEY =
   process.env.SEO_SECRET_ENCRYPTION_KEY || "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -779,6 +781,52 @@ test("app auth derives a domain-separated session secret from the Supabase serve
     assert.ok(secret);
     assert.notEqual(secret, process.env.SUPABASE_SECRET_KEY);
     assert.equal(secret, getAppSessionSecret());
+  } finally {
+    if (originalSessionToken === undefined) delete process.env.SEO_APP_SESSION_TOKEN;
+    else process.env.SEO_APP_SESSION_TOKEN = originalSessionToken;
+    if (originalCronSecret === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = originalCronSecret;
+    if (originalSupabaseSecret === undefined) delete process.env.SUPABASE_SECRET_KEY;
+    else process.env.SUPABASE_SECRET_KEY = originalSupabaseSecret;
+    if (originalServiceRole === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRole;
+  }
+});
+
+test("dashboard proxy derives the same Supabase-backed session secret", async () => {
+  assert.equal(
+    await getConfiguredSessionSecret({ SUPABASE_SECRET_KEY: "supabase-server-secret" }),
+    "K_nUpyX7LRsRwq1YXiIbriEfIbaIT8Jmo_7hWT6Fq-A"
+  );
+  assert.equal(
+    await getConfiguredSessionSecret({ SEO_APP_SESSION_TOKEN: "configured-secret" }),
+    "configured-secret"
+  );
+});
+
+test("dashboard proxy accepts a Supabase-backed signed session", async () => {
+  const originalSessionToken = process.env.SEO_APP_SESSION_TOKEN;
+  const originalCronSecret = process.env.CRON_SECRET;
+  const originalSupabaseSecret = process.env.SUPABASE_SECRET_KEY;
+  const originalServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  delete process.env.SEO_APP_SESSION_TOKEN;
+  delete process.env.CRON_SECRET;
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_SECRET_KEY = "supabase-server-secret";
+
+  try {
+    const token = signAppSession(
+      { id: "user-1", email: "admin@example.com", role: "admin" },
+      getAppSessionSecret()
+    );
+    const request = new NextRequest("https://dashboard.example.test/", {
+      headers: { cookie: `${APP_SESSION_COOKIE}=${encodeURIComponent(token)}` },
+    });
+    const response = await dashboardProxy(request);
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-middleware-next"), "1");
   } finally {
     if (originalSessionToken === undefined) delete process.env.SEO_APP_SESSION_TOKEN;
     else process.env.SEO_APP_SESSION_TOKEN = originalSessionToken;

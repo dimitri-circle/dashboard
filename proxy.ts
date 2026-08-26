@@ -49,6 +49,27 @@ async function hmacSha256(payload: string, secret: string) {
   return base64Url(new Uint8Array(signature));
 }
 
+export async function getConfiguredSessionSecret(
+  env: Record<string, string | undefined> = process.env
+) {
+  const configuredSecret = env.SEO_APP_SESSION_TOKEN || env.CRON_SECRET;
+  if (configuredSecret) {
+    return configuredSecret;
+  }
+
+  const supabaseSecret = env.SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseSecret) {
+    return "";
+  }
+
+  const encoder = new TextEncoder();
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    encoder.encode(`circleclick-dashboard-session:${supabaseSecret}`)
+  );
+  return base64Url(new Uint8Array(digest));
+}
+
 async function hasValidSession(cookieSession: string | undefined, configuredSession: string) {
   if (!cookieSession) {
     return false;
@@ -84,7 +105,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const configuredSession = process.env.SEO_APP_SESSION_TOKEN || process.env.CRON_SECRET;
+  const configuredSession = await getConfiguredSessionSecret();
   const cookieSession = request.cookies.get(APP_SESSION_COOKIE)?.value;
 
   if (configuredSession && (await hasValidSession(cookieSession, configuredSession))) {
