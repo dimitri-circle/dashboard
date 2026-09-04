@@ -22,6 +22,11 @@ function isSignedVisitorIngest(request: NextRequest) {
   return request.method === "POST" && request.nextUrl.pathname === "/api/seo/visitor-intelligence";
 }
 
+function isScheduledSync(request: NextRequest) {
+  // The route validates CRON_SECRET; Vercel cron requests have no app session.
+  return request.method === "GET" && request.nextUrl.pathname === "/api/seo/cron/daily";
+}
+
 function base64Url(bytes: Uint8Array) {
   let binary = "";
   bytes.forEach((byte) => {
@@ -101,7 +106,7 @@ async function hasValidSession(cookieSession: string | undefined, configuredSess
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (pathname.startsWith("/_next") || isPublicPath(pathname) || isSignedVisitorIngest(request)) {
+  if (pathname.startsWith("/_next") || isPublicPath(pathname) || isSignedVisitorIngest(request) || isScheduledSync(request)) {
     return NextResponse.next();
   }
 
