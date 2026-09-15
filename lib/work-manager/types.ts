@@ -1,0 +1,131 @@
+export const WORK_STATUSES = ["new", "in_progress", "blocked", "done", "needs_evidence", "unknown"] as const;
+export const WORK_SOURCE_KINDS = ["manual", "slack", "google_meet"] as const;
+
+export type WorkStatus = (typeof WORK_STATUSES)[number];
+export type WorkSourceKind = (typeof WORK_SOURCE_KINDS)[number];
+
+export type WorkAutomationSource = {
+  id: string;
+  client_id: string;
+  channel_id: string;
+  source_kind: Exclude<WorkSourceKind, "manual">;
+  workspace_ref: string;
+  source_ref: string;
+  display_name: string;
+  active: boolean;
+  default_client_visible: boolean;
+  last_ingested_at: string | null;
+  created_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WorkChannel = {
+  id: string;
+  client_id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  source_kind: WorkSourceKind;
+  external_ref: string | null;
+  active: boolean;
+  created_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WorkItem = {
+  id: string;
+  client_id: string;
+  channel_id: string;
+  title: string;
+  now_text: string;
+  next_text: string;
+  blocker_text: string | null;
+  owner_name: string | null;
+  status: WorkStatus;
+  due_date: string | null;
+  source_kind: WorkSourceKind;
+  source_url: string | null;
+  source_external_id: string | null;
+  source_snapshot_json: Record<string, unknown>;
+  automation_review_needed: boolean;
+  automation_last_seen_at: string | null;
+  completion_evidence_url: string | null;
+  client_visible: boolean;
+  created_by_user_id: string | null;
+  updated_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+export type WorkIngestItemInput = {
+  externalId: string;
+  title: string;
+  nowText?: string;
+  nextText?: string;
+  blockerText?: string;
+  ownerName?: string;
+  status?: WorkStatus;
+  dueDate?: string;
+  sourceUrl?: string;
+  completionEvidenceUrl?: string;
+  clientVisible?: boolean;
+};
+
+export type WorkIngestBatch = {
+  sourceKind: Exclude<WorkSourceKind, "manual">;
+  workspaceRef?: string;
+  sourceRef: string;
+  items: WorkIngestItemInput[];
+};
+
+export type WorkIngestResult = {
+  source: Pick<WorkAutomationSource, "id" | "client_id" | "channel_id" | "display_name">;
+  created: number;
+  updated: number;
+  proposed: number;
+  unchanged: number;
+  items: Array<{ id: string; externalId: string; outcome: "created" | "updated" | "proposed" | "unchanged" }>;
+};
+
+export type WorkReviewLink = {
+  id: string;
+  client_id: string;
+  channel_id: string | null;
+  label: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+};
+
+export type WorkReviewSnapshot = {
+  client: { id: string; name: string };
+  channel: Pick<WorkChannel, "id" | "name" | "slug" | "description"> | null;
+  label: string;
+  generated_at: string;
+  items: Array<
+    Pick<
+      WorkItem,
+      | "id"
+      | "title"
+      | "now_text"
+      | "next_text"
+      | "blocker_text"
+      | "owner_name"
+      | "status"
+      | "due_date"
+      | "source_url"
+      | "completion_evidence_url"
+      | "updated_at"
+    > & { channel_name: string }
+  >;
+};
+
+export type WorkManagerSnapshot = {
+  channels: WorkChannel[];
+  items: WorkItem[];
+  storageReady: boolean;
+  storageError: string | null;
+};
