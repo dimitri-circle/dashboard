@@ -23,6 +23,8 @@ Read-only client review link shows only client-visible work
 
 The bridge does not read Slack or Google Meet itself. It accepts normalized findings from an approved collector. It does not send email or post to Slack.
 
+The optional Slack candidate endpoint adds an AI classification step before this normalized bridge. It still never reads or posts to Slack directly.
+
 ## Source mapping
 
 Each collector source must be registered in Work Manager before its first ingest:
@@ -83,3 +85,23 @@ The exact field mapping and fail-isolated sync helper for the existing ABK track
 [`apps-script-abk-work-manager-adapter.gs`](./apps-script-abk-work-manager-adapter.gs).
 It defaults every imported item to private, does not post to Slack, and leaves the existing
 email and daily deduplicated Slack digest behavior unchanged.
+
+## Hourly and on-demand Slack intake
+
+Set `WORK_MANAGER_INTAKE_URL` in Apps Script to
+`https://dashboard-circleclick.vercel.app/api/work-manager/intake/slack`, then run
+`installHourlyWorkManagerTrigger()` once. The installer replaces only an older
+trigger for the same hourly handler, preventing duplicate runs.
+
+For immediate capture, have the existing Slack Events handler call
+`sendSlackCandidatesToWorkManager_()` when a message contains
+`@circleclick-task-add`. The hourly scan sends bounded new-message and thread
+context to the same helper as a safety net. Exact source mapping remains required.
+
+High-confidence candidates become work; low-confidence untagged chatter is ignored.
+If OpenAI is unavailable, an explicitly tagged request still becomes a Needs
+clarification item instead of being lost. Slack text is treated as untrusted data.
+
+Dismissed work retains its source identity and audit history. Later scans return a
+`dismissed` outcome instead of recreating or changing it. An operator can restore it
+from **Dismissed work** in the dashboard.

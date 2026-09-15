@@ -15,6 +15,35 @@ function syncWorkManagerNow() {
   return syncWorkManagerWorkItems_(spreadsheet, properties);
 }
 
+/** Run once. It replaces only this automation's old hourly trigger. */
+function installHourlyWorkManagerTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === 'scanAndSyncWorkManagerHourly') ScriptApp.deleteTrigger(trigger);
+  });
+  ScriptApp.newTrigger('scanAndSyncWorkManagerHourly').timeBased().everyHours(1).create();
+  return {ok: true, cadence: 'hourly'};
+}
+
+function scanAndSyncWorkManagerHourly() {
+  return {scan: scanAbkVideoWork(), sync: syncWorkManagerNow()};
+}
+
+/** Use from Slack Events for tagged messages and from the hourly scan for new candidates. */
+function sendSlackCandidatesToWorkManager_(messages) {
+  const properties = PropertiesService.getScriptProperties();
+  const endpoint = String(properties.getProperty('WORK_MANAGER_INTAKE_URL') || '').trim();
+  const secret = String(properties.getProperty('WORK_MANAGER_INGEST_SECRET') || '').trim();
+  if (!endpoint || !secret || !messages || !messages.length) return {ok: false, skipped: 'work_manager_intake_not_configured'};
+  const response = UrlFetchApp.fetch(endpoint, {
+    method: 'post', contentType: 'application/json', headers: {Authorization: 'Bearer ' + secret},
+    payload: JSON.stringify({sourceRef: CONFIG.channelId, workspaceRef: CONFIG.workspaceId, messages: messages}),
+    muteHttpExceptions: true
+  });
+  const code = response.getResponseCode();
+  if (code < 200 || code >= 300) throw new Error('Work Manager AI intake failed with HTTP ' + code + '.');
+  return JSON.parse(response.getContentText());
+}
+
 function syncWorkManagerWorkItems_(spreadsheet, properties) {
   const endpoint = String(properties.getProperty('WORK_MANAGER_INGEST_URL') || '').trim();
   const secret = String(properties.getProperty('WORK_MANAGER_INGEST_SECRET') || '').trim();

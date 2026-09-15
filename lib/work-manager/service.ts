@@ -4,13 +4,14 @@ import { normalizeClientId } from "@/lib/seo/tenant";
 import {
   WORK_SOURCE_KINDS,
   WORK_STATUSES,
+  WORK_DISMISSAL_REASONS,
   type WorkAutomationSource,
   type WorkChannel,
   type WorkItem,
   type WorkReviewLink,
   type WorkReviewSnapshot,
   type WorkSourceKind,
-  type WorkStatus,
+  type WorkStatus, type WorkDismissalReason,
 } from "./types";
 import { safelyCreateWorkNotifications } from "./notifications";
 
@@ -246,10 +247,11 @@ export async function createWorkChannel(clientId: string, actorUserId: string, p
   }
 }
 
-export async function listWorkItems(clientId: string, channelId?: string | null) {
+export async function listWorkItems(clientId: string, channelId?: string | null, dismissed = false) {
   try {
     const id = normalizeClientId(clientId);
     let query = table("work_items").select("*").eq("client_id", id).order("updated_at", { ascending: false });
+    query = dismissed ? query.not("dismissed_at", "is", null) : query.is("dismissed_at", null);
     if (channelId) query = query.eq("channel_id", channelId);
     const { data, error } = await query;
     if (error) throw error;
@@ -272,7 +274,7 @@ async function ensureChannelBelongsToClient(channelId: string, clientId: string)
 async function addWorkEvent(
   item: WorkItem,
   actorUserId: string,
-  action: "created" | "updated" | "status_changed" | "evidence_added",
+  action: "created" | "updated" | "status_changed" | "evidence_added" | "dismissed" | "restored",
   before: Partial<WorkItem> | null
 ) {
   const eventId = randomUUID();
@@ -315,12 +317,45 @@ export async function createWorkItem(clientId: string, actorUserId: string, payl
       created_at: timestamp,
       updated_at: timestamp,
       completed_at: input.status === "done" ? timestamp : null,
+      dismissed_at: null,
+      dismissed_by_user_id: null,
+      dismissal_reason: null,
+      dismissal_note: null,
     };
     const { error } = await table("work_items").insert(item);
     if (error) throw error;
     const eventId = await addWorkEvent(item, actorUserId, "created", null);
     await safelyCreateWorkNotifications(item, null, actorUserId, eventId);
     return item;
+  } catch (error) {
+    throw workStorageError(error);
+  }
+}
+
+export async function setWorkItemDismissed(clientId: string, itemId: string, actorUserId: string, payload: Record<string, unknown>) {
+  try {
+    const id = normalizeClientId(clientId);
+    const { data, error } = await table("work_items").select("*").eq("id", itemId).eq("client_id", id).maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error("Work item not found in the selected client.");
+    const existing = data as WorkItem;
+    const restore = payload.dismissed === false;
+    const reason = asText(payload.reason, 40) as WorkDismissalReason;
+    if (!restore && !WORK_DISMISSAL_REASONS.includes(reason)) throw new Error("Choose why this work should be dismissed.");
+    const timestamp = new Date().toISOString();
+    const next: WorkItem = {
+      ...existing,
+      dismissed_at: restore ? null : timestamp,
+      dismissed_by_user_id: restore ? null : actorUserId,
+      dismissal_reason: restore ? null : reason,
+      dismissal_note: restore ? null : asNullableText(payload.note, 500),
+      updated_by_user_id: actorUserId,
+      updated_at: timestamp,
+    };
+    const { error: updateError } = await table("work_items").update(next).eq("id", itemId).eq("client_id", id);
+    if (updateError) throw updateError;
+    await addWorkEvent(next, actorUserId, restore ? "restored" : "dismissed", existing);
+    return next;
   } catch (error) {
     throw workStorageError(error);
   }

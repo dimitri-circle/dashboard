@@ -706,6 +706,15 @@ function getAvailableOpenAiApiKey(integration?: SeoIntegration | null) {
   throw new Error("OpenAI token is unavailable.");
 }
 
+export async function getAvailableOpenAiApiKeyForUser(userId?: string | null) {
+  if (userId) {
+    const { integrations } = await getSeoCollections();
+    const integration = await integrations.findOne({ user_id: userId, provider: "openai", encrypted_secret: { $ne: null } });
+    return getAvailableOpenAiApiKey(integration);
+  }
+  return getAvailableOpenAiApiKey();
+}
+
 async function recordAuditEvent({ scope, action, entityType, entityId = null, metadata = {} }: AuditPayload) {
   const { auditEvents } = await getSeoCollections();
   await auditEvents.insertOne({

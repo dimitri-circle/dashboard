@@ -12,6 +12,7 @@ import { createReviewToken, hashReviewToken, normalizeWorkItemInput, slugifyWork
 import type { WorkItem } from "../lib/work-manager/types";
 import { notificationReason, plannedNotificationKinds } from "../lib/work-manager/notifications";
 import { normalizeWorkGuideUpdate } from "../lib/work-manager/guide";
+import { normalizeSlackCandidates } from "../lib/work-manager/intake";
 
 function exampleWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {
   return {
@@ -39,6 +40,10 @@ function exampleWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {
     created_at: "2026-09-10T12:00:00.000Z",
     updated_at: "2026-09-10T12:00:00.000Z",
     completed_at: null,
+    dismissed_at: null,
+    dismissed_by_user_id: null,
+    dismissal_reason: null,
+    dismissal_note: null,
     ...overrides,
   };
 }
@@ -47,6 +52,12 @@ test("channel names become stable human-readable slugs", () => {
   assert.equal(slugifyWorkChannel("  ABK Video Queue  "), "abk-video-queue");
   assert.equal(slugifyWorkChannel("Q4 / Client Review"), "q4-client-review");
   assert.throws(() => slugifyWorkChannel("---"), /Channel name is required/);
+});
+
+test("Slack candidate intake recognizes explicit task tags and stays bounded", () => {
+  const intake = normalizeSlackCandidates({ workspaceRef: "circleclick", sourceRef: "C0BE2423W75", messages: [{ externalId: "1.2", text: "@circleclick-task-add publish the approved video" }] });
+  assert.equal(intake.messages[0].tagged, true);
+  assert.throws(() => normalizeSlackCandidates({ sourceRef: "C", messages: [] }), /between 1 and 50/);
 });
 
 test("Done and Blocked require explicit evidence", () => {
@@ -193,6 +204,8 @@ test("client review is public while Work Manager APIs remain session-protected",
     assert.equal(ingestPost.headers.get("x-middleware-next"), "1");
     const ingestGet = await proxy(new NextRequest("https://dashboard.example/api/work-manager/ingest"));
     assert.equal(ingestGet.status, 307);
+    const slackIntakePost = await proxy(new NextRequest("https://dashboard.example/api/work-manager/intake/slack", { method: "POST" }));
+    assert.equal(slackIntakePost.headers.get("x-middleware-next"), "1");
   } finally {
     if (previousSecret === undefined) delete process.env.SEO_APP_SESSION_TOKEN;
     else process.env.SEO_APP_SESSION_TOKEN = previousSecret;

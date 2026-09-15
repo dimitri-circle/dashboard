@@ -8,6 +8,13 @@ import type { WorkAssignableUser, WorkAutomationSource, WorkChannel, WorkItem, W
 
 type WorkNotice = { type: "success" | "error" | "info"; message: string } | null;
 type QuickEditor = { itemId: string; kind: "complete" | "block" } | null;
+const dismissalLabels = {
+  no_longer_needed: "No longer needed",
+  not_work: "Not a work request",
+  duplicate: "Duplicate",
+  wrong_client: "Wrong client",
+  other: "Other",
+} as const;
 
 const emptyGuideProgress: WorkGuideProgress = {
   guide_id: "work-manager-v1",
@@ -160,6 +167,7 @@ export function WorkManager({
   const [guideRunning, setGuideRunning] = useState(false);
   const [mobileGuideStep, setMobileGuideStep] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
+  const [showDismissed, setShowDismissed] = useState(false);
 
   const guideSteps = useMemo<Step[]>(() => [
     {
@@ -252,7 +260,7 @@ export function WorkManager({
       setNotice(null);
       const [channelBody, itemBody, sourceBody, userBody] = await Promise.all([
         workApi<{ channels: WorkChannel[] }>(clientId, "/api/work-manager/channels"),
-        workApi<{ items: WorkItem[] }>(clientId, "/api/work-manager/items"),
+        workApi<{ items: WorkItem[] }>(clientId, `/api/work-manager/items${showDismissed ? "?view=dismissed" : ""}`),
         workApi<{ sources: WorkAutomationSource[] }>(clientId, "/api/work-manager/sources"),
         workApi<{ users: WorkAssignableUser[] }>(clientId, "/api/work-manager/users"),
       ]);
@@ -272,6 +280,44 @@ export function WorkManager({
     } finally {
       setLoading(false);
     }
+  }
+
+  async function changeDismissal(item: WorkItem, restore = false) {
+    const reason = restore ? undefined : window.prompt(
+      "Why should this leave the queue? Type: no longer needed, not work, duplicate, wrong client, or other.",
+      "no longer needed"
+    );
+    if (!restore && reason === null) return;
+    const normalized = String(reason || "").trim().toLowerCase().replaceAll(" ", "_");
+    const dismissalReason = normalized in dismissalLabels ? normalized : "other";
+    try {
+      setSaving(true);
+      if (!preview) await workApi(clientId, `/api/work-manager/items/${item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action: restore ? "restore" : "dismiss", reason: dismissalReason }),
+      });
+      setItems((current) => current.filter((candidate) => candidate.id !== item.id));
+      setNotice({ type: "success", message: restore
+        ? `${item.title} is back in the active queue.`
+        : `${item.title} was dismissed. The source scanner will not recreate it.` });
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to change this work." });
+    } finally { setSaving(false); }
+  }
+
+  async function toggleDismissed() {
+    const next = !showDismissed;
+    setShowDismissed(next);
+    if (preview) {
+      setItems(next ? [] : previewItems.map((item) => ({ ...item, client_id: clientId })));
+      return;
+    }
+    try {
+      setLoading(true);
+      const body = await workApi<{ items: WorkItem[] }>(clientId, `/api/work-manager/items${next ? "?view=dismissed" : ""}`);
+      setItems(body.items);
+    } catch (error) { setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to load dismissed work." }); }
+    finally { setLoading(false); }
   }
 
   useEffect(() => {
@@ -710,6 +756,7 @@ export function WorkManager({
           <button className="button" type="button" onClick={() => { setShareFormOpen(true); setEditorOpen(false); }} disabled={!canEdit || loading}>
             Share client view
           </button>
+          <button className="work-text-button" type="button" onClick={toggleDismissed} disabled={loading}>{showDismissed ? "Back to active work" : "Dismissed work"}</button>
           {guideEnabled ? <button className="work-text-button" type="button" onClick={() => setGuideCenterOpen(true)}>How this works</button> : null}
         </div>
       </section>
@@ -800,7 +847,7 @@ export function WorkManager({
         <section className="work-feed-panel" data-work-guide="queue" aria-labelledby="work-feed-title">
           <div className="work-panel-heading work-feed-heading">
             <div>
-              <span className="eyebrow">{selectedChannel?.source_kind === "slack" ? "Slack-linked queue" : selectedChannel?.source_kind === "google_meet" ? "Meeting follow-ups" : "Team-maintained queue"}</span>
+              <span className="eyebrow">{showDismissed ? "Dismissed — safe to restore" : selectedChannel?.source_kind === "slack" ? "Slack-linked queue" : selectedChannel?.source_kind === "google_meet" ? "Meeting follow-ups" : "Team-maintained queue"}</span>
               <h3 id="work-feed-title">{selectedChannel?.name || "Work updates"}</h3>
               <p>{selectedChannel?.description || "Choose a channel to see its work."}</p>
             </div>
@@ -865,9 +912,12 @@ export function WorkManager({
                     {item.source_url ? <a href={item.source_url} target="_blank" rel="noreferrer">Source</a> : null}
                     {canEdit ? (
                       <div className="work-quick-actions" aria-label={`Actions for ${item.title}`}>
-                        <button className="button button-primary" type="button" disabled={saving} onClick={() => usePrimaryAction(item)}>{primaryAction(item).label}</button>
-                        {item.status !== "blocked" && item.status !== "done" ? <button className="button" type="button" disabled={saving} onClick={() => setQuickEditor({ itemId: item.id, kind: "block" })}>Block</button> : null}
-                        <button className="work-text-button" type="button" disabled={saving} onClick={() => openEditItem(item)}>Details</button>
+                        {showDismissed ? <button className="button button-primary" type="button" disabled={saving} onClick={() => changeDismissal(item, true)}>Restore</button> : <>
+                          <button className="button button-primary" type="button" disabled={saving} onClick={() => usePrimaryAction(item)}>{primaryAction(item).label}</button>
+                          {item.status !== "blocked" && item.status !== "done" ? <button className="button" type="button" disabled={saving} onClick={() => setQuickEditor({ itemId: item.id, kind: "block" })}>Block</button> : null}
+                          <button className="work-text-button" type="button" disabled={saving} onClick={() => openEditItem(item)}>Details</button>
+                          <button className="work-text-button" type="button" disabled={saving} onClick={() => changeDismissal(item)}>Dismiss</button>
+                        </>}
                       </div>
                     ) : null}
                   </footer>

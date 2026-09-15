@@ -30,7 +30,10 @@ function isScheduledSync(request: NextRequest) {
 
 function isWorkManagerIngest(request: NextRequest) {
   // The route validates WORK_MANAGER_INGEST_SECRET; collectors have no app session.
-  return request.method === "POST" && request.nextUrl.pathname === "/api/work-manager/ingest";
+  return request.method === "POST" && (
+    request.nextUrl.pathname === "/api/work-manager/ingest" ||
+    request.nextUrl.pathname === "/api/work-manager/intake/slack"
+  );
 }
 
 function isLocalWorkManagerPreview(request: NextRequest) {

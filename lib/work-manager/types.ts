@@ -59,7 +59,14 @@ export type WorkItem = {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  dismissed_at?: string | null;
+  dismissed_by_user_id?: string | null;
+  dismissal_reason?: WorkDismissalReason | null;
+  dismissal_note?: string | null;
 };
+
+export const WORK_DISMISSAL_REASONS = ["not_work", "no_longer_needed", "duplicate", "wrong_client", "other"] as const;
+export type WorkDismissalReason = (typeof WORK_DISMISSAL_REASONS)[number];
 
 export const WORK_NOTIFICATION_KINDS = ["assigned", "blocked", "review_needed", "watched_changed", "due_soon", "overdue", "channel_intake"] as const;
 export type WorkNotificationKind = (typeof WORK_NOTIFICATION_KINDS)[number];
@@ -124,7 +131,8 @@ export type WorkIngestResult = {
   updated: number;
   proposed: number;
   unchanged: number;
-  items: Array<{ id: string; externalId: string; outcome: "created" | "updated" | "proposed" | "unchanged" }>;
+  dismissed: number;
+  items: Array<{ id: string; externalId: string; outcome: "created" | "updated" | "proposed" | "unchanged" | "dismissed" }>;
 };
 
 export type WorkReviewLink = {

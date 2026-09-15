@@ -227,6 +227,7 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
     updated: 0,
     proposed: 0,
     unchanged: 0,
+    dismissed: 0,
     items: [],
   };
 
@@ -283,6 +284,11 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
     }
 
     const existing = existingData as WorkItem;
+    if (existing.dismissed_at) {
+      result.dismissed += 1;
+      result.items.push({ id: existing.id, externalId: item.externalId, outcome: "dismissed" });
+      continue;
+    }
     const plan = planAutomationUpdate(existing, incoming, timestamp);
     const { error } = await table("work_items").update(plan.next).eq("id", existing.id).eq("client_id", source.client_id);
     if (error) throw error;

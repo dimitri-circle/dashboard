@@ -9,7 +9,8 @@ export async function GET(request: Request) {
     await requireWorkSession(request);
     const scope = getTenantScopeFromRequest(request);
     const channelId = new URL(request.url).searchParams.get("channelId");
-    return NextResponse.json({ items: await listWorkItems(scope.userId, channelId) });
+    const dismissed = new URL(request.url).searchParams.get("view") === "dismissed";
+    return NextResponse.json({ items: await listWorkItems(scope.userId, channelId, dismissed) });
   } catch (error) {
     return workErrorResponse(error, "Unable to load work items.");
   }
