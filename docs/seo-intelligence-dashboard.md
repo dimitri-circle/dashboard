@@ -92,6 +92,8 @@ For temporary controlled deployments, set `SEO_ALLOWED_CLIENT_IDS` to a comma-se
 
 The dashboard includes a built-in product tour powered by React Joyride. It highlights the overview, sidebar, client switcher, focused Tool Setup entry point, tool page picker, competitive analysis, and insight feed. The implementation uses configured steps and a dark overlay so users can learn the workflow in place. The tutorial copy now explains that connector setup is separated by tool instead of showing every setup form on one screen.
 
+Work Manager has a separate, task-focused guide. A signed-in user sees a one-time overview on first entry, can run a four-step walkthrough without changing real work, and can reopen the guide from the Work Manager header or command bar. Completion and dismissal sync through `work_guide_progress`; `WORK_MANAGER_GUIDE_ENABLED=false` disables the guide without affecting work data.
+
 ## Website Watch
 
 The dashboard includes Website Watch for two levels of site review:

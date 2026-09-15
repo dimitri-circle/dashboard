@@ -1,11 +1,22 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Joyride, STATUS, type EventData, type Step, type TooltipRenderProps } from "react-joyride";
 import { previewChannels, previewItems, previewSources } from "@/lib/work-manager/preview";
+import type { WorkGuideProgress, WorkGuideStatus } from "@/lib/work-manager/guide";
 import type { WorkAssignableUser, WorkAutomationSource, WorkChannel, WorkItem, WorkStatus } from "@/lib/work-manager/types";
 
 type WorkNotice = { type: "success" | "error" | "info"; message: string } | null;
 type QuickEditor = { itemId: string; kind: "complete" | "block" } | null;
+
+const emptyGuideProgress: WorkGuideProgress = {
+  guide_id: "work-manager-v1",
+  status: "not_started",
+  current_step: 0,
+  completed_at: null,
+  dismissed_at: null,
+  updated_at: null,
+};
 
 const statusLabels: Record<WorkStatus, string> = {
   new: "Ready to start",
@@ -119,10 +130,12 @@ export function WorkManager({
   clientId,
   clientName,
   canEdit,
+  userId,
 }: {
   clientId: string;
   clientName: string;
   canEdit: boolean;
+  userId: string;
 }) {
   const [channels, setChannels] = useState<WorkChannel[]>([]);
   const [sources, setSources] = useState<WorkAutomationSource[]>([]);
@@ -140,6 +153,98 @@ export function WorkManager({
   const [editingItem, setEditingItem] = useState<WorkItem | null>(null);
   const [quickEditor, setQuickEditor] = useState<QuickEditor>(null);
   const [reviewUrl, setReviewUrl] = useState("");
+  const [guideEnabled, setGuideEnabled] = useState(true);
+  const [guideProgress, setGuideProgress] = useState<WorkGuideProgress>(emptyGuideProgress);
+  const [guideOverviewOpen, setGuideOverviewOpen] = useState(false);
+  const [guideCenterOpen, setGuideCenterOpen] = useState(false);
+  const [guideRunning, setGuideRunning] = useState(false);
+  const [mobileGuideStep, setMobileGuideStep] = useState(0);
+  const [isMobile, setIsMobile] = useState(false);
+
+  const guideSteps = useMemo<Step[]>(() => [
+    {
+      target: "[data-work-guide='actions']",
+      title: "Capture work where it starts",
+      content: "Add a clear update yourself, or create a read-only client view when the work is ready to share.",
+      placement: "bottom",
+      skipBeacon: true,
+    },
+    {
+      target: "[data-work-guide='channels']",
+      title: "Keep each workstream focused",
+      content: "Choose a channel to see only that client workstream. Connected sources are listed here when they are available.",
+      placement: "right",
+    },
+    {
+      target: "[data-work-guide='queue']",
+      title: "Read the handoff in seconds",
+      content: "Every item answers: what is happening now, what comes next, who owns it, and whether proof is still needed.",
+      placement: "left",
+    },
+    {
+      target: isMobile ? "[data-work-guide='inbox-mobile']" : "[data-work-guide='inbox-sidebar']",
+      title: "Go straight to what needs you",
+      content: "Assignments, blockers, and review requests appear in Inbox. Select one to open the exact work item.",
+      placement: isMobile ? "center" : "right",
+    },
+  ], [isMobile]);
+
+  const readiness = useMemo(() => [
+    { label: "A workstream is ready", complete: channels.length > 0 },
+    { label: "Work is being tracked", complete: items.length > 0 },
+    { label: "An owner is clear", complete: items.some((item) => Boolean(item.owner_user_id || item.owner_name)) },
+    { label: "A client-ready update exists", complete: items.some((item) => item.client_visible) },
+  ], [channels, items]);
+  const readinessCount = readiness.filter((item) => item.complete).length;
+
+  async function saveGuideProgress(status: WorkGuideStatus, currentStep: number) {
+    const fallback = { ...guideProgress, status, current_step: currentStep };
+    setGuideProgress(fallback);
+    window.localStorage.setItem(`work-manager-guide:${userId}`, JSON.stringify(fallback));
+    if (preview) return;
+    try {
+      const body = await workApi<{ progress: WorkGuideProgress }>(clientId, "/api/work-manager/guide", {
+        method: "PUT",
+        body: JSON.stringify({ status, currentStep }),
+      });
+      setGuideProgress(body.progress);
+      window.localStorage.setItem(`work-manager-guide:${userId}`, JSON.stringify(body.progress));
+    } catch {
+      // The guide stays usable with per-browser progress if synced storage is temporarily unavailable.
+    }
+  }
+
+  function startGuide() {
+    setGuideOverviewOpen(false);
+    setGuideCenterOpen(false);
+    setMobileGuideStep(0);
+    setGuideRunning(true);
+    void saveGuideProgress("in_progress", 0);
+  }
+
+  function dismissGuide() {
+    setGuideOverviewOpen(false);
+    setGuideRunning(false);
+    void saveGuideProgress("dismissed", guideProgress.current_step);
+  }
+
+  function finishGuide() {
+    setGuideRunning(false);
+    setMobileGuideStep(0);
+    void saveGuideProgress("completed", 4);
+  }
+
+  function handleGuideEvent(data: EventData) {
+    if (data.status === STATUS.FINISHED) {
+      finishGuide();
+      return;
+    }
+    if (data.status === STATUS.SKIPPED) {
+      dismissGuide();
+      return;
+    }
+    if (data.type === "step:after") void saveGuideProgress("in_progress", Math.min(data.index + 1, 4));
+  }
 
   async function loadWorkManager() {
     try {
@@ -192,6 +297,51 @@ export function WorkManager({
     loadWorkManager();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 880px)");
+    const syncViewport = () => setIsMobile(media.matches);
+    syncViewport();
+    media.addEventListener("change", syncViewport);
+    return () => media.removeEventListener("change", syncViewport);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadGuide() {
+      const cached = window.localStorage.getItem(`work-manager-guide:${userId}`);
+      if (cached) {
+        try { setGuideProgress(JSON.parse(cached) as WorkGuideProgress); } catch { /* Ignore unreadable fallback state. */ }
+      }
+      if (preview) {
+        if (!cancelled) setGuideOverviewOpen(true);
+        return;
+      }
+      try {
+        const body = await workApi<{ enabled: boolean; progress: WorkGuideProgress }>(clientId, "/api/work-manager/guide");
+        if (cancelled) return;
+        setGuideEnabled(body.enabled);
+        setGuideProgress(body.progress);
+        setGuideOverviewOpen(body.enabled && body.progress.status === "not_started");
+        window.localStorage.setItem(`work-manager-guide:${userId}`, JSON.stringify(body.progress));
+      } catch {
+        if (!cancelled && cached) {
+          try {
+            const fallback = JSON.parse(cached) as WorkGuideProgress;
+            setGuideOverviewOpen(fallback.status === "not_started");
+          } catch { setGuideOverviewOpen(false); }
+        }
+      }
+    }
+    void loadGuide();
+    return () => { cancelled = true; };
+  }, [clientId, preview, userId]);
+
+  useEffect(() => {
+    const openGuide = () => setGuideCenterOpen(true);
+    window.addEventListener("work-manager:open-guide", openGuide);
+    return () => window.removeEventListener("work-manager:open-guide", openGuide);
+  }, []);
 
   useEffect(() => {
     if (loading) return;
@@ -519,21 +669,66 @@ export function WorkManager({
 
   return (
     <div className="page-workspace work-manager-workspace">
+      {!isMobile ? (
+        <Joyride
+          continuous
+          onEvent={handleGuideEvent}
+          options={{ overlayColor: "rgba(10, 10, 12, 0.62)", primaryColor: "#111214", scrollOffset: 72, spotlightPadding: 10, spotlightRadius: 8, textColor: "#111214", width: 400, zIndex: 10000 }}
+          run={guideRunning}
+          scrollToFirstStep
+          steps={guideSteps}
+          tooltipComponent={WorkGuideTooltip}
+        />
+      ) : null}
+      {isMobile && guideRunning ? (
+        <MobileWorkGuide
+          index={mobileGuideStep}
+          size={guideSteps.length}
+          step={guideSteps[mobileGuideStep]}
+          onBack={() => setMobileGuideStep((current) => Math.max(0, current - 1))}
+          onNext={() => {
+            if (mobileGuideStep === guideSteps.length - 1) finishGuide();
+            else {
+              const next = mobileGuideStep + 1;
+              setMobileGuideStep(next);
+              void saveGuideProgress("in_progress", next);
+            }
+          }}
+          onSkip={dismissGuide}
+        />
+      ) : null}
       <section className="work-command-bar" aria-label="Work Manager controls">
         <div>
           <span className="eyebrow">People-first project view</span>
           <h3>Keep every handoff visible.</h3>
           <p>One client, one workstream, and a plain answer to what is happening now and what comes next.</p>
         </div>
-        <div className="work-command-actions">
+        <div className="work-command-actions" data-work-guide="actions">
           <button className="button button-primary" type="button" onClick={openNewItem} disabled={!canEdit || loading || !channels.length}>
             Add work update
           </button>
           <button className="button" type="button" onClick={() => { setShareFormOpen(true); setEditorOpen(false); }} disabled={!canEdit || loading}>
             Share client view
           </button>
+          {guideEnabled ? <button className="work-text-button" type="button" onClick={() => setGuideCenterOpen(true)}>How this works</button> : null}
         </div>
       </section>
+
+      {guideOverviewOpen && !editorOpen && !shareFormOpen ? (
+        <section className="work-guide-overview" aria-labelledby="work-guide-overview-title">
+          <div><span className="eyebrow">Welcome to Work Manager</span><h3 id="work-guide-overview-title">Know what is moving—and what needs you.</h3><p>Take one minute to learn how workstreams, handoffs, status updates, and Inbox fit together.</p></div>
+          <div><button className="button button-primary" type="button" onClick={startGuide}>Show me around</button><button className="button" type="button" onClick={dismissGuide}>Not now</button></div>
+        </section>
+      ) : null}
+
+      {guideCenterOpen ? (
+        <section className="work-guide-center" role="dialog" aria-modal="false" aria-labelledby="work-guide-center-title">
+          <header><div><span className="eyebrow">Work Manager guide</span><h3 id="work-guide-center-title">Your everyday flow</h3><p>These signals come from the current client workspace—not from tutorial clicks.</p></div><button className="work-text-button" type="button" onClick={() => setGuideCenterOpen(false)}>Close</button></header>
+          <div className="work-guide-progress"><strong>{readinessCount} of {readiness.length} workspace signals ready</strong><span><i style={{ width: `${(readinessCount / readiness.length) * 100}%` }} /></span></div>
+          <ol>{readiness.map((item) => <li data-complete={item.complete} key={item.label}><span aria-hidden="true">{item.complete ? "✓" : "○"}</span><span>{item.label}</span></li>)}</ol>
+          <div className="work-guide-center-actions"><button className="button button-primary" type="button" onClick={startGuide}>{guideProgress.status === "completed" ? "Replay walkthrough" : "Start walkthrough"}</button><p>Nothing in the walkthrough changes real work.</p></div>
+        </section>
+      ) : null}
 
       {notice ? <div className="alert work-manager-alert" data-type={notice.type} role="status">{notice.message}</div> : null}
 
@@ -546,7 +741,7 @@ export function WorkManager({
       </section>
 
       <div className="work-manager-layout">
-        <aside className="work-channel-panel" aria-label="Client work channels">
+        <aside className="work-channel-panel" data-work-guide="channels" aria-label="Client work channels">
           <div className="work-panel-heading">
             <div><span className="eyebrow">Channels</span><h3>Workstreams</h3></div>
             {canEdit ? <button className="work-text-button" type="button" onClick={() => setChannelFormOpen((current) => !current)}>+ Add</button> : null}
@@ -602,7 +797,7 @@ export function WorkManager({
           ) : null}
         </aside>
 
-        <section className="work-feed-panel" aria-labelledby="work-feed-title">
+        <section className="work-feed-panel" data-work-guide="queue" aria-labelledby="work-feed-title">
           <div className="work-panel-heading work-feed-heading">
             <div>
               <span className="eyebrow">{selectedChannel?.source_kind === "slack" ? "Slack-linked queue" : selectedChannel?.source_kind === "google_meet" ? "Meeting follow-ups" : "Team-maintained queue"}</span>
@@ -693,6 +888,58 @@ export function WorkManager({
           ) : null}
         </section>
       </div>
+    </div>
+  );
+}
+
+function WorkGuideTooltip({
+  backProps,
+  continuous,
+  index,
+  isLastStep,
+  primaryProps,
+  size,
+  skipProps,
+  step,
+  tooltipProps,
+}: TooltipRenderProps) {
+  return (
+    <div className="tour-dialogue work-guide-tooltip" {...tooltipProps}>
+      <div className="tour-dialogue__meta"><span>Work Manager</span><span>{index + 1} / {size}</span></div>
+      <div className="tour-dialogue__bar" aria-hidden="true"><span style={{ width: `${((index + 1) / size) * 100}%` }} /></div>
+      <div className="tour-dialogue__body">{step.title ? <h3>{step.title}</h3> : null}<p>{step.content}</p></div>
+      <div className="tour-dialogue__actions">
+        <button className="tour-button tour-button-ghost" type="button" {...skipProps}>Skip</button>
+        <div>{index > 0 ? <button className="tour-button" type="button" {...backProps}>Back</button> : null}<button className="tour-button tour-button-primary" type="button" {...primaryProps}>{isLastStep ? "Finish" : continuous ? "Next" : "Close"}</button></div>
+      </div>
+    </div>
+  );
+}
+
+function MobileWorkGuide({
+  index,
+  size,
+  step,
+  onBack,
+  onNext,
+  onSkip,
+}: {
+  index: number;
+  size: number;
+  step: Step;
+  onBack: () => void;
+  onNext: () => void;
+  onSkip: () => void;
+}) {
+  return (
+    <div className="work-guide-mobile-layer" role="presentation">
+      <div className="work-guide-mobile-scrim" />
+      <section className="tour-dialogue work-guide-mobile-sheet" role="dialog" aria-modal="true" aria-labelledby="work-mobile-guide-title">
+        <div className="tour-dialogue__meta"><span>Work Manager</span><span>{index + 1} / {size}</span></div>
+        <div className="tour-dialogue__bar" aria-hidden="true"><span style={{ width: `${((index + 1) / size) * 100}%` }} /></div>
+        <div className="tour-dialogue__body"><h3 id="work-mobile-guide-title">{step.title}</h3><p>{step.content}</p></div>
+        <div className="tour-dialogue__actions"><button className="tour-button tour-button-ghost" type="button" onClick={onSkip}>Skip</button><div>{index > 0 ? <button className="tour-button" type="button" onClick={onBack}>Back</button> : null}<button autoFocus className="tour-button tour-button-primary" type="button" onClick={onNext}>{index === size - 1 ? "Finish" : "Next"}</button></div></div>
+      </section>
     </div>
   );
 }
