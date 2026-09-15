@@ -1,16 +1,17 @@
 "use client";
 
 import { CircleClickLogo } from "@/components/CircleClickLogo";
+import { WorkManager } from "@/components/WorkManager";
 import { FormEvent, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Joyride, STATUS, type EventData, type Step, type TooltipRenderProps } from "react-joyride";
 
 type Provider = "ga4" | "gtm" | "hotjar" | "openai" | "mcp";
 type Status = "disconnected" | "connected" | "error";
-type View = "clients" | "admin" | "overview" | "brain" | "watch" | "integrations" | "analysis" | "insights";
+type View = "clients" | "admin" | "work" | "overview" | "brain" | "watch" | "integrations" | "analysis" | "insights";
 type FeatureKey = "overview" | "brain" | "watch" | "integrations" | "analysis" | "insights";
 type FeatureFlags = Record<FeatureKey, boolean>;
 type AppRole = "admin" | "operator" | "viewer";
-type NavIconName = "clients" | "admin" | "overview" | "brain" | "watch" | "tools" | "analysis" | "insights" | "menu" | "close" | "signout";
+type NavIconName = "clients" | "admin" | "work" | "overview" | "brain" | "watch" | "tools" | "analysis" | "insights" | "menu" | "close" | "signout";
 type WebsiteWatchTool = "surface" | "tracker" | "social" | "visitors" | "jobIndex" | "deep";
 type DeepAuditAccess = "public" | "vercel" | "basic" | "login" | "custom";
 type ToastNoticeState = {
@@ -582,6 +583,7 @@ const roleDetails: Record<AppRole, { label: string; description: string }> = {
 
 const navItems: Array<{ id: View; label: string; description: string; icon: NavIconName; feature?: FeatureKey }> = [
   { id: "clients", label: "Clients", description: "Choose workspace", icon: "clients" },
+  { id: "work", label: "Work Manager", description: "Now, next, and client review", icon: "work" },
   { id: "admin", label: "Admin", description: "Feature visibility", icon: "admin" },
   { id: "brain", label: "Br(AI)N", description: "Content review", icon: "brain", feature: "brain" },
   { id: "overview", label: "Overview", description: "Health and report coverage", icon: "overview", feature: "overview" },
@@ -830,7 +832,7 @@ function normalizeFeatureFlags(value: Client["feature_flags_json"] | undefined):
 }
 
 function isViewAvailable(view: View, flags: FeatureFlags) {
-  if (view === "clients" || view === "admin") return true;
+  if (view === "clients" || view === "admin" || view === "work") return true;
   return Boolean(flags[view]);
 }
 
@@ -1035,6 +1037,23 @@ export function SeoDashboard() {
   }
 
   useEffect(() => {
+    if (process.env.NODE_ENV !== "production" && new URLSearchParams(window.location.search).get("preview") === "work-manager") {
+      const timestamp = new Date().toISOString();
+      setClientId("abk-labs");
+      setClients([{
+        id: "abk-labs",
+        name: "ABK Labs",
+        notes: "Local Work Manager preview.",
+        feature_flags_json: defaultFeatureFlags,
+        created_at: timestamp,
+        updated_at: timestamp,
+      }]);
+      setCurrentUser({ id: "preview-user", email: "dimitri@circleclick.com", role: "admin", legacy: true });
+      setView("work");
+      setLoading(false);
+      return;
+    }
+
     const storedClientId = window.localStorage.getItem(CLIENT_STORAGE_KEY) || DEFAULT_CLIENT_ID;
     setClientId(storedClientId);
     loadDashboard(storedClientId);
@@ -1675,6 +1694,14 @@ export function SeoDashboard() {
 
             {view === "brain" ? <BrainView activeClient={activeClient} clientId={clientId} currentUser={currentUser} /> : null}
 
+            {view === "work" ? (
+              <WorkManager
+                canEdit={Boolean(currentUser && currentUser.role !== "viewer")}
+                clientId={clientId}
+                clientName={activeClient?.name || clientId}
+              />
+            ) : null}
+
             {view === "watch" ? (
               <WebsiteWatchView
                 activeTool={activeWatchTool}
@@ -1869,6 +1896,14 @@ function NavIcon({ name }: { name: NavIconName }) {
           <path {...common} d="M9.5 12.2 11.2 14l3.5-4" />
         </>
       ) : null}
+      {name === "work" ? (
+        <>
+          <path {...common} d="M5 5.5h14v13H5v-13Z" />
+          <path {...common} d="M8 9h8" />
+          <path {...common} d="M8 12h5" />
+          <path {...common} d="m13 16 1.5 1.5L18 14" />
+        </>
+      ) : null}
       {name === "brain" ? (
         <>
           <path {...common} d="M9 4.5a3 3 0 0 0-3 3v.3a3 3 0 0 0-1.2 5.4 3 3 0 0 0 3 5.3H9" />
@@ -1939,6 +1974,7 @@ function NavIcon({ name }: { name: NavIconName }) {
 function viewTitle(view: View, provider: Provider) {
   if (view === "clients") return "Clients";
   if (view === "admin") return "Admin";
+  if (view === "work") return "Work Manager";
   if (view === "brain") return "Br(AI)N";
   if (view === "watch") return "Website Watch";
   if (view === "integrations") return providerDetails[provider].title;
@@ -1950,6 +1986,7 @@ function viewTitle(view: View, provider: Provider) {
 function viewDescription(view: View, clientName: string, provider: Provider) {
   if (view === "clients") return "Choose or create the active client workspace.";
   if (view === "admin") return "Manage logins, roles, and client feature visibility.";
+  if (view === "work") return `${clientName}: see what is happening now, what comes next, and what needs attention.`;
   if (view === "brain") return `${clientName}: review drafts for truth, evidence, brand fit, and client-specific context.`;
   if (view === "watch") return `${clientName}: internal surface checks and deeper audit setup.`;
   if (view === "integrations") return `${clientName}: ${providerDetails[provider].description}`;

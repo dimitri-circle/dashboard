@@ -154,6 +154,18 @@ OpenAI also summarizes the already-collected crawl evidence. If no token is conn
 - ChatGPT / OpenAI: stores an encrypted user-provided API token and uses it for insight generation plus optional competitive-report summaries.
 - MCP connectors: stores remote HTTP connector config only. The MVP tests `/.well-known/oauth-protected-resource`, `/health`, and `/metadata`.
 
+## Work Manager
+
+Work Manager organizes delivery by client and by familiar workstream, such as Video Queue, Content Schedule, or Meeting Follow-ups. Every item uses a short `Now → Next` handoff and can include an owner, due date, blocker, source, and completion proof.
+
+- `Done` requires a completion-evidence URL, and `Blocked` requires a plain-language blocker.
+- Operators can mark each item as client-visible or internal-only.
+- Client review links are read-only, can cover one channel or the full client workspace, and can expire or be revoked.
+- Only a SHA-256 hash of each high-entropy review token is stored. The raw token is returned once when the link is created.
+- Slack and Google Meet are represented as source kinds in the data contract. Their collectors remain a separate activation step after storage and provider access are verified.
+
+Apply `supabase/migrations/20260909192545_work_manager_core.sql` only after confirming the CircleClick Supabase project and migration state. The migration is additive, enables RLS, revokes browser roles, and grants access only to the server-side service role.
+
 ## Security Model
 
 - Secrets are encrypted server-side with AES-256-GCM using `SEO_SECRET_ENCRYPTION_KEY` before being written to Supabase.

@@ -8,6 +8,7 @@ const PUBLIC_PATHS = [
   "/api/auth/login",
   "/api/auth/logout",
   "/api/seo/health",
+  "/review",
   "/favicon.ico",
   "/circleclick-icon.svg",
   "/dots-pattern.webp",
@@ -25,6 +26,22 @@ function isSignedVisitorIngest(request: NextRequest) {
 function isScheduledSync(request: NextRequest) {
   // The route validates CRON_SECRET; Vercel cron requests have no app session.
   return request.method === "GET" && request.nextUrl.pathname === "/api/seo/cron/daily";
+}
+
+function isWorkManagerIngest(request: NextRequest) {
+  // The route validates WORK_MANAGER_INGEST_SECRET; collectors have no app session.
+  return request.method === "POST" && request.nextUrl.pathname === "/api/work-manager/ingest";
+}
+
+function isLocalWorkManagerPreview(request: NextRequest) {
+  const hostname = request.nextUrl.hostname.toLowerCase();
+  const isLocal = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  return (
+    process.env.NODE_ENV !== "production" &&
+    isLocal &&
+    request.nextUrl.pathname === "/" &&
+    request.nextUrl.searchParams.get("preview") === "work-manager"
+  );
 }
 
 function base64Url(bytes: Uint8Array) {
@@ -106,7 +123,14 @@ async function hasValidSession(cookieSession: string | undefined, configuredSess
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (pathname.startsWith("/_next") || isPublicPath(pathname) || isSignedVisitorIngest(request) || isScheduledSync(request)) {
+  if (
+    pathname.startsWith("/_next") ||
+    isPublicPath(pathname) ||
+    isSignedVisitorIngest(request) ||
+    isScheduledSync(request) ||
+    isWorkManagerIngest(request) ||
+    isLocalWorkManagerPreview(request)
+  ) {
     return NextResponse.next();
   }
 
@@ -119,6 +143,7 @@ export async function proxy(request: NextRequest) {
 
   const loginUrl = request.nextUrl.clone();
   loginUrl.pathname = "/login";
+  loginUrl.search = "";
   loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
   return NextResponse.redirect(loginUrl);
 }
