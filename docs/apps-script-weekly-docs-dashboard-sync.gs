@@ -25,6 +25,66 @@ function prepareMeetingTemplateCopy_(documentId, reportDate, client, actions) {
   replaceMeetingSection_(body, 'Content', 'Dashboard work updates will appear here after the first sync.');
   addDashboardManagedRanges_(doc, body);
   doc.saveAndClose();
+  registerLatestDashboardMeetingDoc_(client, reportDate, documentId);
+}
+
+function registerLatestDashboardMeetingDoc_(client, reportDate, documentId) {
+  if (documentId === CONFIG.templateDocumentId) throw new Error('Refusing to register the master meeting template.');
+  PropertiesService.getScriptProperties().setProperty(
+    dashboardLatestDocKey_(client),
+    JSON.stringify({documentId: documentId, reportDate: reportDate, registeredAt: new Date().toISOString()})
+  );
+}
+
+function dashboardLatestDocKey_(client) {
+  return 'DASHBOARD_LATEST_MEETING_DOC_' + String(client.key || client.name || '')
+    .toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+function getLatestDashboardMeetingDoc_(client) {
+  var raw = PropertiesService.getScriptProperties().getProperty(dashboardLatestDocKey_(client));
+  if (!raw) throw new Error('No generated meeting document is registered for this client yet.');
+  var latest = JSON.parse(raw);
+  var reportDate = normalizeDashboardText_(latest.reportDate, 10);
+  parseIsoDate_(reportDate);
+  var documentId = normalizeDashboardText_(latest.documentId, 120);
+  if (!documentId || documentId === CONFIG.templateDocumentId) throw new Error('The registered meeting document is invalid.');
+  return {documentId: documentId, reportDate: reportDate};
+}
+
+function syncAllDashboardMeetingDocuments() {
+  var properties = PropertiesService.getScriptProperties();
+  var secret = String(properties.getProperty('DASHBOARD_DOC_SYNC_SECRET') || '');
+  var baseUrl = String(properties.getProperty('DASHBOARD_MEETING_DOC_EXPORT_URL') || '');
+  if (secret.length < 24 || !/^https:\/\//.test(baseUrl)) throw new Error('Dashboard meeting document export is not configured.');
+  return CONFIG.clients.map(function(client) {
+    var latest;
+    try { latest = getLatestDashboardMeetingDoc_(client); }
+    catch (error) { return {ok: false, skipped: true, client: client.name, reason: errorMessage_(error)}; }
+    var response = UrlFetchApp.fetch(baseUrl + '?client=' + encodeURIComponent(client.name), {
+      method: 'get',
+      headers: {Authorization: 'Bearer ' + secret},
+      muteHttpExceptions: true
+    });
+    if (response.getResponseCode() !== 200) {
+      throw new Error('Dashboard export failed for ' + client.name + ' with HTTP ' + response.getResponseCode() + '.');
+    }
+    var payload = JSON.parse(response.getContentText());
+    return syncDashboardMeetingDocument_({
+      secret: secret,
+      clientKey: client.name,
+      reportDate: latest.reportDate,
+      documentId: latest.documentId,
+      items: payload.items || []
+    });
+  });
+}
+
+function installDashboardMeetingDocumentTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === 'syncAllDashboardMeetingDocuments') ScriptApp.deleteTrigger(trigger);
+  });
+  ScriptApp.newTrigger('syncAllDashboardMeetingDocuments').timeBased().everyMinutes(15).create();
 }
 
 function updateMeetingMetadata_(body, client, reportDate) {
@@ -147,9 +207,11 @@ function syncDashboardMeetingDocument_(payload) {
   try {
     var client = getClientConfig_(normalizeDashboardText_(payload.clientKey, 60));
     var reportDate = normalizeDashboardText_(payload.reportDate, 10);
+    var latest = reportDate ? null : getLatestDashboardMeetingDoc_(client);
+    if (!reportDate) reportDate = latest.reportDate;
     parseIsoDate_(reportDate);
     var key = idempotencyKey_(client, reportDate, false);
-    var expectedId = PropertiesService.getScriptProperties().getProperty(key);
+    var expectedId = PropertiesService.getScriptProperties().getProperty(key) || (latest && latest.documentId);
     var requestedId = normalizeDashboardText_(payload.documentId, 120);
     if (!expectedId) throw new Error('No generated meeting document is registered for this client and week.');
     if (requestedId && requestedId !== expectedId) throw new Error('The requested document does not match the registered generated copy.');

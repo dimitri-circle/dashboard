@@ -13,6 +13,7 @@ import type { WorkItem } from "../lib/work-manager/types";
 import { notificationReason, plannedNotificationKinds } from "../lib/work-manager/notifications";
 import { normalizeWorkGuideUpdate } from "../lib/work-manager/guide";
 import { normalizeSlackCandidates } from "../lib/work-manager/intake";
+import { isValidMeetingDocExportRequest, toMeetingDocItem } from "../lib/work-manager/meeting-docs";
 
 function exampleWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {
   return {
@@ -189,6 +190,35 @@ test("work guide progress is bounded and completion always records the final ste
   assert.deepEqual(normalizeWorkGuideUpdate({ status: "unexpected", currentStep: "nope" }), { status: "in_progress", currentStep: 0 });
 });
 
+test("meeting document payload keeps human work fields and omits private implementation data", () => {
+  assert.deepEqual(toMeetingDocItem(exampleWorkItem({ blocker_text: "Waiting for approval" }), "Video Queue"), {
+    id: "item-1",
+    title: "Publish founder interview",
+    ownerName: "Award",
+    dueDate: "",
+    status: "in_progress",
+    channelName: "Video Queue",
+    nowText: "Editing",
+    nextText: "Review",
+    blockerText: "Waiting for approval",
+    dismissed: false,
+  });
+});
+
+test("meeting document export fails closed without the shared bearer secret", () => {
+  const previous = process.env.DASHBOARD_DOC_SYNC_SECRET;
+  process.env.DASHBOARD_DOC_SYNC_SECRET = "12345678901234567890123456789012";
+  try {
+    assert.equal(isValidMeetingDocExportRequest(new Request("https://dashboard.example/api/work-manager/meeting-document")), false);
+    assert.equal(isValidMeetingDocExportRequest(new Request("https://dashboard.example/api/work-manager/meeting-document", {
+      headers: {authorization: "Bearer 12345678901234567890123456789012"},
+    })), true);
+  } finally {
+    if (previous === undefined) delete process.env.DASHBOARD_DOC_SYNC_SECRET;
+    else process.env.DASHBOARD_DOC_SYNC_SECRET = previous;
+  }
+});
+
 test("client review is public while Work Manager APIs remain session-protected", async () => {
   const previousSecret = process.env.SEO_APP_SESSION_TOKEN;
   process.env.SEO_APP_SESSION_TOKEN = "work-manager-test-secret";
@@ -206,6 +236,8 @@ test("client review is public while Work Manager APIs remain session-protected",
     assert.equal(ingestGet.status, 307);
     const slackIntakePost = await proxy(new NextRequest("https://dashboard.example/api/work-manager/intake/slack", { method: "POST" }));
     assert.equal(slackIntakePost.headers.get("x-middleware-next"), "1");
+    const meetingExportGet = await proxy(new NextRequest("https://dashboard.example/api/work-manager/meeting-document?client=Vast.ai"));
+    assert.equal(meetingExportGet.headers.get("x-middleware-next"), "1");
   } finally {
     if (previousSecret === undefined) delete process.env.SEO_APP_SESSION_TOKEN;
     else process.env.SEO_APP_SESSION_TOKEN = previousSecret;

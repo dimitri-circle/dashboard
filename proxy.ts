@@ -36,6 +36,11 @@ function isWorkManagerIngest(request: NextRequest) {
   );
 }
 
+function isMeetingDocumentExport(request: NextRequest) {
+  // The route validates DASHBOARD_DOC_SYNC_SECRET; Apps Script has no app session.
+  return request.method === "GET" && request.nextUrl.pathname === "/api/work-manager/meeting-document";
+}
+
 function isLocalWorkManagerPreview(request: NextRequest) {
   const hostname = request.nextUrl.hostname.toLowerCase();
   const isLocal = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
@@ -132,6 +137,7 @@ export async function proxy(request: NextRequest) {
     isSignedVisitorIngest(request) ||
     isScheduledSync(request) ||
     isWorkManagerIngest(request) ||
+    isMeetingDocumentExport(request) ||
     isLocalWorkManagerPreview(request)
   ) {
     return NextResponse.next();
