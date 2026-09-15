@@ -12,6 +12,7 @@ import {
   type WorkSourceKind,
   type WorkStatus,
 } from "./types";
+import { safelyCreateWorkNotifications } from "./notifications";
 
 const WORK_STORAGE_MESSAGE =
   "Work Manager storage is not installed yet. Apply the reviewed Work Manager migrations to the confirmed CircleClick Supabase project.";
@@ -23,6 +24,7 @@ type WorkItemInput = Partial<{
   nextText: unknown;
   blockerText: unknown;
   ownerName: unknown;
+  ownerUserId: unknown;
   status: unknown;
   dueDate: unknown;
   sourceKind: unknown;
@@ -121,6 +123,7 @@ export function normalizeWorkItemInput(payload: WorkItemInput, existing?: WorkIt
     next_text: payload.nextText === undefined ? existing?.next_text || "" : asText(payload.nextText, 2400),
     blocker_text: blockerText,
     owner_name: payload.ownerName === undefined ? existing?.owner_name || null : asNullableText(payload.ownerName, 120),
+    owner_user_id: payload.ownerUserId === undefined ? existing?.owner_user_id || null : asNullableText(payload.ownerUserId, 80),
     status,
     due_date: payload.dueDate === undefined ? existing?.due_date || null : asDate(payload.dueDate),
     source_kind: asSourceKind(payload.sourceKind, existing?.source_kind || "manual"),
@@ -143,7 +146,7 @@ function workStorageError(error: unknown) {
   return error instanceof Error ? error : new Error(message);
 }
 
-function table(name: "work_channels" | "work_items" | "work_item_events" | "work_review_links" | "work_sources" | "seo_clients") {
+function table(name: "work_channels" | "work_items" | "work_item_events" | "work_review_links" | "work_sources" | "seo_clients" | "seo_app_users") {
   return getSupabaseAdminClient().from(name);
 }
 
@@ -272,8 +275,9 @@ async function addWorkEvent(
   action: "created" | "updated" | "status_changed" | "evidence_added",
   before: Partial<WorkItem> | null
 ) {
+  const eventId = randomUUID();
   const { error } = await table("work_item_events").insert({
-    id: randomUUID(),
+    id: eventId,
     client_id: item.client_id,
     item_id: item.id,
     actor_user_id: actorUserId,
@@ -284,6 +288,13 @@ async function addWorkEvent(
     created_at: new Date().toISOString(),
   });
   if (error) throw error;
+  return eventId;
+}
+
+export async function listWorkAssignableUsers() {
+  const { data, error } = await table("seo_app_users").select("id,email,role").is("disabled_at", null).order("email", { ascending: true });
+  if (error) throw error;
+  return data || [];
 }
 
 export async function createWorkItem(clientId: string, actorUserId: string, payload: WorkItemInput) {
@@ -307,7 +318,8 @@ export async function createWorkItem(clientId: string, actorUserId: string, payl
     };
     const { error } = await table("work_items").insert(item);
     if (error) throw error;
-    await addWorkEvent(item, actorUserId, "created", null);
+    const eventId = await addWorkEvent(item, actorUserId, "created", null);
+    await safelyCreateWorkNotifications(item, null, actorUserId, eventId);
     return item;
   } catch (error) {
     throw workStorageError(error);
@@ -339,7 +351,8 @@ export async function updateWorkItem(clientId: string, itemId: string, actorUser
       : !existing.completion_evidence_url && next.completion_evidence_url
         ? "evidence_added"
         : "updated";
-    await addWorkEvent(next, actorUserId, action, existing);
+    const eventId = await addWorkEvent(next, actorUserId, action, existing);
+    await safelyCreateWorkNotifications(next, existing, actorUserId, eventId);
     return next;
   } catch (error) {
     throw workStorageError(error);

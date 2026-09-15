@@ -1,5 +1,6 @@
 import crypto, { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "@/lib/seo/db";
+import { safelyCreateWorkNotifications } from "./notifications";
 import { normalizeWorkItemInput } from "./service";
 import {
   WORK_STATUSES,
@@ -191,8 +192,9 @@ function table(name: "work_sources" | "work_items" | "work_item_events") {
 }
 
 async function addAutomationEvent(item: WorkItem, action: "ingested" | "automation_proposed", before: WorkItem | null) {
+  const eventId = randomUUID();
   const { error } = await table("work_item_events").insert({
-    id: randomUUID(),
+    id: eventId,
     client_id: item.client_id,
     item_id: item.id,
     actor_user_id: null,
@@ -203,6 +205,7 @@ async function addAutomationEvent(item: WorkItem, action: "ingested" | "automati
     created_at: new Date().toISOString(),
   });
   if (error) throw error;
+  return eventId;
 }
 
 export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult> {
@@ -272,7 +275,8 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
       };
       const { error } = await table("work_items").insert(created);
       if (error) throw error;
-      await addAutomationEvent(created, "ingested", null);
+      const eventId = await addAutomationEvent(created, "ingested", null);
+      await safelyCreateWorkNotifications(created, null, null, eventId);
       result.created += 1;
       result.items.push({ id: created.id, externalId: item.externalId, outcome: "created" });
       continue;
@@ -282,8 +286,14 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
     const plan = planAutomationUpdate(existing, incoming, timestamp);
     const { error } = await table("work_items").update(plan.next).eq("id", existing.id).eq("client_id", source.client_id);
     if (error) throw error;
-    if (plan.outcome === "updated") await addAutomationEvent(plan.next, "ingested", existing);
-    if (plan.outcome === "proposed") await addAutomationEvent(plan.next, "automation_proposed", existing);
+    if (plan.outcome === "updated") {
+      const eventId = await addAutomationEvent(plan.next, "ingested", existing);
+      await safelyCreateWorkNotifications(plan.next, existing, null, eventId);
+    }
+    if (plan.outcome === "proposed") {
+      const eventId = await addAutomationEvent(plan.next, "automation_proposed", existing);
+      await safelyCreateWorkNotifications(plan.next, existing, null, eventId);
+    }
     result[plan.outcome] += 1;
     result.items.push({ id: existing.id, externalId: item.externalId, outcome: plan.outcome });
   }
