@@ -1689,8 +1689,8 @@ export function SeoDashboard() {
                   <p className="active-client">{viewDescription(view, activeClient?.name || clientId, activeProvider)}</p>
                 </div>
                 <div className="dashboard-tools">
-                  <button className="button" type="button" onClick={() => setTourRunning(true)}>
-                    Start Tutorial
+                  <button className="button" type="button" onClick={() => view === "work" ? window.dispatchEvent(new CustomEvent("work-manager:open-guide")) : setTourRunning(true)}>
+                    {view === "work" ? "How Work Manager works" : "Dashboard tour"}
                   </button>
                 </div>
               </div>
@@ -1733,6 +1733,7 @@ export function SeoDashboard() {
                 canEdit={Boolean(currentUser && currentUser.role !== "viewer")}
                 clientId={clientId}
                 clientName={activeClient?.name || clientId}
+                userId={currentUser?.id || "unknown-user"}
               />
             ) : null}
 
@@ -1902,7 +1903,7 @@ function NotificationInbox({
   const itemCountLabel = unreadCount ? `${unreadCount} work item${unreadCount === 1 ? "" : "s"} need attention` : notifications.length ? `${openItemLabel}, ${updateCountLabel}` : updateCountLabel;
 
   return (
-    <div className={`notification-inbox notification-inbox-${variant}`} data-open={open}>
+    <div className={`notification-inbox notification-inbox-${variant}`} data-open={open} data-work-guide={`inbox-${variant}`}>
       <button
         className="notification-inbox-trigger"
         type="button"

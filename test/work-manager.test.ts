@@ -11,6 +11,7 @@ import {
 import { createReviewToken, hashReviewToken, normalizeWorkItemInput, slugifyWorkChannel } from "../lib/work-manager/service";
 import type { WorkItem } from "../lib/work-manager/types";
 import { notificationReason, plannedNotificationKinds } from "../lib/work-manager/notifications";
+import { normalizeWorkGuideUpdate } from "../lib/work-manager/guide";
 
 function exampleWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {
   return {
@@ -168,6 +169,13 @@ test("notification planning is actionable and does not emit routine noise", () =
   assert.deepEqual(plannedNotificationKinds(original, assignedAndBlocked), ["assigned", "blocked"]);
   assert.deepEqual(plannedNotificationKinds(assignedAndBlocked, { ...assignedAndBlocked, now_text: "Minor wording change" }), []);
   assert.equal(notificationReason("blocked", assignedAndBlocked), "Blocked: Client approval is missing.");
+});
+
+test("work guide progress is bounded and completion always records the final step", () => {
+  assert.deepEqual(normalizeWorkGuideUpdate({ status: "in_progress", currentStep: 2 }), { status: "in_progress", currentStep: 2 });
+  assert.deepEqual(normalizeWorkGuideUpdate({ status: "completed", currentStep: 1 }), { status: "completed", currentStep: 4 });
+  assert.deepEqual(normalizeWorkGuideUpdate({ status: "dismissed", currentStep: 99 }), { status: "dismissed", currentStep: 4 });
+  assert.deepEqual(normalizeWorkGuideUpdate({ status: "unexpected", currentStep: "nope" }), { status: "in_progress", currentStep: 0 });
 });
 
 test("client review is public while Work Manager APIs remain session-protected", async () => {
