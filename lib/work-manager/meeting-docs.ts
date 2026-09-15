@@ -65,7 +65,9 @@ export async function meetingDocPayloadByClientKey(clientKey: string) {
   if (!normalized || normalized.length > 80) throw new Error("Client key is required.");
   const { data, error } = await getSupabaseAdminClient().from("seo_clients").select("id,name");
   if (error) throw error;
-  const client = (data || []).find((row) => String(row.name || "").trim().toLowerCase() === normalized);
+  const aliases: Record<string, string> = { "vast.ai": "vast" };
+  const dashboardName = aliases[normalized] || normalized;
+  const client = (data || []).find((row) => String(row.name || "").trim().toLowerCase() === dashboardName);
   if (!client) throw new Error("Client workspace is unavailable.");
   return meetingDocPayload(client.id);
 }
