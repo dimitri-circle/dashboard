@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { previewChannels, previewItems, previewSources } from "@/lib/work-manager/preview";
-import type { WorkAutomationSource, WorkChannel, WorkItem, WorkStatus } from "@/lib/work-manager/types";
+import type { WorkAssignableUser, WorkAutomationSource, WorkChannel, WorkItem, WorkStatus } from "@/lib/work-manager/types";
 
 type WorkNotice = { type: "success" | "error" | "info"; message: string } | null;
 type QuickEditor = { itemId: string; kind: "complete" | "block" } | null;
@@ -96,6 +96,7 @@ function previewItemFromForm(clientId: string, item: WorkItem | null, formData: 
     next_text: String(formData.get("nextText") || "").trim(),
     blocker_text: String(formData.get("blockerText") || "").trim() || null,
     owner_name: String(formData.get("ownerName") || "").trim() || null,
+    owner_user_id: String(formData.get("ownerUserId") || "").trim() || null,
     status,
     due_date: String(formData.get("dueDate") || "").trim() || null,
     source_kind: item?.source_kind || "manual",
@@ -126,6 +127,7 @@ export function WorkManager({
   const [channels, setChannels] = useState<WorkChannel[]>([]);
   const [sources, setSources] = useState<WorkAutomationSource[]>([]);
   const [items, setItems] = useState<WorkItem[]>([]);
+  const [assignableUsers, setAssignableUsers] = useState<WorkAssignableUser[]>([]);
   const [selectedChannelId, setSelectedChannelId] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -143,18 +145,22 @@ export function WorkManager({
     try {
       setLoading(true);
       setNotice(null);
-      const [channelBody, itemBody, sourceBody] = await Promise.all([
+      const [channelBody, itemBody, sourceBody, userBody] = await Promise.all([
         workApi<{ channels: WorkChannel[] }>(clientId, "/api/work-manager/channels"),
         workApi<{ items: WorkItem[] }>(clientId, "/api/work-manager/items"),
         workApi<{ sources: WorkAutomationSource[] }>(clientId, "/api/work-manager/sources"),
+        workApi<{ users: WorkAssignableUser[] }>(clientId, "/api/work-manager/users"),
       ]);
       setChannels(channelBody.channels);
       setItems(itemBody.items);
       setSources(sourceBody.sources);
+      setAssignableUsers(userBody.users);
+      const requestedItemId = new URLSearchParams(window.location.search).get("item");
+      const requestedItem = itemBody.items.find((item) => item.id === requestedItemId);
       setSelectedChannelId((current) =>
-        current && channelBody.channels.some((channel) => channel.id === current)
+        requestedItem?.channel_id || (current && channelBody.channels.some((channel) => channel.id === current)
           ? current
-          : channelBody.channels[0]?.id || ""
+          : channelBody.channels[0]?.id || "")
       );
     } catch (error) {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to load Work Manager." });
@@ -176,6 +182,7 @@ export function WorkManager({
       setChannels(previewClientChannels);
       setItems(previewItems.map((item) => ({ ...item, client_id: clientId })));
       setSources(previewSources.map((source) => ({ ...source, client_id: clientId })));
+      setAssignableUsers([{ id: "preview-user", email: "dimitri@circleclick.com", role: "admin" }]);
       setSelectedChannelId(previewClientChannels[0]?.id || "");
       setLoading(false);
       setNotice({ type: "info", message: "Preview mode uses local sample work and cannot change production data." });
@@ -185,6 +192,26 @@ export function WorkManager({
     loadWorkManager();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
+
+  useEffect(() => {
+    if (loading) return;
+    const itemId = new URLSearchParams(window.location.search).get("item");
+    const item = items.find((candidate) => candidate.id === itemId);
+    if (item) openEditItem(item);
+    // Open once when a notification deep link resolves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
+
+  useEffect(() => {
+    const handleOpenItem = (event: Event) => {
+      const itemId = (event as CustomEvent<{ itemId?: string }>).detail?.itemId;
+      const item = items.find((candidate) => candidate.id === itemId);
+      if (item) openEditItem(item);
+    };
+    window.addEventListener("work-manager:open-item", handleOpenItem);
+    return () => window.removeEventListener("work-manager:open-item", handleOpenItem);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
 
   const selectedChannel = channels.find((channel) => channel.id === selectedChannelId) || null;
   const selectedSources = sources.filter((source) => source.channel_id === selectedChannelId && source.active);
@@ -417,6 +444,7 @@ export function WorkManager({
         nextText: String(formData.get("nextText") || ""),
         blockerText,
         ownerName: String(formData.get("ownerName") || ""),
+        ownerUserId: String(formData.get("ownerUserId") || ""),
         status,
         dueDate: String(formData.get("dueDate") || ""),
         sourceUrl: String(formData.get("sourceUrl") || ""),
@@ -587,6 +615,7 @@ export function WorkManager({
           {editorOpen ? (
             <WorkItemForm
               channels={channels}
+              assignableUsers={assignableUsers}
               editingItem={editingItem}
               saving={saving}
               selectedChannelId={selectedChannelId}
@@ -670,6 +699,7 @@ export function WorkManager({
 
 function WorkItemForm({
   channels,
+  assignableUsers,
   editingItem,
   saving,
   selectedChannelId,
@@ -677,6 +707,7 @@ function WorkItemForm({
   onSubmit,
 }: {
   channels: WorkChannel[];
+  assignableUsers: WorkAssignableUser[];
   editingItem: WorkItem | null;
   saving: boolean;
   selectedChannelId: string;
@@ -689,7 +720,8 @@ function WorkItemForm({
       <div className="work-form-grid">
         <label className="work-form-wide">Work title<input name="title" defaultValue={editingItem?.title || ""} placeholder="Publish the customer interview" maxLength={180} required /></label>
         <label>Channel<select name="channelId" defaultValue={editingItem?.channel_id || selectedChannelId} required>{channels.map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}</select></label>
-        <label>Owner<input name="ownerName" defaultValue={editingItem?.owner_name || ""} placeholder="Person or team" maxLength={120} /></label>
+        <label>Person responsible<select name="ownerUserId" defaultValue={editingItem?.owner_user_id || ""}><option value="">Not assigned to a login</option>{assignableUsers.map((user) => <option key={user.id} value={user.id}>{user.email}</option>)}</select></label>
+        <label>Team or display name<input name="ownerName" defaultValue={editingItem?.owner_name || ""} placeholder="Optional team name" maxLength={120} /></label>
         <label>Status<select name="status" defaultValue={editingItem?.status || "new"}>{statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label>Due date<input name="dueDate" type="date" defaultValue={editingItem?.due_date || ""} /></label>
         <label className="work-form-wide">What is happening now?<textarea name="nowText" defaultValue={editingItem?.now_text || ""} rows={3} placeholder="Use a sentence a teammate or client can understand without context." /></label>

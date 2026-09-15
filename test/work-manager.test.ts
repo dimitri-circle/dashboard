@@ -10,6 +10,7 @@ import {
 } from "../lib/work-manager/ingest";
 import { createReviewToken, hashReviewToken, normalizeWorkItemInput, slugifyWorkChannel } from "../lib/work-manager/service";
 import type { WorkItem } from "../lib/work-manager/types";
+import { notificationReason, plannedNotificationKinds } from "../lib/work-manager/notifications";
 
 function exampleWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {
   return {
@@ -21,6 +22,7 @@ function exampleWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {
     next_text: "Review",
     blocker_text: null,
     owner_name: "Award",
+    owner_user_id: null,
     status: "in_progress",
     due_date: null,
     source_kind: "slack",
@@ -132,6 +134,7 @@ test("automation updates its own rows but only proposes changes to human-owned r
     next_text: "Publish after approval",
     blocker_text: null,
     owner_name: existing.owner_name,
+    owner_user_id: existing.owner_user_id,
     status: "in_progress" as const,
     due_date: null,
     source_kind: "slack" as const,
@@ -157,6 +160,14 @@ test("automation updates its own rows but only proposes changes to human-owned r
   assert.equal(humanOwned.outcome, "proposed");
   assert.equal(humanOwned.next.now_text, "Human confirmed this wording");
   assert.equal(humanOwned.next.automation_review_needed, true);
+});
+
+test("notification planning is actionable and does not emit routine noise", () => {
+  const original = exampleWorkItem();
+  const assignedAndBlocked = exampleWorkItem({ owner_user_id: "user-2", status: "blocked", blocker_text: "Client approval is missing." });
+  assert.deepEqual(plannedNotificationKinds(original, assignedAndBlocked), ["assigned", "blocked"]);
+  assert.deepEqual(plannedNotificationKinds(assignedAndBlocked, { ...assignedAndBlocked, now_text: "Minor wording change" }), []);
+  assert.equal(notificationReason("blocked", assignedAndBlocked), "Blocked: Client approval is missing.");
 });
 
 test("client review is public while Work Manager APIs remain session-protected", async () => {

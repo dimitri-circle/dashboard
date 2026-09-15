@@ -43,6 +43,7 @@ export type WorkItem = {
   next_text: string;
   blocker_text: string | null;
   owner_name: string | null;
+  owner_user_id: string | null;
   status: WorkStatus;
   due_date: string | null;
   source_kind: WorkSourceKind;
@@ -59,6 +60,42 @@ export type WorkItem = {
   updated_at: string;
   completed_at: string | null;
 };
+
+export const WORK_NOTIFICATION_KINDS = ["assigned", "blocked", "review_needed", "watched_changed", "due_soon", "overdue", "channel_intake"] as const;
+export type WorkNotificationKind = (typeof WORK_NOTIFICATION_KINDS)[number];
+
+export type WorkNotification = {
+  id: string;
+  recipient_user_id: string;
+  client_id: string;
+  channel_id: string;
+  item_id: string;
+  event_id: string | null;
+  kind: WorkNotificationKind;
+  title: string;
+  message: string;
+  dedupe_key: string;
+  read_at: string | null;
+  created_at: string;
+  client_name?: string;
+  channel_name?: string;
+  channel_slug?: string;
+};
+
+export type WorkNotificationPreferences = {
+  user_id: string;
+  email_enabled: boolean;
+  digest_hour: number;
+  timezone: string;
+  assigned_enabled: boolean;
+  blocked_enabled: boolean;
+  review_enabled: boolean;
+  due_enabled: boolean;
+  channel_intake_enabled: boolean;
+  updated_at: string;
+};
+
+export type WorkAssignableUser = { id: string; email: string; role: "admin" | "operator" | "viewer" };
 
 export type WorkIngestItemInput = {
   externalId: string;

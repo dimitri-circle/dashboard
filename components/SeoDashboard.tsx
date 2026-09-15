@@ -40,6 +40,16 @@ type ChangelogEntry = {
   tags: string[];
 };
 
+type WorkNotification = {
+  id: string; client_id: string; channel_id: string; item_id: string; kind: string; title: string; message: string;
+  read_at: string | null; created_at: string; client_name?: string; channel_name?: string;
+};
+
+type WorkNotificationPreferences = {
+  user_id: string; email_enabled: boolean; digest_hour: number; timezone: string; assigned_enabled: boolean;
+  blocked_enabled: boolean; review_enabled: boolean; due_enabled: boolean; channel_intake_enabled: boolean; updated_at: string;
+};
+
 type PageHeroStat = {
   label: string;
   value: string;
@@ -1054,8 +1064,11 @@ export function SeoDashboard() {
       return;
     }
 
-    const storedClientId = window.localStorage.getItem(CLIENT_STORAGE_KEY) || DEFAULT_CLIENT_ID;
+    const params = new URLSearchParams(window.location.search);
+    const linkedClientId = params.get("client");
+    const storedClientId = linkedClientId || window.localStorage.getItem(CLIENT_STORAGE_KEY) || DEFAULT_CLIENT_ID;
     setClientId(storedClientId);
+    if (params.get("view") === "work" && params.get("item")) setView("work");
     loadDashboard(storedClientId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1472,6 +1485,23 @@ export function SeoDashboard() {
     }
   }
 
+  function openWorkNotification(notification: WorkNotification) {
+    if (clients.some((client) => client.id === notification.client_id)) {
+      window.localStorage.setItem(CLIENT_STORAGE_KEY, notification.client_id);
+      setClientId(notification.client_id);
+    }
+    const url = new URL(window.location.href);
+    if (notification.id !== "preview-notification") url.searchParams.delete("preview");
+    url.searchParams.set("view", "work");
+    url.searchParams.set("client", notification.client_id);
+    url.searchParams.set("channel", notification.channel_id);
+    url.searchParams.set("item", notification.item_id);
+    window.history.replaceState({}, "", url);
+    setView("work");
+    window.setTimeout(() => window.dispatchEvent(new CustomEvent("work-manager:open-item", { detail: { itemId: notification.item_id } })), 0);
+    setNotificationInboxOpen(false);
+  }
+
   return (
     <section className="dashboard-shell" data-nav-open={navOpen} aria-labelledby="dashboard-title">
       <Joyride
@@ -1526,9 +1556,11 @@ export function SeoDashboard() {
         </div>
 
         <NotificationInbox
+          clientId={clientId}
           changelogEntries={productChangelog}
           notifications={setupNotifications}
           onConnectOpenAi={openOpenAiSetup}
+          onOpenWork={openWorkNotification}
           onToggle={() => setNotificationInboxOpen((current) => !current)}
           open={notificationInboxOpen}
           variant="sidebar"
@@ -1620,9 +1652,11 @@ export function SeoDashboard() {
 
       <ToastNotice toast={toastNotice} />
       <NotificationInbox
+        clientId={clientId}
         changelogEntries={productChangelog}
         notifications={setupNotifications}
         onConnectOpenAi={openOpenAiSetup}
+        onOpenWork={openWorkNotification}
         onToggle={() => setNotificationInboxOpen((current) => !current)}
         open={notificationInboxOpen}
         variant="mobile"
@@ -1765,28 +1799,107 @@ export function SeoDashboard() {
 }
 
 function NotificationInbox({
+  clientId,
   changelogEntries,
   notifications,
   onConnectOpenAi,
+  onOpenWork,
   onToggle,
   open,
   variant,
 }: {
+  clientId: string;
   changelogEntries: ChangelogEntry[];
   notifications: SetupNotification[];
   onConnectOpenAi: () => void;
+  onOpenWork: (notification: WorkNotification) => void;
   onToggle: () => void;
   open: boolean;
   variant: "sidebar" | "mobile";
 }) {
-  if (!notifications.length && !changelogEntries.length) {
-    return null;
+  const [workNotifications, setWorkNotifications] = useState<WorkNotification[]>([]);
+  const [preferences, setPreferences] = useState<WorkNotificationPreferences | null>(null);
+  const [tab, setTab] = useState<"work" | "product">("work");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [savingPreferences, setSavingPreferences] = useState(false);
+
+  async function loadWorkInbox() {
+    if (process.env.NODE_ENV !== "production" && new URLSearchParams(window.location.search).get("preview") === "work-manager") {
+      setWorkNotifications([{ id: "preview-notification", client_id: "abk-labs", channel_id: "preview-video", item_id: "preview-item-2", kind: "blocked", title: "September product demo", message: "Blocked: Waiting on ABK to choose the final thumbnail.", read_at: null, created_at: new Date().toISOString(), client_name: "ABK Labs", channel_name: "Video Queue" }]);
+      return;
+    }
+    try {
+      const body = await api<{ notifications: WorkNotification[] }>(clientId, "/api/work-manager/notifications");
+      setWorkNotifications(Array.isArray(body.notifications) ? body.notifications : []);
+    } catch {
+      setWorkNotifications([]);
+    }
+  }
+
+  useEffect(() => {
+    loadWorkInbox();
+    const timer = window.setInterval(loadWorkInbox, 60_000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function openNotification(notification: WorkNotification) {
+    if (!notification.read_at) {
+      if (!(process.env.NODE_ENV !== "production" && notification.id === "preview-notification")) {
+        await api(clientId, "/api/work-manager/notifications", { method: "PATCH", body: JSON.stringify({ ids: [notification.id] }) });
+      }
+      setWorkNotifications((current) => current.map((item) => item.id === notification.id ? { ...item, read_at: new Date().toISOString() } : item));
+    }
+    onOpenWork(notification);
+  }
+
+  async function markAllRead() {
+    if (!(process.env.NODE_ENV !== "production" && new URLSearchParams(window.location.search).get("preview") === "work-manager")) {
+      await api(clientId, "/api/work-manager/notifications", { method: "PATCH", body: JSON.stringify({}) });
+    }
+    setWorkNotifications((current) => current.map((item) => ({ ...item, read_at: item.read_at || new Date().toISOString() })));
+  }
+
+  async function toggleSettings() {
+    if (!preferences) {
+      if (process.env.NODE_ENV !== "production" && new URLSearchParams(window.location.search).get("preview") === "work-manager") {
+        setPreferences({ user_id: "preview-user", email_enabled: false, digest_hour: 17, timezone: "America/Chicago", assigned_enabled: true, blocked_enabled: true, review_enabled: true, due_enabled: true, channel_intake_enabled: false, updated_at: new Date().toISOString() });
+      } else {
+        const body = await api<{ preferences: WorkNotificationPreferences }>(clientId, "/api/work-manager/notification-preferences");
+        setPreferences(body.preferences);
+      }
+    }
+    setSettingsOpen((current) => !current);
+  }
+
+  async function savePreferences(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    setSavingPreferences(true);
+    try {
+      const nextPreferences = {
+        email_enabled: formData.get("emailEnabled") === "on", assigned_enabled: formData.get("assignedEnabled") === "on",
+        blocked_enabled: formData.get("blockedEnabled") === "on", review_enabled: formData.get("reviewEnabled") === "on",
+        due_enabled: formData.get("dueEnabled") === "on", channel_intake_enabled: formData.get("channelIntakeEnabled") === "on",
+        digest_hour: Number(formData.get("digestHour") || 17), timezone: "America/Chicago",
+      };
+      if (process.env.NODE_ENV !== "production" && new URLSearchParams(window.location.search).get("preview") === "work-manager") {
+        setPreferences((current) => current ? { ...current, ...nextPreferences, updated_at: new Date().toISOString() } : current);
+      } else {
+        const body = await api<{ preferences: WorkNotificationPreferences }>(clientId, "/api/work-manager/notification-preferences", { method: "PUT", body: JSON.stringify(nextPreferences) });
+        setPreferences(body.preferences);
+      }
+      setSettingsOpen(false);
+    } finally {
+      setSavingPreferences(false);
+    }
   }
 
   const panelId = `dashboard-inbox-${variant}`;
+  const unreadCount = workNotifications.filter((item) => !item.read_at).length;
   const updateCountLabel = `${changelogEntries.length} update${changelogEntries.length === 1 ? "" : "s"}`;
   const openItemLabel = `${notifications.length} setup item${notifications.length === 1 ? "" : "s"}`;
-  const itemCountLabel = notifications.length ? `${openItemLabel}, ${updateCountLabel}` : updateCountLabel;
+  const itemCountLabel = unreadCount ? `${unreadCount} work item${unreadCount === 1 ? "" : "s"} need attention` : notifications.length ? `${openItemLabel}, ${updateCountLabel}` : updateCountLabel;
 
   return (
     <div className={`notification-inbox notification-inbox-${variant}`} data-open={open}>
@@ -1804,7 +1917,7 @@ function NotificationInbox({
           Inbox
         </span>
         <span className="notification-inbox-trigger-meta" aria-hidden="true">
-          <strong>{notifications.length || changelogEntries.length}</strong>
+          <strong>{unreadCount || notifications.length || changelogEntries.length}</strong>
           <span className="notification-inbox-caret" />
         </span>
       </button>
@@ -1812,10 +1925,41 @@ function NotificationInbox({
         <section className="notification-inbox-panel" id={panelId} role="dialog" aria-label="Dashboard inbox">
           <div className="notification-inbox-heading">
             <span className="eyebrow">Dashboard inbox</span>
-            <strong>{notifications.length ? openItemLabel : "Product changelog"}</strong>
-            <p>{notifications.length ? "Handle setup items first, then review recent product updates." : "Recent changes shipped to this dashboard."}</p>
+            <strong>{unreadCount ? `${unreadCount} task update${unreadCount === 1 ? "" : "s"}` : "You’re caught up"}</strong>
+            <p>Open an update to land on the exact task, or choose which email summary you want.</p>
           </div>
-          {notifications.length ? (
+          <div className="notification-inbox-tabs" role="tablist" aria-label="Inbox sections">
+            <button type="button" role="tab" aria-selected={tab === "work"} onClick={() => setTab("work")}>Work {unreadCount ? `(${unreadCount})` : ""}</button>
+            <button type="button" role="tab" aria-selected={tab === "product"} onClick={() => setTab("product")}>Product updates</button>
+            <button type="button" className="work-text-button" onClick={toggleSettings}>Email</button>
+          </div>
+          {settingsOpen && preferences ? (
+            <form className="notification-preferences" onSubmit={savePreferences}>
+              <strong>Daily task summary</strong><p>One email at most, and nothing when there is no actionable work.</p>
+              <label><input type="checkbox" name="emailEnabled" defaultChecked={preferences.email_enabled} /> Email me a daily summary</label>
+              <label>Send time<select name="digestHour" defaultValue={preferences.digest_hour}><option value="9">9 AM Central</option><option value="12">Noon Central</option><option value="17">5 PM Central</option></select></label>
+              <fieldset><legend>Include</legend>
+                <label><input type="checkbox" name="assignedEnabled" defaultChecked={preferences.assigned_enabled} /> Assigned to me</label>
+                <label><input type="checkbox" name="blockedEnabled" defaultChecked={preferences.blocked_enabled} /> Blocked work</label>
+                <label><input type="checkbox" name="reviewEnabled" defaultChecked={preferences.review_enabled} /> Source changes needing review</label>
+                <label><input type="checkbox" name="dueEnabled" defaultChecked={preferences.due_enabled} /> Due soon or overdue</label>
+                <label><input type="checkbox" name="channelIntakeEnabled" defaultChecked={preferences.channel_intake_enabled} /> New channel requests</label>
+              </fieldset>
+              <button className="button button-primary button-compact" type="submit" disabled={savingPreferences}>{savingPreferences ? "Saving…" : "Save preferences"}</button>
+            </form>
+          ) : null}
+          {tab === "work" ? (
+            <div className="notification-inbox-list" aria-label="Task notifications">
+              {unreadCount ? <button className="work-text-button notification-mark-read" type="button" onClick={markAllRead}>Mark all read</button> : null}
+              {workNotifications.length ? workNotifications.map((notification) => (
+                <button className="notification-work-item" data-read={Boolean(notification.read_at)} type="button" key={notification.id} onClick={() => openNotification(notification)}>
+                  <span><strong>{notification.title}</strong><small>{notification.client_name || "Client"} · {notification.channel_name || "Work"}</small></span>
+                  <p>{notification.message}</p><time dateTime={notification.created_at}>{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(notification.created_at))}</time>
+                </button>
+              )) : <div className="notification-empty"><strong>No task updates</strong><p>Assignments, blockers, reviews, and watched work will appear here.</p></div>}
+            </div>
+          ) : null}
+          {tab === "product" && notifications.length ? (
             <div className="notification-inbox-list" aria-label="Setup items">
               {notifications.map((notification) => (
                 <article className="notification-inbox-item" data-type={notification.type} key={notification.id}>
@@ -1832,7 +1976,7 @@ function NotificationInbox({
               ))}
             </div>
           ) : null}
-          {changelogEntries.length ? (
+          {tab === "product" && changelogEntries.length ? (
             <div className="changelog-list" aria-label="Product changelog">
               <div className="changelog-list-heading">
                 <span className="eyebrow">Product changelog</span>
