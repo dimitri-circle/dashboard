@@ -76,3 +76,10 @@ Send one to 50 items per request. `externalId` must remain stable across retries
 - Once a person edits a row, later automation changes become a visible suggestion. The person chooses whether to save it.
 
 This gives retries idempotent identities while preserving human judgment as the final authority.
+
+## ABK Apps Script adapter
+
+The exact field mapping and fail-isolated sync helper for the existing ABK tracker is in
+[`apps-script-abk-work-manager-adapter.gs`](./apps-script-abk-work-manager-adapter.gs).
+It defaults every imported item to private, does not post to Slack, and leaves the existing
+email and daily deduplicated Slack digest behavior unchanged.
