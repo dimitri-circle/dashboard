@@ -48,7 +48,7 @@
       ],
       "inputs": ["Confirmed production migration state", "Current API error shape"],
       "outputs": ["Operational items query", "Readable API and UI errors"],
-      "evidenceRefs": [],
+      "evidenceRefs": ["E-production-schema"],
       "attemptCount": 1,
       "maximumAttempts": 3,
       "riskLevel": "high",
