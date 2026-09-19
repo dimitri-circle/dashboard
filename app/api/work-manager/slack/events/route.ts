@@ -35,7 +35,11 @@ export async function POST(request: Request) {
 
   after(async () => {
     try {
-      await intakeSlackCandidates(normalized);
+      await intakeSlackCandidates({
+        sourceRef: normalized.sourceRef,
+        workspaceRef: normalized.workspaceRef,
+        messages: [normalized.message],
+      });
     } catch (error) {
       console.error("Work Manager Slack event intake failed", error);
     }
