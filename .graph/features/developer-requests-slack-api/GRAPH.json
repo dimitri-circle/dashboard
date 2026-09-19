@@ -15,13 +15,13 @@
       "type": "observe",
       "title": "Inspect Slack and Work Manager boundaries",
       "objective": "Verify the existing command parser, Slack app/API path, channel identity, source mapping, database state, and production failure before editing.",
-      "status": "partially_verified",
+      "status": "completed",
       "dependencies": [],
       "requiredSkills": ["product-decision", "graph-loop-engineering", "anti-bias-debugging", "circleclick-supabase"],
       "acceptanceCriteria": [
         {"id": "AC-OBS-1", "required": true, "status": "passed", "evidenceRefs": ["E-existing-parser"]},
         {"id": "AC-OBS-2", "required": true, "status": "passed", "evidenceRefs": ["E-developer-channel-id"]},
-        {"id": "AC-OBS-3", "required": true, "status": "pending", "evidenceRefs": []}
+        {"id": "AC-OBS-3", "required": true, "status": "passed", "evidenceRefs": ["E-slack-app-verified"]}
       ],
       "inputs": ["Repository source", "Authenticated Slack workspace", "Authenticated production dashboard"],
       "outputs": ["Verified Slack channel ID", "Verified app/API capability", "Verified database and source-mapping gaps"],
@@ -39,23 +39,23 @@
       "type": "repair",
       "title": "Repair Work Manager storage and readable errors",
       "objective": "Make the current Work Manager items path operational and preserve useful database errors.",
-      "status": "pending",
+      "status": "completed",
       "dependencies": ["inspect-current-path"],
       "requiredSkills": ["circleclick-supabase", "supabase", "anti-bias-debugging"],
       "acceptanceCriteria": [
-        {"id": "AC-DB-1", "required": true, "status": "pending", "evidenceRefs": []},
-        {"id": "AC-DB-2", "required": true, "status": "pending", "evidenceRefs": []}
+        {"id": "AC-DB-1", "required": true, "status": "passed", "evidenceRefs": ["E-production-schema"]},
+        {"id": "AC-DB-2", "required": true, "status": "passed", "evidenceRefs": ["E-production-schema"]}
       ],
       "inputs": ["Confirmed production migration state", "Current API error shape"],
       "outputs": ["Operational items query", "Readable API and UI errors"],
       "evidenceRefs": [],
-      "attemptCount": 0,
+      "attemptCount": 1,
       "maximumAttempts": 3,
       "riskLevel": "high",
       "approvalRequired": true,
       "blockingReason": null,
       "createdAt": "2026-09-18T23:42:01Z",
-      "updatedAt": "2026-09-18T23:42:01Z"
+      "updatedAt": "2026-09-19T02:58:00Z"
     },
     {
       "id": "implement-command-intake",
@@ -146,7 +146,9 @@
     {"timestamp": "2026-09-18T23:42:01Z", "nodeId": "inspect-current-path", "summary": "Graph created after explicit user approval.", "evidenceRefs": []},
     {"timestamp": "2026-09-18T23:42:01Z", "nodeId": "inspect-current-path", "summary": "Product decision selected explicit command-only internal intake.", "evidenceRefs": ["E-existing-parser"]},
     {"timestamp": "2026-09-18T23:50:00Z", "nodeId": "inspect-current-path", "summary": "Verified developer-requests workspace and channel identity.", "evidenceRefs": ["E-developer-channel-id"]},
-    {"timestamp": "2026-09-18T23:51:00Z", "nodeId": "inspect-current-path", "summary": "Slack app inventory blocked pending user CAPTCHA completion.", "evidenceRefs": ["E-slack-app-auth-blocked"]}
+    {"timestamp": "2026-09-18T23:51:00Z", "nodeId": "inspect-current-path", "summary": "Slack app inventory blocked pending user CAPTCHA completion.", "evidenceRefs": ["E-slack-app-auth-blocked"]},
+    {"timestamp": "2026-09-19T03:00:00Z", "nodeId": "inspect-current-path", "summary": "Verified existing CircleClick Request Tracker app and CircleClick production Supabase project.", "evidenceRefs": ["E-slack-app-verified", "E-production-schema"]},
+    {"timestamp": "2026-09-19T03:02:00Z", "nodeId": "repair-storage-and-errors", "summary": "Applied schema reconciliation and created internal Developer Requests source mapping.", "evidenceRefs": ["E-production-schema"]}
   ],
   "componentDelivery": {
     "scopeFingerprint": "6ef7b304db7bfabb37662d7b62419f71750c9880c0e5119f04a6635245618185",

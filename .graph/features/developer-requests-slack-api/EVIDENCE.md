@@ -55,3 +55,27 @@
 - Result: Prepared a reversible migration for the observed Work Manager fields, dismissal metadata, automation review metadata, constraints, and indexes. Updated API error normalization to preserve Supabase message, details, and hint.
 - Exit status: 0
 - Remaining uncertainty: The migration is not applied. Supabase CLI has no linked CircleClick project and the visible project inventory did not include one, so target identity and remote schema remain unproven.
+
+## Evidence: Slack app verified
+- Date: 2026-09-19
+- Graph node: inspect-current-path
+- Command or verification method: Authenticated Slack API app-management portal.
+- Result: Existing `CircleClick Request Tracker` app `A0BPSUSJLAD` is owned by the CircleClick workspace `T09EZFPHN`. Events API was confirmed off before configuration. Signing secret was stored in Vercel without being written to the repository.
+- Exit status: 0
+- Remaining uncertainty: Event subscription and bot/channel membership are not enabled until a successful Vercel deployment exists.
+
+## Evidence: Production schema and source mapping
+- Date: 2026-09-19
+- Graph node: repair-storage-and-errors
+- Command or verification method: Authenticated Supabase SQL Editor in production project `oxfpparkbduckvzsqnkl`.
+- Result: Schema reconciliation executed successfully. Created or reconciled `circleclick-internal` / `Developer Requests` and source `source-slack-developer-requests` with workspace `T09EZFPHN`, channel `C072BE92C4X`, active and not client-visible by default.
+- Exit status: 0
+- Remaining uncertainty: The Vercel endpoint has not yet run against this production mapping.
+
+## Evidence: Vercel deployment blocked
+- Date: 2026-09-19
+- Graph node: configure-and-enable-production
+- Command or verification method: GitHub PR #21 status and Vercel project settings.
+- Result: Branch `update/work-manager-intake` pushed and PR `https://github.com/dimitri-circle/dashboard/pull/21` created. Vercel check failed with the account/deployment blocked flow. Production environment variables for workspace, channel, domain, and signing secret were stored, but no deployment was enabled.
+- Exit status: blocked
+- Remaining uncertainty: Vercel owner must resolve the account pause or deployment restriction before the route can be deployed and Slack URL verification can run.
