@@ -27,11 +27,11 @@ export function extractDueDate(input: string, now = new Date()): DueDateParse {
   }
 
   const today = centralToday(now);
-  const weekday = input.match(/\b(?:by|on)\s+(next\s+)?(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)\b/i);
+  const weekday = input.match(/\b(?:(by|on)\s+)?(next\s+)?(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)\b/i);
   if (weekday) {
-    const target = WEEKDAYS.indexOf(weekday[2].toLowerCase());
+    const target = WEEKDAYS.indexOf(weekday[3].toLowerCase());
     let delta = (target - today.getUTCDay() + 7) % 7;
-    if (weekday[1] || delta === 0) delta += 7;
+    if (weekday[2] || delta === 0) delta += 7;
     const date = new Date(today);
     date.setUTCDate(date.getUTCDate() + delta);
     return { text: input.replace(weekday[0], " ").replace(/\s+/g, " ").trim(), dueDate: iso(date), reviewNeeded: false };
