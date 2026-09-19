@@ -1,0 +1,29 @@
+{
+  "capturedAt": "2026-09-18T23:42:12.151748+00:00",
+  "ownedTemporaryBytes": 0,
+  "policy": {
+    "autoClean": [
+      "/Users/ofroot/.codex/worktrees/work-manager-intake/circleclick/.graph-runs/active/20260918T234201Z-developer-requests-slack-api/tmp"
+    ],
+    "reviewOnly": [
+      ".next",
+      ".turbo",
+      ".cache",
+      "build",
+      "coverage",
+      "dist",
+      "node_modules",
+      "target",
+      ".venv",
+      "venv"
+    ]
+  },
+  "repository": "/Users/ofroot/.codex/worktrees/work-manager-intake/circleclick",
+  "repositoryBytes": 539151151,
+  "runDirectory": "/Users/ofroot/.codex/worktrees/work-manager-intake/circleclick/.graph-runs/active/20260918T234201Z-developer-requests-slack-api",
+  "sharedArtifacts": {
+    ".next": 154337348,
+    "node_modules": 383097883
+  },
+  "volumeFreeBytes": 6278029312
+}

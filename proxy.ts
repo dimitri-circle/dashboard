@@ -7,6 +7,7 @@ const PUBLIC_PATHS = [
   "/login",
   "/api/auth/login",
   "/api/auth/logout",
+  "/api/work-manager/slack/events",
   "/api/seo/health",
   "/review",
   "/favicon.ico",

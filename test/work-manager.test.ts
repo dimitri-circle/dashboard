@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import test from "node:test";
 import { NextRequest } from "next/server";
 import { proxy } from "../proxy";
@@ -14,6 +15,7 @@ import { notificationReason, plannedNotificationKinds } from "../lib/work-manage
 import { normalizeWorkGuideUpdate } from "../lib/work-manager/guide";
 import { normalizeSlackCandidates } from "../lib/work-manager/intake";
 import { isValidMeetingDocExportRequest, toMeetingDocItem } from "../lib/work-manager/meeting-docs";
+import { isValidSlackSignature, normalizeSlackTaskEvent } from "../lib/work-manager/slack-events";
 
 function exampleWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {
   return {
@@ -59,6 +61,28 @@ test("Slack candidate intake recognizes explicit task tags and stays bounded", (
   const intake = normalizeSlackCandidates({ workspaceRef: "circleclick", sourceRef: "C0BE2423W75", messages: [{ externalId: "1.2", text: "@circleclick-task-add publish the approved video" }] });
   assert.equal(intake.messages[0].tagged, true);
   assert.throws(() => normalizeSlackCandidates({ sourceRef: "C", messages: [] }), /between 1 and 50/);
+});
+
+test("Slack Events verification accepts fresh signed requests and rejects replay or tampering", () => {
+  const secret = "slack-signing-secret";
+  const timestamp = "1760000000";
+  const body = JSON.stringify({ type: "event_callback" });
+  const signature = `v0=${crypto.createHmac("sha256", secret).update(`v0:${timestamp}:${body}`).digest("hex")}`;
+  assert.equal(isValidSlackSignature(body, timestamp, signature, secret, 1760000000), true);
+  assert.equal(isValidSlackSignature(body, timestamp, `${signature}x`, secret, 1760000000), false);
+  assert.equal(isValidSlackSignature(body, timestamp, signature, secret, 1760000601), false);
+});
+
+test("Slack Events only forwards the explicit developer-requests command", () => {
+  const base = { type: "event_callback", team_id: "T09EZFPHN" };
+  const accepted = normalizeSlackTaskEvent({
+    ...base,
+    event: { type: "message", channel: "C072BE92C4X", channel_type: "channel", user: "U1", ts: "1789769000.123456", text: "@circleclick-task-add This is a test task" },
+  }, { workspaceId: "T09EZFPHN", channelId: "C072BE92C4X" });
+  assert.equal(accepted?.message.externalId, "1789769000.123456");
+  assert.equal(accepted?.message.sourceUrl, "https://circleclick.slack.com/archives/C072BE92C4X/p1789769000123456");
+  assert.equal(normalizeSlackTaskEvent({ ...base, event: { type: "message", channel: "C072BE92C4X", ts: "1.2", text: "ordinary conversation" } }, { workspaceId: "T09EZFPHN", channelId: "C072BE92C4X" }), null);
+  assert.equal(normalizeSlackTaskEvent({ ...base, event: { type: "message", channel: "C0BE2423W75", ts: "1.3", text: "@circleclick-task-add wrong channel" } }, { workspaceId: "T09EZFPHN", channelId: "C072BE92C4X" }), null);
 });
 
 test("Done and Blocked require explicit evidence", () => {
