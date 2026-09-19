@@ -1,0 +1,184 @@
+{
+  "schemaVersion": "1.1",
+  "graphId": "developer-requests-slack-api",
+  "featureId": "developer-requests-slack-api",
+  "objective": "Capture explicit Slack task commands from developer-requests into a safe internal Work Manager lane through direct Slack API access.",
+  "status": "incomplete",
+  "createdAt": "2026-09-18T23:42:01Z",
+  "updatedAt": "2026-09-19T02:55:00Z",
+  "iterationCount": 4,
+  "maximumIterations": 25,
+  "rootNodeIds": ["inspect-current-path"],
+  "nodes": [
+    {
+      "id": "inspect-current-path",
+      "type": "observe",
+      "title": "Inspect Slack and Work Manager boundaries",
+      "objective": "Verify the existing command parser, Slack app/API path, channel identity, source mapping, database state, and production failure before editing.",
+      "status": "partially_verified",
+      "dependencies": [],
+      "requiredSkills": ["product-decision", "graph-loop-engineering", "anti-bias-debugging", "circleclick-supabase"],
+      "acceptanceCriteria": [
+        {"id": "AC-OBS-1", "required": true, "status": "passed", "evidenceRefs": ["E-existing-parser"]},
+        {"id": "AC-OBS-2", "required": true, "status": "passed", "evidenceRefs": ["E-developer-channel-id"]},
+        {"id": "AC-OBS-3", "required": true, "status": "pending", "evidenceRefs": []}
+      ],
+      "inputs": ["Repository source", "Authenticated Slack workspace", "Authenticated production dashboard"],
+      "outputs": ["Verified Slack channel ID", "Verified app/API capability", "Verified database and source-mapping gaps"],
+      "evidenceRefs": ["E-existing-parser", "E-existing-source", "E-developer-channel-id", "E-slack-app-auth-blocked"],
+      "attemptCount": 1,
+      "maximumAttempts": 3,
+      "riskLevel": "medium",
+      "approvalRequired": false,
+      "blockingReason": "Slack developer portal app inventory requires user completion of CAPTCHA sign-in.",
+      "createdAt": "2026-09-18T23:42:01Z",
+      "updatedAt": "2026-09-18T23:51:00Z"
+    },
+    {
+      "id": "repair-storage-and-errors",
+      "type": "repair",
+      "title": "Repair Work Manager storage and readable errors",
+      "objective": "Make the current Work Manager items path operational and preserve useful database errors.",
+      "status": "pending",
+      "dependencies": ["inspect-current-path"],
+      "requiredSkills": ["circleclick-supabase", "supabase", "anti-bias-debugging"],
+      "acceptanceCriteria": [
+        {"id": "AC-DB-1", "required": true, "status": "pending", "evidenceRefs": []},
+        {"id": "AC-DB-2", "required": true, "status": "pending", "evidenceRefs": []}
+      ],
+      "inputs": ["Confirmed production migration state", "Current API error shape"],
+      "outputs": ["Operational items query", "Readable API and UI errors"],
+      "evidenceRefs": [],
+      "attemptCount": 0,
+      "maximumAttempts": 3,
+      "riskLevel": "high",
+      "approvalRequired": true,
+      "blockingReason": null,
+      "createdAt": "2026-09-18T23:42:01Z",
+      "updatedAt": "2026-09-18T23:42:01Z"
+    },
+    {
+      "id": "implement-command-intake",
+      "type": "task",
+      "title": "Implement developer-requests command intake",
+      "objective": "Connect the explicit Slack command event to signed, idempotent Work Manager ingestion and internal routing.",
+      "status": "completed",
+      "dependencies": ["inspect-current-path", "repair-storage-and-errors"],
+      "requiredSkills": ["graph-loop-engineering"],
+      "acceptanceCriteria": [
+        {"id": "AC-IMPL-1", "required": true, "status": "passed", "evidenceRefs": ["E-signed-events"]},
+        {"id": "AC-IMPL-2", "required": true, "status": "passed", "evidenceRefs": ["E-signed-events"]},
+        {"id": "AC-IMPL-3", "required": true, "status": "passed", "evidenceRefs": ["E-signed-events"]}
+      ],
+      "inputs": ["Slack event", "Verified workspace/channel mapping", "Shared intake secret"],
+      "outputs": ["One internal task candidate or a safe ignored result"],
+      "evidenceRefs": ["E-signed-events"],
+      "attemptCount": 1,
+      "maximumAttempts": 3,
+      "riskLevel": "high",
+      "approvalRequired": false,
+      "blockingReason": null,
+      "createdAt": "2026-09-18T23:42:01Z",
+      "updatedAt": "2026-09-18T23:58:00Z"
+    },
+    {
+      "id": "validate-isolated-flow",
+      "type": "validation",
+      "title": "Validate command intake in isolation",
+      "objective": "Prove parser, signature checks, source routing, idempotency, dismissal behavior, and assembled ingestion without live Slack production changes.",
+      "status": "partially_verified",
+      "dependencies": ["implement-command-intake"],
+      "requiredSkills": ["graph-loop-engineering"],
+      "acceptanceCriteria": [
+        {"id": "AC-VAL-1", "required": true, "status": "passed", "evidenceRefs": ["E-signed-events"]},
+        {"id": "AC-VAL-2", "required": true, "status": "pending", "evidenceRefs": []}
+      ],
+      "inputs": ["Synthetic Slack event", "Isolated storage boundary"],
+      "outputs": ["Component, connection, and assembly evidence"],
+      "evidenceRefs": [],
+      "attemptCount": 0,
+      "maximumAttempts": 3,
+      "riskLevel": "medium",
+      "approvalRequired": false,
+      "blockingReason": null,
+      "validation": {
+        "requiredCommands": [
+          {"id": "tests", "command": "npm test", "required": true, "outcome": "passed", "exitStatus": 0, "evidenceRefs": ["E-signed-events"]},
+          {"id": "build", "command": "npm run build", "required": true, "outcome": "passed", "exitStatus": 0, "evidenceRefs": ["E-signed-events"]}
+        ],
+        "runtimeVerification": "not_performed"
+      },
+      "createdAt": "2026-09-18T23:42:01Z",
+      "updatedAt": "2026-09-18T23:58:00Z"
+    },
+    {
+      "id": "configure-and-enable-production",
+      "type": "human_gate",
+      "title": "Configure and enable production Slack intake",
+      "objective": "Apply approved Slack permissions, database/source mapping, deployment, and enablement, then verify one real command end to end.",
+      "status": "pending",
+      "dependencies": ["validate-isolated-flow"],
+      "requiredSkills": ["circleclick-supabase", "supabase", "circleclick-authenticated-dashboard"],
+      "acceptanceCriteria": [
+        {"id": "AC-PROD-1", "required": true, "status": "pending", "evidenceRefs": []},
+        {"id": "AC-PROD-2", "required": true, "status": "pending", "evidenceRefs": []},
+        {"id": "AC-PROD-3", "required": true, "status": "pending", "evidenceRefs": []}
+      ],
+      "inputs": ["Approved production migration", "Approved Slack permission change", "Verified deployment"],
+      "outputs": ["Enabled source mapping", "Verified real task and direct dashboard link"],
+      "evidenceRefs": [],
+      "attemptCount": 0,
+      "maximumAttempts": 3,
+      "riskLevel": "high",
+      "approvalRequired": true,
+      "blockingReason": "Production database and Slack permission changes require action-time approval.",
+      "createdAt": "2026-09-18T23:42:01Z",
+      "updatedAt": "2026-09-18T23:42:01Z"
+    }
+  ],
+  "edges": [
+    {"from": "repair-storage-and-errors", "to": "inspect-current-path", "type": "depends_on"},
+    {"from": "implement-command-intake", "to": "repair-storage-and-errors", "type": "depends_on"},
+    {"from": "validate-isolated-flow", "to": "implement-command-intake", "type": "validates"},
+    {"from": "configure-and-enable-production", "to": "validate-isolated-flow", "type": "depends_on"}
+  ],
+  "events": [
+    {"timestamp": "2026-09-18T23:42:01Z", "nodeId": "inspect-current-path", "summary": "Graph created after explicit user approval.", "evidenceRefs": []},
+    {"timestamp": "2026-09-18T23:42:01Z", "nodeId": "inspect-current-path", "summary": "Product decision selected explicit command-only internal intake.", "evidenceRefs": ["E-existing-parser"]},
+    {"timestamp": "2026-09-18T23:50:00Z", "nodeId": "inspect-current-path", "summary": "Verified developer-requests workspace and channel identity.", "evidenceRefs": ["E-developer-channel-id"]},
+    {"timestamp": "2026-09-18T23:51:00Z", "nodeId": "inspect-current-path", "summary": "Slack app inventory blocked pending user CAPTCHA completion.", "evidenceRefs": ["E-slack-app-auth-blocked"]}
+  ],
+  "componentDelivery": {
+    "scopeFingerprint": "6ef7b304db7bfabb37662d7b62419f71750c9880c0e5119f04a6635245618185",
+    "contracts": [
+      {
+        "id": "slack-command-capture",
+        "inputs": "Slack message event from the registered workspace and developer-requests channel",
+        "outputs": "Bounded task candidate or explicit ignored result",
+        "sideEffects": "Calls the signed dashboard intake only for the explicit task command",
+        "failures": "Invalid signature, wrong channel, missing command, or malformed event fails closed",
+        "retry": "Slack message timestamp remains the stable external ID so retries are idempotent",
+        "invariants": "No Slack posting and no passive conversation ingestion during the pilot",
+        "dependencies": [] ,
+        "realBoundary": true
+      },
+      {
+        "id": "work-manager-intake",
+        "inputs": "Signed bounded candidate with stable source identity",
+        "outputs": "One internal task, unchanged task, dismissed result, or safe error",
+        "sideEffects": "Persists task and audit/notification state in the selected Work Manager lane",
+        "failures": "Unknown source, invalid secret, unavailable storage, or unsafe evidence returns an error without guessing a client",
+        "retry": "Same source and external ID does not create a duplicate",
+        "invariants": "Human-owned updates are not silently overwritten and new work is private by default",
+        "dependencies": ["slack-command-capture"],
+        "realBoundary": true
+      }
+    ],
+    "checks": [
+      {"kind": "component", "componentIds": ["slack-command-capture", "work-manager-intake"], "nodeId": "validate-isolated-flow", "scopeFingerprint": "6ef7b304db7bfabb37662d7b62419f71750c9880c0e5119f04a6635245618185"},
+      {"kind": "connection", "componentIds": ["slack-command-capture", "work-manager-intake"], "nodeId": "validate-isolated-flow", "scopeFingerprint": "6ef7b304db7bfabb37662d7b62419f71750c9880c0e5119f04a6635245618185", "environment": "isolated automated test boundary", "realBoundaryVerified": false},
+      {"kind": "assembly", "componentIds": ["slack-command-capture", "work-manager-intake"], "nodeId": "validate-isolated-flow", "scopeFingerprint": "6ef7b304db7bfabb37662d7b62419f71750c9880c0e5119f04a6635245618185", "environment": "isolated automated test boundary", "realBoundaryVerified": false}
+    ],
+    "releaseNodeIds": ["configure-and-enable-production"]
+  }
+}

@@ -140,7 +140,12 @@ export function normalizeWorkItemInput(payload: WorkItemInput, existing?: WorkIt
 }
 
 function workStorageError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
+  const candidate = error as { message?: unknown; details?: unknown; hint?: unknown } | null;
+  const message = error instanceof Error
+    ? error.message
+    : typeof candidate?.message === "string"
+      ? [candidate.message, candidate.details, candidate.hint].filter((value) => typeof value === "string" && value).join(" ")
+      : String(error);
   if (/work_(channels|items|item_events|review_links|sources).*does not exist|schema cache/i.test(message)) {
     return new Error(WORK_STORAGE_MESSAGE);
   }
