@@ -79,3 +79,19 @@
 - Result: Branch `update/work-manager-intake` pushed and PR `https://github.com/dimitri-circle/dashboard/pull/21` created. Vercel check failed with the account/deployment blocked flow. Production environment variables for workspace, channel, domain, and signing secret were stored, but no deployment was enabled.
 - Exit status: blocked
 - Remaining uncertainty: Vercel owner must resolve the account pause or deployment restriction before the route can be deployed and Slack URL verification can run.
+
+## Evidence: Production Slack configuration and live intake
+- Date: 2026-09-19
+- Graph node: configure-and-enable-production
+- Command or verification method: Authenticated Slack app manifest, Slack channel details, Vercel deployment/logs, Slack desktop test, and Supabase SQL Editor readback.
+- Result: CircleClick Request Tracker `A0BPSUSJLAD` is installed in `#developer-requests` (`C072BE92C4X`). Events API is enabled with the verified production callback and exactly one bot event, `message.channels`, requiring `channels:history`; delayed events remain off. Vercel production deployment `cae958a` is Ready. The production callback received a real Slack POST with HTTP 200. After fixing the message-array handoff, the real command `@circleclick-task-add Final production intake verification` created exactly one internal Work Manager row with status `unknown`.
+- Exit status: 0
+- Remaining uncertainty: A same-event retry has not yet been replayed against the fixed deployment to prove the duplicate count remains one.
+
+## Evidence: Live runtime defect repaired
+- Date: 2026-09-19
+- Graph node: validate-isolated-flow
+- Command or verification method: Vercel production logs and `npm test && npm run build`.
+- Result: The first real event exposed `messages must contain between 1 and 50 candidates` because the route passed a singular normalized message. The route now wraps it as `messages: [normalized.message]`; all 63 tests pass and the production build passes. The subsequent real event created the expected task.
+- Exit status: 0
+- Remaining uncertainty: Duplicate retry verification remains.
