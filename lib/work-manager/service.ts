@@ -12,6 +12,7 @@ import {
   type WorkReviewSnapshot,
   type WorkSourceKind,
   type WorkStatus, type WorkDismissalReason,
+  type WorkRoutingClient,
 } from "./types";
 import { safelyCreateWorkNotifications } from "./notifications";
 
@@ -279,7 +280,7 @@ async function ensureChannelBelongsToClient(channelId: string, clientId: string)
 async function addWorkEvent(
   item: WorkItem,
   actorUserId: string,
-  action: "created" | "updated" | "status_changed" | "evidence_added" | "dismissed" | "restored",
+  action: "created" | "updated" | "status_changed" | "evidence_added" | "dismissed" | "restored" | "routed",
   before: Partial<WorkItem> | null
 ) {
   const eventId = randomUUID();
@@ -296,6 +297,41 @@ async function addWorkEvent(
   });
   if (error) throw error;
   return eventId;
+}
+
+export async function listWorkRoutingOptions(): Promise<WorkRoutingClient[]> {
+  const [{ data: clients, error: clientError }, { data: channels, error: channelError }] = await Promise.all([
+    table("seo_clients").select("id,name").order("name", { ascending: true }),
+    table("work_channels").select("*").eq("active", true).order("name", { ascending: true }),
+  ]);
+  if (clientError) throw clientError;
+  if (channelError) throw channelError;
+  const byClient = new Map<string, WorkChannel[]>();
+  for (const channel of (channels || []) as WorkChannel[]) {
+    const list = byClient.get(channel.client_id) || [];
+    list.push(channel);
+    byClient.set(channel.client_id, list);
+  }
+  return ((clients || []) as Array<{ id: string; name: string }>).map((client) => ({ id: client.id, name: client.name, channels: byClient.get(client.id) || [] }));
+}
+
+export async function routeWorkItem(clientId: string, itemId: string, actorUserId: string, targetClientId: unknown, targetChannelId: unknown) {
+  const currentClientId = normalizeClientId(clientId);
+  const nextClientId = normalizeClientId(targetClientId);
+  const channelId = asText(targetChannelId, 80);
+  if (!channelId) throw new Error("Choose a destination workstream.");
+  const { data: existingData, error: existingError } = await table("work_items").select("*").eq("id", itemId).eq("client_id", currentClientId).maybeSingle();
+  if (existingError) throw existingError;
+  if (!existingData) throw new Error("Work item not found in the selected client.");
+  const existing = existingData as WorkItem;
+  await ensureChannelBelongsToClient(channelId, nextClientId);
+  const timestamp = new Date().toISOString();
+  const next: WorkItem = { ...existing, client_id: nextClientId, channel_id: channelId, updated_by_user_id: actorUserId, updated_at: timestamp };
+  const { error: updateError } = await table("work_items").update(next).eq("id", itemId).eq("client_id", currentClientId);
+  if (updateError) throw updateError;
+  const eventId = await addWorkEvent(next, actorUserId, "routed", existing);
+  await safelyCreateWorkNotifications(next, existing, actorUserId, eventId);
+  return next;
 }
 
 export async function listWorkAssignableUsers() {

@@ -103,6 +103,7 @@ export type WorkNotificationPreferences = {
 };
 
 export type WorkAssignableUser = { id: string; email: string; role: "admin" | "operator" | "viewer" };
+export type WorkRoutingClient = { id: string; name: string; channels: WorkChannel[] };
 
 export type WorkIngestItemInput = {
   externalId: string;
@@ -116,6 +117,7 @@ export type WorkIngestItemInput = {
   sourceUrl?: string;
   completionEvidenceUrl?: string;
   clientVisible?: boolean;
+  automationReviewNeeded?: boolean;
 };
 
 export type WorkIngestBatch = {

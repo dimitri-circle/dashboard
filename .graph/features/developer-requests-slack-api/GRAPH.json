@@ -5,7 +5,7 @@
   "objective": "Capture explicit Slack task commands from developer-requests into a safe internal Work Manager lane through direct Slack API access.",
   "status": "incomplete",
   "createdAt": "2026-09-18T23:42:01Z",
-  "updatedAt": "2026-09-19T02:55:00Z",
+  "updatedAt": "2026-09-19T12:02:00Z",
   "iterationCount": 4,
   "maximumIterations": 25,
   "rootNodeIds": ["inspect-current-path"],
@@ -91,7 +91,7 @@
       "requiredSkills": ["graph-loop-engineering"],
       "acceptanceCriteria": [
         {"id": "AC-VAL-1", "required": true, "status": "passed", "evidenceRefs": ["E-signed-events"]},
-        {"id": "AC-VAL-2", "required": true, "status": "pending", "evidenceRefs": []}
+        {"id": "AC-VAL-2", "required": true, "status": "passed", "evidenceRefs": ["E-live-runtime-defect-repaired", "E-live-production-intake"]}
       ],
       "inputs": ["Synthetic Slack event", "Isolated storage boundary"],
       "outputs": ["Component, connection, and assembly evidence"],
@@ -106,7 +106,7 @@
           {"id": "tests", "command": "npm test", "required": true, "outcome": "passed", "exitStatus": 0, "evidenceRefs": ["E-signed-events"]},
           {"id": "build", "command": "npm run build", "required": true, "outcome": "passed", "exitStatus": 0, "evidenceRefs": ["E-signed-events"]}
         ],
-        "runtimeVerification": "not_performed"
+        "runtimeVerification": "production callback and database row verified; duplicate replay pending"
       },
       "createdAt": "2026-09-18T23:42:01Z",
       "updatedAt": "2026-09-18T23:58:00Z"
@@ -116,24 +116,24 @@
       "type": "human_gate",
       "title": "Configure and enable production Slack intake",
       "objective": "Apply approved Slack permissions, database/source mapping, deployment, and enablement, then verify one real command end to end.",
-      "status": "pending",
+      "status": "partially_verified",
       "dependencies": ["validate-isolated-flow"],
       "requiredSkills": ["circleclick-supabase", "supabase", "circleclick-authenticated-dashboard"],
       "acceptanceCriteria": [
-        {"id": "AC-PROD-1", "required": true, "status": "pending", "evidenceRefs": []},
-        {"id": "AC-PROD-2", "required": true, "status": "pending", "evidenceRefs": []},
+        {"id": "AC-PROD-1", "required": true, "status": "passed", "evidenceRefs": ["E-live-production-intake"]},
+        {"id": "AC-PROD-2", "required": true, "status": "passed", "evidenceRefs": ["E-live-production-intake"]},
         {"id": "AC-PROD-3", "required": true, "status": "pending", "evidenceRefs": []}
       ],
       "inputs": ["Approved production migration", "Approved Slack permission change", "Verified deployment"],
       "outputs": ["Enabled source mapping", "Verified real task and direct dashboard link"],
-      "evidenceRefs": [],
+      "evidenceRefs": ["E-live-production-intake"],
       "attemptCount": 0,
       "maximumAttempts": 3,
       "riskLevel": "high",
       "approvalRequired": true,
-      "blockingReason": "Production database and Slack permission changes require action-time approval.",
+      "blockingReason": "Replay the same Slack event against the fixed production callback and confirm one row remains.",
       "createdAt": "2026-09-18T23:42:01Z",
-      "updatedAt": "2026-09-18T23:42:01Z"
+      "updatedAt": "2026-09-19T12:02:00Z"
     }
   ],
   "edges": [
@@ -149,6 +149,7 @@
     {"timestamp": "2026-09-18T23:51:00Z", "nodeId": "inspect-current-path", "summary": "Slack app inventory blocked pending user CAPTCHA completion.", "evidenceRefs": ["E-slack-app-auth-blocked"]},
     {"timestamp": "2026-09-19T03:00:00Z", "nodeId": "inspect-current-path", "summary": "Verified existing CircleClick Request Tracker app and CircleClick production Supabase project.", "evidenceRefs": ["E-slack-app-verified", "E-production-schema"]},
     {"timestamp": "2026-09-19T03:02:00Z", "nodeId": "repair-storage-and-errors", "summary": "Applied schema reconciliation and created internal Developer Requests source mapping.", "evidenceRefs": ["E-production-schema"]}
+    ,{"timestamp": "2026-09-19T12:02:00Z", "nodeId": "configure-and-enable-production", "summary": "Verified Slack callback configuration, production deployment, real event delivery, and one internal task row; duplicate replay remains.", "evidenceRefs": ["E-live-production-intake", "E-live-runtime-defect-repaired"]}
   ],
   "componentDelivery": {
     "scopeFingerprint": "6ef7b304db7bfabb37662d7b62419f71750c9880c0e5119f04a6635245618185",
