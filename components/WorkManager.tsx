@@ -8,6 +8,7 @@ import type { WorkAssignableUser, WorkAutomationSource, WorkChannel, WorkItem, W
 
 type WorkNotice = { type: "success" | "error" | "info"; message: string } | null;
 type QuickEditor = { itemId: string; kind: "complete" | "block" } | null;
+type QueueFilter = "all" | "attention" | "in_progress" | "blocked" | "done" | "unassigned" | "due_soon";
 const dismissalLabels = {
   no_longer_needed: "No longer needed",
   not_work: "Not a work request",
@@ -171,6 +172,8 @@ export function WorkManager({
   const [mobileGuideStep, setMobileGuideStep] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
   const [showDismissed, setShowDismissed] = useState(false);
+  const [queueFilter, setQueueFilter] = useState<QueueFilter>("all");
+  const [sourceSettingsId, setSourceSettingsId] = useState<string | null>(null);
 
   const guideSteps = useMemo<Step[]>(() => [
     {
@@ -440,10 +443,20 @@ export function WorkManager({
 
   const selectedChannel = channels.find((channel) => channel.id === selectedChannelId) || null;
   const selectedSources = sources.filter((source) => source.channel_id === selectedChannelId && source.active);
-  const visibleItems = useMemo(
-    () => items.filter((item) => !selectedChannelId || item.channel_id === selectedChannelId),
-    [items, selectedChannelId]
-  );
+  const visibleItems = useMemo(() => {
+    const scoped = items.filter((item) => !selectedChannelId || item.channel_id === selectedChannelId);
+    const today = new Date();
+    const soon = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    return scoped.filter((item) => {
+      if (queueFilter === "attention") return item.status === "blocked" || item.status === "needs_evidence" || item.automation_review_needed;
+      if (queueFilter === "unassigned") return !item.owner_user_id && !item.owner_name;
+      if (queueFilter === "due_soon") return Boolean(item.due_date && item.due_date <= soon && item.status !== "done");
+      if (queueFilter === "in_progress") return item.status === "in_progress";
+      if (queueFilter === "blocked") return item.status === "blocked";
+      if (queueFilter === "done") return item.status === "done";
+      return true;
+    });
+  }, [items, selectedChannelId, queueFilter]);
   const activeCount = visibleItems.filter((item) => item.status === "in_progress" || item.status === "new").length;
   const blockedCount = visibleItems.filter((item) => item.status === "blocked").length;
   const evidenceCount = visibleItems.filter((item) => item.status === "needs_evidence").length;
@@ -614,6 +627,8 @@ export function WorkManager({
           display_name: displayName,
           active: true,
           default_client_visible: formData.get("defaultClientVisible") === "on",
+          slack_notification_mode: String(formData.get("slackNotificationMode") || "never") as WorkAutomationSource["slack_notification_mode"],
+          slack_notification_thread_ts: String(formData.get("slackNotificationThreadTs") || "").trim() || null,
           last_ingested_at: null,
           created_by_user_id: "preview-user",
           created_at: timestamp,
@@ -629,6 +644,8 @@ export function WorkManager({
             sourceRef,
             displayName,
             defaultClientVisible: formData.get("defaultClientVisible") === "on",
+            slackNotificationMode: String(formData.get("slackNotificationMode") || "never"),
+            slackNotificationThreadTs: String(formData.get("slackNotificationThreadTs") || ""),
           }),
         });
         source = body.source;
@@ -639,6 +656,21 @@ export function WorkManager({
       setNotice({ type: "success", message: `${displayName} will route findings into ${selectedChannel?.name || "this workstream"}.` });
     } catch (error) {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to connect this source." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function updateSourceNotifications(source: WorkAutomationSource, form: HTMLFormElement) {
+    const data = new FormData(form);
+    try {
+      setSaving(true);
+      const payload = { slackNotificationMode: String(data.get("slackNotificationMode") || "never"), slackNotificationThreadTs: String(data.get("slackNotificationThreadTs") || "") };
+      const updated = preview ? { ...source, slack_notification_mode: payload.slackNotificationMode as WorkAutomationSource["slack_notification_mode"], slack_notification_thread_ts: payload.slackNotificationThreadTs || null } : (await workApi<{ source: WorkAutomationSource }>(clientId, `/api/work-manager/sources/${source.id}`, { method: "PATCH", body: JSON.stringify(payload) })).source;
+      setSources((current) => current.map((candidate) => candidate.id === source.id ? updated : candidate));
+      setNotice({ type: "success", message: "Slack completion updates saved. No post is sent until a matching status transition occurs." });
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to save Slack notification settings." });
     } finally {
       setSaving(false);
     }
@@ -857,6 +889,7 @@ export function WorkManager({
                 <div className="work-source-route" key={source.id}>
                   <span aria-hidden="true">{source.source_kind === "slack" ? "#" : "◉"}</span>
                   <span><strong>{source.display_name}</strong><small>{source.source_kind === "slack" ? "Slack" : "Google Meet"} → {selectedChannel.name}{source.last_ingested_at ? ` · Seen ${formatUpdated(source.last_ingested_at)}` : " · Waiting for first update"}</small></span>
+                  {source.source_kind === "slack" && canEdit ? <div className="work-source-settings"><button className="work-text-button" type="button" onClick={() => setSourceSettingsId(sourceSettingsId === source.id ? null : source.id)}>{sourceSettingsId === source.id ? "Hide settings" : "Configure Slack updates"}</button>{sourceSettingsId === source.id ? <form className="work-source-notifications" onSubmit={(event) => { event.preventDefault(); void updateSourceNotifications(source, event.currentTarget); }}><p>Off by default. When enabled, only a transition into Completed or Blocked can post to Slack.</p><label>Completion posts<select name="slackNotificationMode" defaultValue={source.slack_notification_mode || "never"}><option value="never">Never</option><option value="completed">Completed only</option><option value="completed_and_blocked">Completed and blocked</option></select></label><label>Optional thread timestamp<input name="slackNotificationThreadTs" defaultValue={source.slack_notification_thread_ts || ""} placeholder="Leave blank for a new channel post" /></label><button className="button button-primary" type="submit" disabled={saving}>Save Slack settings</button></form> : null}</div> : null}
                 </div>
               )) : <p>No automation source is routed here yet.</p>}
               {sourceFormOpen ? (
@@ -866,6 +899,8 @@ export function WorkManager({
                   <label>Stable source ID<input name="sourceRef" placeholder="Slack channel ID or meeting series key" maxLength={220} required /></label>
                   <label>Workspace key <small>Optional</small><input name="workspaceRef" placeholder="circleclick" maxLength={220} /></label>
                   <label className="work-source-visible"><input name="defaultClientVisible" type="checkbox" /><span>New findings are client-visible by default</span></label>
+                  <label>Slack completion posts<select name="slackNotificationMode" defaultValue="never"><option value="never">Never (recommended)</option><option value="completed">Completed only</option><option value="completed_and_blocked">Completed and blocked</option></select></label>
+                  <label>Optional thread timestamp <small>Leave blank for a new channel post</small><input name="slackNotificationThreadTs" placeholder="Slack thread timestamp" maxLength={80} /></label>
                   <button className="button button-primary" type="submit" disabled={saving}>{saving ? "Connecting…" : "Connect source"}</button>
                 </form>
               ) : null}
@@ -882,6 +917,11 @@ export function WorkManager({
             </div>
             {selectedChannel ? <span className="work-freshness">{visibleItems.length} item{visibleItems.length === 1 ? "" : "s"}</span> : null}
           </div>
+
+          {selectedChannel && !showDismissed ? <div className="work-queue-filters" aria-label="Filter work queue">
+            <span className="work-filter-label">Show</span>
+            {([ ["all", "All"], ["attention", "Needs attention"], ["in_progress", "In progress"], ["blocked", "Blocked"], ["unassigned", "Unassigned"], ["due_soon", "Due soon"], ["done", "Done"] ] as Array<[QueueFilter, string]>).map(([value, label]) => <button className="work-filter-button" data-active={queueFilter === value} key={value} type="button" onClick={() => setQueueFilter(value)}>{label}</button>)}
+          </div> : null}
 
           {editorOpen ? (
             <WorkItemForm
@@ -930,7 +970,7 @@ export function WorkManager({
               {visibleItems.map((item) => (
                 <article className="work-item-row" data-status={item.status} key={item.id} role="listitem">
                   <header>
-                    <div className="work-item-title"><span className="work-status" data-status={item.status}>{statusLabels[item.status]}</span><h4>{item.title}</h4></div>
+                  <div className="work-item-title"><span className="work-status" data-status={item.status}>{statusLabels[item.status]}</span><h4>{item.title}</h4>{!item.owner_user_id && !item.owner_name ? <span className="work-unassigned-label">Internal · owner to confirm</span> : null}</div>
                     <div className="work-item-owner"><strong>{item.owner_name || "Owner to confirm"}</strong><span>{formatDue(item.due_date)}</span></div>
                   </header>
                   <div className="work-handoff">
@@ -954,9 +994,7 @@ export function WorkManager({
                         {showDismissed ? <button className="button button-primary" type="button" disabled={saving} onClick={() => changeDismissal(item, true)}>Restore</button> : <>
                           <button className="button button-primary" type="button" disabled={saving} onClick={() => usePrimaryAction(item)}>{primaryAction(item).label}</button>
                           {item.status !== "blocked" && item.status !== "done" ? <button className="button" type="button" disabled={saving} onClick={() => setQuickEditor({ itemId: item.id, kind: "block" })}>Block</button> : null}
-                          <button className="work-text-button" type="button" disabled={saving} onClick={() => openEditItem(item)}>Details</button>
-                          <button className="work-text-button" type="button" disabled={saving} onClick={() => { setRoutingItem(item); setRoutingClientId(""); }}>Assign client</button>
-                          <button className="work-text-button" type="button" disabled={saving} onClick={() => changeDismissal(item)}>Dismiss</button>
+                          <details className="work-more-actions"><summary>More</summary><div><button className="work-text-button" type="button" disabled={saving} onClick={() => openEditItem(item)}>Details</button><button className="work-text-button" type="button" disabled={saving} onClick={() => { setRoutingItem(item); setRoutingClientId(""); }}>Assign client</button><button className="work-text-button" type="button" disabled={saving} onClick={() => changeDismissal(item)}>Dismiss</button></div></details>
                         </>}
                       </div>
                     ) : null}

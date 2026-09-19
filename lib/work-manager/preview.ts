@@ -59,6 +59,8 @@ export const previewSources: WorkAutomationSource[] = [
     created_by_user_id: "preview-user",
     created_at: stamp,
     updated_at: stamp,
+    slack_notification_mode: "never",
+    slack_notification_thread_ts: null,
   },
   {
     id: "preview-source-meet",
@@ -74,6 +76,8 @@ export const previewSources: WorkAutomationSource[] = [
     created_by_user_id: "preview-user",
     created_at: stamp,
     updated_at: stamp,
+    slack_notification_mode: "never",
+    slack_notification_thread_ts: null,
   },
 ];
 

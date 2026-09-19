@@ -1,6 +1,7 @@
 import crypto, { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "@/lib/seo/db";
 import { safelyCreateWorkNotifications } from "./notifications";
+import { deliverSlackWorkNotification } from "./slack-notifications";
 import { normalizeWorkItemInput } from "./service";
 import {
   WORK_STATUSES,
@@ -252,7 +253,7 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
     });
     const incoming = {
       ...normalized,
-      source_snapshot_json: sourceSnapshot(item),
+      source_snapshot_json: { ...sourceSnapshot(item), sourceId: source.id },
       automation_review_needed: item.automationReviewNeeded === true,
       automation_last_seen_at: timestamp,
       completed_at: normalized.status === "done" ? timestamp : null,
@@ -296,6 +297,7 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
     if (plan.outcome === "updated") {
       const eventId = await addAutomationEvent(plan.next, "ingested", existing);
       await safelyCreateWorkNotifications(plan.next, existing, null, eventId);
+      await deliverSlackWorkNotification(source, plan.next, existing, eventId);
     }
     if (plan.outcome === "proposed") {
       const eventId = await addAutomationEvent(plan.next, "automation_proposed", existing);

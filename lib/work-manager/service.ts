@@ -13,8 +13,11 @@ import {
   type WorkSourceKind,
   type WorkStatus, type WorkDismissalReason,
   type WorkRoutingClient,
+  WORK_SLACK_NOTIFICATION_MODES,
+  type WorkSlackNotificationMode,
 } from "./types";
 import { safelyCreateWorkNotifications } from "./notifications";
+import { deliverSlackWorkNotification, sourceIdForWorkItem } from "./slack-notifications";
 
 const WORK_STORAGE_MESSAGE =
   "Work Manager storage is not installed yet. Apply the reviewed Work Manager migrations to the confirmed CircleClick Supabase project.";
@@ -67,6 +70,12 @@ function asSourceKind(value: unknown, fallback: WorkSourceKind = "manual"): Work
   return typeof value === "string" && WORK_SOURCE_KINDS.includes(value as WorkSourceKind)
     ? (value as WorkSourceKind)
     : fallback;
+}
+
+function asSlackNotificationMode(value: unknown): WorkSlackNotificationMode {
+  return typeof value === "string" && WORK_SLACK_NOTIFICATION_MODES.includes(value as WorkSlackNotificationMode)
+    ? value as WorkSlackNotificationMode
+    : "never";
 }
 
 function asDate(value: unknown) {
@@ -202,6 +211,8 @@ export async function createWorkSource(clientId: string, actorUserId: string, pa
       created_by_user_id: actorUserId,
       created_at: timestamp,
       updated_at: timestamp,
+      slack_notification_mode: sourceKind === "slack" ? asSlackNotificationMode(payload.slackNotificationMode) : "never",
+      slack_notification_thread_ts: sourceKind === "slack" ? asNullableText(payload.slackNotificationThreadTs, 80) : null,
     };
     const { error } = await table("work_sources").insert(source);
     if (error) throw error;
@@ -209,6 +220,27 @@ export async function createWorkSource(clientId: string, actorUserId: string, pa
   } catch (error) {
     throw workStorageError(error);
   }
+}
+
+export async function updateWorkSource(clientId: string, sourceId: string, payload: Record<string, unknown>) {
+  const id = normalizeClientId(clientId);
+  const { data: existing, error: readError } = await table("work_sources").select("*").eq("id", sourceId).eq("client_id", id).maybeSingle();
+  if (readError) throw workStorageError(readError);
+  if (!existing) throw new Error("Automation source not found.");
+  const mode = asSlackNotificationMode(payload.slackNotificationMode);
+  const next = { slack_notification_mode: existing.source_kind === "slack" ? mode : "never", slack_notification_thread_ts: existing.source_kind === "slack" ? asNullableText(payload.slackNotificationThreadTs, 80) : null, updated_at: new Date().toISOString() };
+  const { data, error } = await table("work_sources").update(next).eq("id", sourceId).eq("client_id", id).select("*").single();
+  if (error) throw workStorageError(error);
+  return data as WorkAutomationSource;
+}
+
+async function slackSourceForItem(item: WorkItem) {
+  const sourceId = sourceIdForWorkItem(item);
+  const query = sourceId
+    ? table("work_sources").select("*").eq("id", sourceId).maybeSingle()
+    : table("work_sources").select("*").eq("client_id", item.client_id).eq("channel_id", item.channel_id).eq("source_kind", "slack").eq("active", true).maybeSingle();
+  const { data } = await query;
+  return (data || null) as WorkAutomationSource | null;
 }
 
 export async function listWorkChannels(clientId: string) {
@@ -429,6 +461,7 @@ export async function updateWorkItem(clientId: string, itemId: string, actorUser
         : "updated";
     const eventId = await addWorkEvent(next, actorUserId, action, existing);
     await safelyCreateWorkNotifications(next, existing, actorUserId, eventId);
+    await deliverSlackWorkNotification(await slackSourceForItem(next), next, existing, eventId);
     return next;
   } catch (error) {
     throw workStorageError(error);
