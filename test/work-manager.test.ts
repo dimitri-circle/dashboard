@@ -17,6 +17,7 @@ import { normalizeSlackCandidates } from "../lib/work-manager/intake";
 import { isValidMeetingDocExportRequest, toMeetingDocItem } from "../lib/work-manager/meeting-docs";
 import { isValidSlackSignature, normalizeSlackTaskEvent } from "../lib/work-manager/slack-events";
 import { extractDueDate } from "../lib/work-manager/due-dates";
+import { allowsSlackNotification, buildSlackWorkUpdate, notificationKindForTransition } from "../lib/work-manager/slack-notifications";
 
 function exampleWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {
   return {
@@ -216,6 +217,19 @@ test("notification planning is actionable and does not emit routine noise", () =
   assert.deepEqual(plannedNotificationKinds(original, assignedAndBlocked), ["assigned", "blocked"]);
   assert.deepEqual(plannedNotificationKinds(assignedAndBlocked, { ...assignedAndBlocked, now_text: "Minor wording change" }), []);
   assert.equal(notificationReason("blocked", assignedAndBlocked), "Blocked: Client approval is missing.");
+});
+
+test("Slack completion notifications are opt-in and transition-only", () => {
+  const before = exampleWorkItem({ status: "in_progress" });
+  const done = exampleWorkItem({ status: "done", completion_evidence_url: "https://example.com/proof" });
+  const blocked = exampleWorkItem({ status: "blocked", blocker_text: "Needs approval" });
+  assert.equal(notificationKindForTransition(before, done), "completed");
+  assert.equal(notificationKindForTransition(before, blocked), "blocked");
+  assert.equal(notificationKindForTransition(done, done), null);
+  assert.equal(allowsSlackNotification("never", "completed"), false);
+  assert.equal(allowsSlackNotification("completed", "blocked"), false);
+  assert.equal(allowsSlackNotification("completed_and_blocked", "blocked"), true);
+  assert.match(buildSlackWorkUpdate(done, "completed"), /Publish founder interview/);
 });
 
 test("work guide progress is bounded and completion always records the final step", () => {

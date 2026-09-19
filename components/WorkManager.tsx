@@ -614,6 +614,8 @@ export function WorkManager({
           display_name: displayName,
           active: true,
           default_client_visible: formData.get("defaultClientVisible") === "on",
+          slack_notification_mode: String(formData.get("slackNotificationMode") || "never") as WorkAutomationSource["slack_notification_mode"],
+          slack_notification_thread_ts: String(formData.get("slackNotificationThreadTs") || "").trim() || null,
           last_ingested_at: null,
           created_by_user_id: "preview-user",
           created_at: timestamp,
@@ -629,6 +631,8 @@ export function WorkManager({
             sourceRef,
             displayName,
             defaultClientVisible: formData.get("defaultClientVisible") === "on",
+            slackNotificationMode: String(formData.get("slackNotificationMode") || "never"),
+            slackNotificationThreadTs: String(formData.get("slackNotificationThreadTs") || ""),
           }),
         });
         source = body.source;
@@ -639,6 +643,21 @@ export function WorkManager({
       setNotice({ type: "success", message: `${displayName} will route findings into ${selectedChannel?.name || "this workstream"}.` });
     } catch (error) {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to connect this source." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function updateSourceNotifications(source: WorkAutomationSource, form: HTMLFormElement) {
+    const data = new FormData(form);
+    try {
+      setSaving(true);
+      const payload = { slackNotificationMode: String(data.get("slackNotificationMode") || "never"), slackNotificationThreadTs: String(data.get("slackNotificationThreadTs") || "") };
+      const updated = preview ? { ...source, slack_notification_mode: payload.slackNotificationMode as WorkAutomationSource["slack_notification_mode"], slack_notification_thread_ts: payload.slackNotificationThreadTs || null } : (await workApi<{ source: WorkAutomationSource }>(clientId, `/api/work-manager/sources/${source.id}`, { method: "PATCH", body: JSON.stringify(payload) })).source;
+      setSources((current) => current.map((candidate) => candidate.id === source.id ? updated : candidate));
+      setNotice({ type: "success", message: "Slack completion updates saved. No post is sent until a matching status transition occurs." });
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to save Slack notification settings." });
     } finally {
       setSaving(false);
     }
@@ -857,6 +876,7 @@ export function WorkManager({
                 <div className="work-source-route" key={source.id}>
                   <span aria-hidden="true">{source.source_kind === "slack" ? "#" : "◉"}</span>
                   <span><strong>{source.display_name}</strong><small>{source.source_kind === "slack" ? "Slack" : "Google Meet"} → {selectedChannel.name}{source.last_ingested_at ? ` · Seen ${formatUpdated(source.last_ingested_at)}` : " · Waiting for first update"}</small></span>
+                  {source.source_kind === "slack" && canEdit ? <form className="work-source-notifications" onSubmit={(event) => { event.preventDefault(); void updateSourceNotifications(source, event.currentTarget); }}><label>Completion posts<select name="slackNotificationMode" defaultValue={source.slack_notification_mode || "never"}><option value="never">Never (recommended)</option><option value="completed">Completed only</option><option value="completed_and_blocked">Completed and blocked</option></select></label><label>Optional thread timestamp<input name="slackNotificationThreadTs" defaultValue={source.slack_notification_thread_ts || ""} placeholder="Leave blank for a new channel post" /></label><button className="work-text-button" type="submit" disabled={saving}>Save</button></form> : null}
                 </div>
               )) : <p>No automation source is routed here yet.</p>}
               {sourceFormOpen ? (
@@ -866,6 +886,8 @@ export function WorkManager({
                   <label>Stable source ID<input name="sourceRef" placeholder="Slack channel ID or meeting series key" maxLength={220} required /></label>
                   <label>Workspace key <small>Optional</small><input name="workspaceRef" placeholder="circleclick" maxLength={220} /></label>
                   <label className="work-source-visible"><input name="defaultClientVisible" type="checkbox" /><span>New findings are client-visible by default</span></label>
+                  <label>Slack completion posts<select name="slackNotificationMode" defaultValue="never"><option value="never">Never (recommended)</option><option value="completed">Completed only</option><option value="completed_and_blocked">Completed and blocked</option></select></label>
+                  <label>Optional thread timestamp <small>Leave blank for a new channel post</small><input name="slackNotificationThreadTs" placeholder="Slack thread timestamp" maxLength={80} /></label>
                   <button className="button button-primary" type="submit" disabled={saving}>{saving ? "Connecting…" : "Connect source"}</button>
                 </form>
               ) : null}

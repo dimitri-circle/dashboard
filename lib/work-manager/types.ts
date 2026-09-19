@@ -3,6 +3,8 @@ export const WORK_SOURCE_KINDS = ["manual", "slack", "google_meet"] as const;
 
 export type WorkStatus = (typeof WORK_STATUSES)[number];
 export type WorkSourceKind = (typeof WORK_SOURCE_KINDS)[number];
+export const WORK_SLACK_NOTIFICATION_MODES = ["never", "completed", "completed_and_blocked"] as const;
+export type WorkSlackNotificationMode = (typeof WORK_SLACK_NOTIFICATION_MODES)[number];
 
 export type WorkAutomationSource = {
   id: string;
@@ -18,6 +20,8 @@ export type WorkAutomationSource = {
   created_by_user_id: string | null;
   created_at: string;
   updated_at: string;
+  slack_notification_mode: WorkSlackNotificationMode;
+  slack_notification_thread_ts: string | null;
 };
 
 export type WorkChannel = {
