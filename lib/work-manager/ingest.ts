@@ -79,6 +79,7 @@ function normalizeIngestItem(value: unknown, index: number): NormalizedIngestIte
     sourceUrl: asOptionalUrl(item.sourceUrl),
     completionEvidenceUrl,
     clientVisible: typeof item.clientVisible === "boolean" ? item.clientVisible : undefined,
+    automationReviewNeeded: item.automationReviewNeeded === true,
   };
 }
 
@@ -252,7 +253,7 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
     const incoming = {
       ...normalized,
       source_snapshot_json: sourceSnapshot(item),
-      automation_review_needed: false,
+      automation_review_needed: item.automationReviewNeeded === true,
       automation_last_seen_at: timestamp,
       completed_at: normalized.status === "done" ? timestamp : null,
     };

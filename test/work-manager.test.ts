@@ -16,6 +16,7 @@ import { normalizeWorkGuideUpdate } from "../lib/work-manager/guide";
 import { normalizeSlackCandidates } from "../lib/work-manager/intake";
 import { isValidMeetingDocExportRequest, toMeetingDocItem } from "../lib/work-manager/meeting-docs";
 import { isValidSlackSignature, normalizeSlackTaskEvent } from "../lib/work-manager/slack-events";
+import { extractDueDate } from "../lib/work-manager/due-dates";
 
 function exampleWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {
   return {
@@ -61,6 +62,16 @@ test("Slack candidate intake recognizes explicit task tags and stays bounded", (
   const intake = normalizeSlackCandidates({ workspaceRef: "circleclick", sourceRef: "C0BE2423W75", messages: [{ externalId: "1.2", text: "@circleclick-task-add publish the approved video" }] });
   assert.equal(intake.messages[0].tagged, true);
   assert.throws(() => normalizeSlackCandidates({ sourceRef: "C", messages: [] }), /between 1 and 50/);
+});
+
+test("Slack task dates support ISO and Central Time natural language", () => {
+  assert.deepEqual(extractDueDate("@circleclick-task-add due:2026-09-25 Publish the video").dueDate, "2026-09-25");
+  assert.deepEqual(extractDueDate("@circleclick-task-add Publish the video by Friday", new Date("2026-09-16T12:00:00Z")), {
+    text: "@circleclick-task-add Publish the video",
+    dueDate: "2026-09-18",
+    reviewNeeded: false,
+  });
+  assert.equal(extractDueDate("Publish by February 31", new Date("2026-01-01T12:00:00Z")).reviewNeeded, true);
 });
 
 test("Slack Events verification accepts fresh signed requests and rejects replay or tampering", () => {

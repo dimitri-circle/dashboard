@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Joyride, STATUS, type EventData, type Step, type TooltipRenderProps } from "react-joyride";
 import { previewChannels, previewItems, previewSources } from "@/lib/work-manager/preview";
 import type { WorkGuideProgress, WorkGuideStatus } from "@/lib/work-manager/guide";
-import type { WorkAssignableUser, WorkAutomationSource, WorkChannel, WorkItem, WorkStatus } from "@/lib/work-manager/types";
+import type { WorkAssignableUser, WorkAutomationSource, WorkChannel, WorkItem, WorkRoutingClient, WorkStatus } from "@/lib/work-manager/types";
 
 type WorkNotice = { type: "success" | "error" | "info"; message: string } | null;
 type QuickEditor = { itemId: string; kind: "complete" | "block" } | null;
@@ -148,6 +148,9 @@ export function WorkManager({
   const [sources, setSources] = useState<WorkAutomationSource[]>([]);
   const [items, setItems] = useState<WorkItem[]>([]);
   const [assignableUsers, setAssignableUsers] = useState<WorkAssignableUser[]>([]);
+  const [routingClients, setRoutingClients] = useState<WorkRoutingClient[]>([]);
+  const [routingItem, setRoutingItem] = useState<WorkItem | null>(null);
+  const [routingClientId, setRoutingClientId] = useState("");
   const [selectedChannelId, setSelectedChannelId] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -258,16 +261,18 @@ export function WorkManager({
     try {
       setLoading(true);
       setNotice(null);
-      const [channelBody, itemBody, sourceBody, userBody] = await Promise.all([
+      const [channelBody, itemBody, sourceBody, userBody, routingBody] = await Promise.all([
         workApi<{ channels: WorkChannel[] }>(clientId, "/api/work-manager/channels"),
         workApi<{ items: WorkItem[] }>(clientId, `/api/work-manager/items${showDismissed ? "?view=dismissed" : ""}`),
         workApi<{ sources: WorkAutomationSource[] }>(clientId, "/api/work-manager/sources"),
         workApi<{ users: WorkAssignableUser[] }>(clientId, "/api/work-manager/users"),
+        workApi<{ clients: WorkRoutingClient[] }>(clientId, "/api/work-manager/routing-options"),
       ]);
       setChannels(channelBody.channels);
       setItems(itemBody.items);
       setSources(sourceBody.sources);
       setAssignableUsers(userBody.users);
+      setRoutingClients(routingBody.clients);
       const requestedItemId = new URLSearchParams(window.location.search).get("item");
       const requestedItem = itemBody.items.find((item) => item.id === requestedItemId);
       setSelectedChannelId((current) =>
@@ -280,6 +285,30 @@ export function WorkManager({
     } finally {
       setLoading(false);
     }
+  }
+
+  async function routeItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!routingItem) return;
+    const formData = new FormData(event.currentTarget);
+    const targetClientId = String(formData.get("targetClientId") || "");
+    const targetChannelId = String(formData.get("targetChannelId") || "");
+    if (!targetClientId || !targetChannelId) {
+      setNotice({ type: "error", message: "Choose both a client and workstream." });
+      return;
+    }
+    try {
+      setSaving(true);
+      const routed = preview
+        ? { ...routingItem, client_id: targetClientId, channel_id: targetChannelId, updated_at: new Date().toISOString() }
+        : (await workApi<{ item: WorkItem }>(clientId, `/api/work-manager/items/${routingItem.id}`, { method: "PATCH", body: JSON.stringify({ action: "route", targetClientId, targetChannelId }) })).item;
+      setItems((current) => current.filter((item) => item.id !== routingItem.id));
+      setRoutingItem(null);
+      setRoutingClientId("");
+      setNotice({ type: "success", message: `${routed.title} was routed to the selected client workstream.` });
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to route this work." });
+    } finally { setSaving(false); }
   }
 
   async function changeDismissal(item: WorkItem, restore = false) {
@@ -866,6 +895,16 @@ export function WorkManager({
             />
           ) : null}
 
+          {routingItem ? (
+            <form className="work-quick-panel" onSubmit={routeItem}>
+              <strong>Assign client and workstream</strong>
+              <p>{routingItem.title}</p>
+              <label>Client<select name="targetClientId" value={routingClientId} onChange={(event) => setRoutingClientId(event.target.value)} required><option value="">Choose a client</option>{routingClients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
+              <label>Workstream<select name="targetChannelId" defaultValue="" required><option value="">Choose a workstream</option>{(routingClients.find((client) => client.id === routingClientId)?.channels || []).map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}</select></label>
+              <div><button className="button button-primary" type="submit" disabled={saving}>{saving ? "Routing…" : "Assign work"}</button><button className="button" type="button" onClick={() => setRoutingItem(null)}>Cancel</button></div>
+            </form>
+          ) : null}
+
           {shareFormOpen ? (
             <form className="work-share-panel" onSubmit={createReviewLink}>
               <div><span className="eyebrow">Client review</span><h4>Create a calm, read-only update</h4><p>Only items marked visible to the client will appear. Internal controls and notes stay private.</p></div>
@@ -916,6 +955,7 @@ export function WorkManager({
                           <button className="button button-primary" type="button" disabled={saving} onClick={() => usePrimaryAction(item)}>{primaryAction(item).label}</button>
                           {item.status !== "blocked" && item.status !== "done" ? <button className="button" type="button" disabled={saving} onClick={() => setQuickEditor({ itemId: item.id, kind: "block" })}>Block</button> : null}
                           <button className="work-text-button" type="button" disabled={saving} onClick={() => openEditItem(item)}>Details</button>
+                          <button className="work-text-button" type="button" disabled={saving} onClick={() => { setRoutingItem(item); setRoutingClientId(""); }}>Assign client</button>
                           <button className="work-text-button" type="button" disabled={saving} onClick={() => changeDismissal(item)}>Dismiss</button>
                         </>}
                       </div>

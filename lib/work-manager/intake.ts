@@ -1,8 +1,9 @@
 import { getSupabaseAdminClient } from "@/lib/seo/db";
 import { getAvailableOpenAiApiKeyForUser } from "@/lib/seo/service";
 import { ingestWorkBatch } from "./ingest";
+import { extractDueDate } from "./due-dates";
 
-type Candidate = { externalId: string; text: string; sourceUrl?: string; threadContext?: string; tagged?: boolean };
+type Candidate = { externalId: string; text: string; sourceUrl?: string; threadContext?: string; tagged?: boolean; dueDate?: string; reviewNeeded?: boolean };
 
 function text(value: unknown, max: number) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
 
@@ -16,9 +17,12 @@ export function normalizeSlackCandidates(value: unknown) {
   const messages = body.messages.map((raw, index) => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`Message ${index + 1} is invalid.`);
     const item = raw as Record<string, unknown>;
+    const rawText = text(item.text, 3000);
+    const parsedDueDate = extractDueDate(rawText);
     const candidate: Candidate = {
-      externalId: text(item.externalId, 180), text: text(item.text, 3000), sourceUrl: text(item.sourceUrl, 2000),
-      threadContext: text(item.threadContext, 3000), tagged: item.tagged === true || /@circleclick-task-add\b/i.test(text(item.text, 3000)),
+      externalId: text(item.externalId, 180), text: parsedDueDate.text, sourceUrl: text(item.sourceUrl, 2000),
+      dueDate: parsedDueDate.dueDate, reviewNeeded: parsedDueDate.reviewNeeded,
+      threadContext: text(item.threadContext, 3000), tagged: item.tagged === true || /@circleclick-task-add\b/i.test(rawText),
     };
     if (!candidate.externalId || !candidate.text) throw new Error(`Message ${index + 1} needs externalId and text.`);
     return candidate;
@@ -28,7 +32,7 @@ export function normalizeSlackCandidates(value: unknown) {
 
 function fallback(candidate: Candidate) {
   const clean = candidate.text.replace(/@circleclick-task-add\b:?/ig, "").trim();
-  return { externalId: candidate.externalId, title: clean.slice(0, 180), nowText: clean, nextText: "Confirm the owner and next observable step.", status: "unknown", sourceUrl: candidate.sourceUrl };
+  return { externalId: candidate.externalId, title: clean.slice(0, 180), nowText: clean, nextText: "Confirm the owner and next observable step.", status: "unknown", dueDate: candidate.dueDate, sourceUrl: candidate.sourceUrl, automationReviewNeeded: candidate.reviewNeeded };
 }
 
 async function classify(candidate: Candidate, apiKey: string) {
@@ -46,7 +50,7 @@ async function classify(candidate: Candidate, apiKey: string) {
   return { isWork: parsed.isWork === true, confidence: Number(parsed.confidence || 0), item: {
     externalId: candidate.externalId, title: text(parsed.title, 180), nowText: text(parsed.nowText, 2400), nextText: text(parsed.nextText, 2400),
     ownerName: text(parsed.ownerName, 120), status: text(parsed.status, 40) || "unknown", blockerText: text(parsed.blockerText, 1600),
-    dueDate: text(parsed.dueDate, 10), sourceUrl: candidate.sourceUrl,
+    dueDate: candidate.dueDate || text(parsed.dueDate, 10), sourceUrl: candidate.sourceUrl, automationReviewNeeded: candidate.reviewNeeded,
   } };
 }
 
