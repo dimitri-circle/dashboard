@@ -72,13 +72,13 @@
 - Exit status: 0
 - Remaining uncertainty: The Vercel endpoint has not yet run against this production mapping.
 
-## Evidence: Vercel deployment blocked
+## Evidence: Vercel deployment history
 - Date: 2026-09-19
 - Graph node: configure-and-enable-production
 - Command or verification method: GitHub PR #21 status and Vercel project settings.
-- Result: Branch `update/work-manager-intake` pushed and PR `https://github.com/dimitri-circle/dashboard/pull/21` created. Vercel check failed with the account/deployment blocked flow. Production environment variables for workspace, channel, domain, and signing secret were stored, but no deployment was enabled.
-- Exit status: blocked
-- Remaining uncertainty: Vercel owner must resolve the account pause or deployment restriction before the route can be deployed and Slack URL verification can run.
+- Result: The earlier PR #21 check was stale. The Circleclick Pro team later produced Ready production deployment `cae958a` from merged PR #22, with the production environment variables present and the route reachable.
+- Exit status: 0
+- Remaining uncertainty: None for deployment; live duplicate replay remains pending below.
 
 ## Evidence: Production Slack configuration and live intake
 - Date: 2026-09-19
