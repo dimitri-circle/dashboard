@@ -392,8 +392,15 @@
   gap: 9px;
 }
 
+.work-source-heading {
+  flex-wrap: wrap;
+}
+
 .work-source-route {
-  justify-content: flex-start;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  justify-content: initial;
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 9px;
@@ -415,6 +422,11 @@
 .work-source-form {
   display: grid;
   gap: 3px;
+  min-width: 0;
+}
+
+.work-source-route > span:last-child {
+  overflow: hidden;
 }
 
 .work-source-route strong,
@@ -818,12 +830,17 @@
 .work-source-settings {
   display: grid;
   gap: 7px;
-  margin-left: 37px;
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin-left: 0;
 }
 
 .work-source-notifications {
   display: grid;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 9px;
   border: 1px solid rgba(20, 93, 120, 0.18);
   border-radius: 7px;
