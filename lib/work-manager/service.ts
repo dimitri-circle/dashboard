@@ -470,7 +470,7 @@ export async function updateWorkItem(clientId: string, itemId: string, actorUser
 
 export async function createWorkReviewLink(
   clientId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   payload: { channelId?: unknown; itemId?: unknown; label?: unknown; expiresAt?: unknown }
 ) {
   try {
