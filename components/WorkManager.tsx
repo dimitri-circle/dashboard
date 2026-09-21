@@ -939,8 +939,9 @@ export function WorkManager({
             <form className="work-quick-panel" onSubmit={routeItem}>
               <strong>Assign client and workstream</strong>
               <p>{routingItem.title}</p>
-              <label>Client<select name="targetClientId" value={routingClientId} onChange={(event) => setRoutingClientId(event.target.value)} required><option value="">Choose a client</option>{routingClients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
-              <label>Workstream<select name="targetChannelId" defaultValue="" required><option value="">Choose a workstream</option>{(routingClients.find((client) => client.id === routingClientId)?.channels || []).map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}</select></label>
+              <label>Client<select name="targetClientId" value={routingClientId} onChange={(event) => setRoutingClientId(event.target.value)} required><option value="">Choose a client</option>{routingClients.map((client) => <option key={client.id} value={client.id} disabled={!client.channels.length}>{client.name}{client.channels.length ? "" : " — no workstreams yet"}</option>)}</select></label>
+              <label>Workstream<select name="targetChannelId" defaultValue="" required disabled={!routingClients.find((client) => client.id === routingClientId)?.channels.length}><option value="">{routingClientId && !routingClients.find((client) => client.id === routingClientId)?.channels.length ? "This client needs a workstream" : "Choose a workstream"}</option>{(routingClients.find((client) => client.id === routingClientId)?.channels || []).map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}</select></label>
+              {routingClientId && !routingClients.find((client) => client.id === routingClientId)?.channels.length ? <p className="work-routing-help">This client has no active workstreams. Choose another client or create a workstream from that client’s Work Manager page first.</p> : null}
               <div><button className="button button-primary" type="submit" disabled={saving}>{saving ? "Routing…" : "Assign work"}</button><button className="button" type="button" onClick={() => setRoutingItem(null)}>Cancel</button></div>
             </form>
           ) : null}
@@ -994,7 +995,7 @@ export function WorkManager({
                         {showDismissed ? <button className="button button-primary" type="button" disabled={saving} onClick={() => changeDismissal(item, true)}>Restore</button> : <>
                           <button className="button button-primary" type="button" disabled={saving} onClick={() => usePrimaryAction(item)}>{primaryAction(item).label}</button>
                           {item.status !== "blocked" && item.status !== "done" ? <button className="button" type="button" disabled={saving} onClick={() => setQuickEditor({ itemId: item.id, kind: "block" })}>Block</button> : null}
-                          <details className="work-more-actions"><summary>More</summary><div><button className="work-text-button" type="button" disabled={saving} onClick={() => openEditItem(item)}>Details</button><button className="work-text-button" type="button" disabled={saving} onClick={() => { setRoutingItem(item); setRoutingClientId(""); }}>Assign client</button><button className="work-text-button" type="button" disabled={saving} onClick={() => changeDismissal(item)}>Dismiss</button></div></details>
+                          <details className="work-more-actions"><summary>More</summary><div><button className="work-text-button" type="button" disabled={saving} onClick={() => openEditItem(item)}>Details</button><button className="work-text-button" type="button" disabled={saving} onClick={() => { setRoutingItem(item); setRoutingClientId(routingClients.find((client) => client.channels.length)?.id || ""); }}>Assign client</button><button className="work-text-button" type="button" disabled={saving} onClick={() => changeDismissal(item)}>Dismiss</button></div></details>
                         </>}
                       </div>
                     ) : null}
