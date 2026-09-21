@@ -122,6 +122,8 @@ export type WorkIngestItemInput = {
   completionEvidenceUrl?: string;
   clientVisible?: boolean;
   automationReviewNeeded?: boolean;
+  targetClientId?: string;
+  targetChannelId?: string;
 };
 
 export type WorkIngestBatch = {

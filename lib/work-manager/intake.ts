@@ -5,6 +5,8 @@ import { extractDueDate } from "./due-dates";
 
 type Candidate = { externalId: string; text: string; sourceUrl?: string; threadContext?: string; tagged?: boolean; dueDate?: string; reviewNeeded?: boolean };
 
+type RoutingMatch = { clientId?: string; channelId?: string; reviewNeeded: boolean };
+
 function text(value: unknown, max: number) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
 
 export function normalizeSlackCandidates(value: unknown) {
@@ -35,6 +37,22 @@ function fallback(candidate: Candidate) {
   return { externalId: candidate.externalId, title: clean.slice(0, 180), nowText: clean, nextText: "Confirm the owner and next observable step.", status: "unknown", dueDate: candidate.dueDate, sourceUrl: candidate.sourceUrl, automationReviewNeeded: candidate.reviewNeeded };
 }
 
+function normalizedName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function findRoutingMatch(message: string, clients: Array<{ id: string; name: string }>, channels: Array<{ id: string; client_id: string; name: string }>): RoutingMatch {
+  const haystack = normalizedName(message);
+  const clientMatches = clients.filter((client) => {
+    const name = normalizedName(client.name);
+    return name.length >= 3 && ` ${haystack} `.includes(` ${name} `);
+  });
+  if (clientMatches.length !== 1) return { reviewNeeded: clientMatches.length > 1 };
+  const client = clientMatches[0];
+  const channelMatches = channels.filter((channel) => channel.client_id === client.id && haystack.includes(normalizedName(channel.name)));
+  return { clientId: client.id, channelId: channelMatches.length === 1 ? channelMatches[0].id : undefined, reviewNeeded: channelMatches.length > 1 };
+}
+
 async function classify(candidate: Candidate, apiKey: string) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({
     model: process.env.OPENAI_SEO_MODEL || "gpt-4o-mini", temperature: 0,
@@ -59,21 +77,34 @@ export async function intakeSlackCandidates(value: unknown) {
   const { data: source, error } = await getSupabaseAdminClient().from("work_sources").select("created_by_user_id").eq("source_kind", "slack").eq("workspace_ref", input.workspaceRef).eq("source_ref", input.sourceRef).eq("active", true).maybeSingle();
   if (error) throw error;
   if (!source) throw new Error("No active Work Manager source mapping matches this Slack channel.");
+  const [{ data: clients }, { data: channels }] = await Promise.all([
+    getSupabaseAdminClient().from("seo_clients").select("id,name").eq("active", true),
+    getSupabaseAdminClient().from("work_channels").select("id,client_id,name").eq("active", true),
+  ]);
   let apiKey = "";
   try { apiKey = await getAvailableOpenAiApiKeyForUser(source.created_by_user_id); } catch { /* Tagged requests retain a deterministic fallback. */ }
   const accepted = [] as Array<Record<string, unknown>>;
   const ignored = [] as Array<{ externalId: string; reason: string }>;
   for (const candidate of input.messages) {
     if (!apiKey) {
-      if (candidate.tagged) accepted.push(fallback(candidate)); else ignored.push({ externalId: candidate.externalId, reason: "AI unavailable and message was not explicitly tagged" });
+      if (candidate.tagged) {
+        const item = fallback(candidate); const routing = findRoutingMatch(candidate.text, clients || [], channels || []);
+        accepted.push({ ...item, targetClientId: routing.clientId, targetChannelId: routing.channelId, automationReviewNeeded: item.automationReviewNeeded || routing.reviewNeeded });
+      } else ignored.push({ externalId: candidate.externalId, reason: "AI unavailable and message was not explicitly tagged" });
       continue;
     }
     try {
       const result = await classify(candidate, apiKey);
-      if (result.isWork && (candidate.tagged || result.confidence >= 0.72) && result.item.title) accepted.push(result.item);
+      if (result.isWork && (candidate.tagged || result.confidence >= 0.72) && result.item.title) {
+        const routing = findRoutingMatch(candidate.text, clients || [], channels || []);
+        accepted.push({ ...result.item, targetClientId: routing.clientId, targetChannelId: routing.channelId, automationReviewNeeded: result.item.automationReviewNeeded || routing.reviewNeeded });
+      }
       else ignored.push({ externalId: candidate.externalId, reason: "Not confident this is actionable work" });
     } catch {
-      if (candidate.tagged) accepted.push(fallback(candidate)); else ignored.push({ externalId: candidate.externalId, reason: "Classification failed" });
+      if (candidate.tagged) {
+        const item = fallback(candidate); const routing = findRoutingMatch(candidate.text, clients || [], channels || []);
+        accepted.push({ ...item, targetClientId: routing.clientId, targetChannelId: routing.channelId, automationReviewNeeded: item.automationReviewNeeded || routing.reviewNeeded });
+      } else ignored.push({ externalId: candidate.externalId, reason: "Classification failed" });
     }
   }
   const result = accepted.length ? await ingestWorkBatch({ sourceKind: "slack", sourceRef: input.sourceRef, workspaceRef: input.workspaceRef, items: accepted }) : null;

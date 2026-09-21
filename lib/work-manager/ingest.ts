@@ -81,6 +81,8 @@ function normalizeIngestItem(value: unknown, index: number): NormalizedIngestIte
     completionEvidenceUrl,
     clientVisible: typeof item.clientVisible === "boolean" ? item.clientVisible : undefined,
     automationReviewNeeded: item.automationReviewNeeded === true,
+    targetClientId: asText(item.targetClientId, 80),
+    targetChannelId: asText(item.targetChannelId, 80),
   };
 }
 
@@ -262,8 +264,10 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
   for (const item of batch.items) {
     const timestamp = new Date().toISOString();
     const sourceExternalId = createSourceExternalIdentity(source.id, item.externalId);
+    const targetClientId = item.targetClientId || source.client_id;
+    const targetChannelId = item.targetChannelId || source.channel_id;
     const normalized = normalizeWorkItemInput({
-      channelId: source.channel_id,
+      channelId: targetChannelId,
       title: item.title,
       nowText: item.nowText,
       nextText: item.nextText,
@@ -286,7 +290,7 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
     };
     const { data: existingData, error: existingError } = await table("work_items")
       .select("*")
-      .eq("client_id", source.client_id)
+      .eq("client_id", targetClientId)
       .eq("source_kind", source.source_kind)
       .eq("source_external_id", sourceExternalId)
       .maybeSingle();
@@ -295,7 +299,7 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
     if (!existingData) {
       const created: WorkItem = {
         id: randomUUID(),
-        client_id: source.client_id,
+        client_id: targetClientId,
         ...incoming,
         created_by_user_id: null,
         updated_by_user_id: null,
@@ -306,7 +310,7 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
       if (error) throw error;
       const eventId = await addAutomationEvent(created, "ingested", null);
       await safelyCreateWorkNotifications(created, null, null, eventId);
-      await postSlackIntakeLink(source, created);
+      await postSlackIntakeLink({ ...source, client_id: targetClientId, channel_id: targetChannelId }, created);
       result.created += 1;
       result.items.push({ id: created.id, externalId: item.externalId, outcome: "created" });
       continue;
@@ -319,7 +323,7 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
       continue;
     }
     const plan = planAutomationUpdate(existing, incoming, timestamp);
-    const { error } = await table("work_items").update(plan.next).eq("id", existing.id).eq("client_id", source.client_id);
+    const { error } = await table("work_items").update(plan.next).eq("id", existing.id).eq("client_id", targetClientId);
     if (error) throw error;
     if (plan.outcome === "updated") {
       const eventId = await addAutomationEvent(plan.next, "ingested", existing);
