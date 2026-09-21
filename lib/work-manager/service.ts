@@ -471,12 +471,19 @@ export async function updateWorkItem(clientId: string, itemId: string, actorUser
 export async function createWorkReviewLink(
   clientId: string,
   actorUserId: string,
-  payload: { channelId?: unknown; label?: unknown; expiresAt?: unknown }
+  payload: { channelId?: unknown; itemId?: unknown; label?: unknown; expiresAt?: unknown }
 ) {
   try {
     const id = normalizeClientId(clientId);
     const channelId = asNullableText(payload.channelId, 80);
     if (channelId) await ensureChannelBelongsToClient(channelId, id);
+    const itemId = asNullableText(payload.itemId, 80);
+    if (itemId) {
+      const { data: item, error: itemError } = await table("work_items").select("id,channel_id").eq("id", itemId).eq("client_id", id).maybeSingle();
+      if (itemError) throw itemError;
+      if (!item) throw new Error("Work item does not belong to the selected client.");
+      if (channelId && item.channel_id !== channelId) throw new Error("Work item does not belong to the selected channel.");
+    }
     const label = asText(payload.label, 120) || "Client work review";
     const expiresRaw = asText(payload.expiresAt, 40);
     const expiresTimestamp = expiresRaw ? Date.parse(expiresRaw) : null;
@@ -484,13 +491,14 @@ export async function createWorkReviewLink(
     if (expiresTimestamp !== null && expiresTimestamp <= Date.now()) throw new Error("Review link expiry must be in the future.");
     const expiresAt = expiresTimestamp === null ? null : new Date(expiresTimestamp).toISOString();
     const token = createReviewToken();
-    const link: WorkReviewLink & { token_hash: string; created_by_user_id: string } = {
+    const link: WorkReviewLink & { token_hash: string; created_by_user_id: string | null } = {
       id: randomUUID(),
       client_id: id,
       channel_id: channelId,
+      item_id: itemId,
       label,
       token_hash: hashReviewToken(token),
-      created_by_user_id: actorUserId,
+      created_by_user_id: actorUserId || null,
       expires_at: expiresAt,
       revoked_at: null,
       created_at: new Date().toISOString(),
@@ -502,6 +510,14 @@ export async function createWorkReviewLink(
   } catch (error) {
     throw workStorageError(error);
   }
+}
+
+export async function createWorkItemReviewLink(clientId: string, actorUserId: string | null, item: WorkItem) {
+  return createWorkReviewLink(clientId, actorUserId, {
+    channelId: item.channel_id,
+    itemId: item.id,
+    label: `${item.title} client view`,
+  });
 }
 
 export async function revokeWorkReviewLink(clientId: string, linkId: string) {
@@ -551,6 +567,7 @@ export async function getWorkReviewSnapshot(token: string): Promise<WorkReviewSn
       .eq("client_visible", true)
       .order("updated_at", { ascending: false });
     if (linkData.channel_id) itemQuery = itemQuery.eq("channel_id", linkData.channel_id);
+    if (linkData.item_id) itemQuery = itemQuery.eq("id", linkData.item_id);
     const { data: items, error: itemError } = await itemQuery;
     if (itemError) throw itemError;
     const channelById = new Map((channels || []).map((channel) => [channel.id, channel]));

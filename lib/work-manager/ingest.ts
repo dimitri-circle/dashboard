@@ -2,7 +2,7 @@ import crypto, { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "@/lib/seo/db";
 import { safelyCreateWorkNotifications } from "./notifications";
 import { deliverSlackWorkNotification } from "./slack-notifications";
-import { normalizeWorkItemInput } from "./service";
+import { createWorkItemReviewLink, normalizeWorkItemInput } from "./service";
 import {
   WORK_STATUSES,
   type WorkAutomationSource,
@@ -193,6 +193,32 @@ function table(name: "work_sources" | "work_items" | "work_item_events") {
   return getSupabaseAdminClient().from(name);
 }
 
+function slackThreadTsFromPermalink(sourceUrl: string) {
+  const match = sourceUrl.match(/\/p(\d{16,})/);
+  if (!match) return null;
+  const digits = match[1];
+  return `${digits.slice(0, -6)}.${digits.slice(-6)}`;
+}
+
+async function postSlackIntakeLink(source: WorkAutomationSource, item: WorkItem) {
+  const token = process.env.SLACK_BOT_TOKEN?.trim();
+  if (!token || source.source_kind !== "slack" || !item.source_url) return;
+  try {
+    const { token: reviewToken } = await createWorkItemReviewLink(source.client_id, source.created_by_user_id, item);
+    const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || process.env.WORK_MANAGER_PUBLIC_URL || "https://dashboard-circleclick.vercel.app").replace(/\/$/, "");
+    const threadTs = slackThreadTsFromPermalink(item.source_url);
+    const response = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ channel: source.source_ref, text: `Work added: ${item.title}\nClient view: ${baseUrl}/review/${reviewToken}`, ...(threadTs ? { thread_ts: threadTs } : {}) }),
+    });
+    const payload = await response.json() as { ok?: boolean; error?: string };
+    if (!response.ok || !payload.ok) throw new Error(payload.error || `Slack returned ${response.status}`);
+  } catch (error) {
+    console.error("Slack intake link post failed", error instanceof Error ? error.message : String(error));
+  }
+}
+
 async function addAutomationEvent(item: WorkItem, action: "ingested" | "automation_proposed", before: WorkItem | null) {
   const eventId = randomUUID();
   const { error } = await table("work_item_events").insert({
@@ -280,6 +306,7 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
       if (error) throw error;
       const eventId = await addAutomationEvent(created, "ingested", null);
       await safelyCreateWorkNotifications(created, null, null, eventId);
+      await postSlackIntakeLink(source, created);
       result.created += 1;
       result.items.push({ id: created.id, externalId: item.externalId, outcome: "created" });
       continue;

@@ -164,6 +164,7 @@ export function WorkManager({
   const [editingItem, setEditingItem] = useState<WorkItem | null>(null);
   const [quickEditor, setQuickEditor] = useState<QuickEditor>(null);
   const [reviewUrl, setReviewUrl] = useState("");
+  const [itemReviewUrls, setItemReviewUrls] = useState<Record<string, string>>({});
   const [guideEnabled, setGuideEnabled] = useState(true);
   const [guideProgress, setGuideProgress] = useState<WorkGuideProgress>(emptyGuideProgress);
   const [guideOverviewOpen, setGuideOverviewOpen] = useState(false);
@@ -774,6 +775,26 @@ export function WorkManager({
     }
   }
 
+  async function createItemReviewLink(item: WorkItem) {
+    try {
+      setSaving(true);
+      if (preview) {
+        setItemReviewUrls((current) => ({ ...current, [item.id]: `${window.location.origin}/review/preview` }));
+      } else {
+        const body = await workApi<{ token: string }>(clientId, "/api/work-manager/review-links", {
+          method: "POST",
+          body: JSON.stringify({ itemId: item.id, channelId: item.channel_id, label: `${item.title} client view` }),
+        });
+        setItemReviewUrls((current) => ({ ...current, [item.id]: `${window.location.origin}/review/${body.token}` }));
+      }
+      setNotice({ type: "success", message: "Client-first work-order link created." });
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to create work-order link." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="page-workspace work-manager-workspace">
       {!isMobile ? (
@@ -995,11 +1016,12 @@ export function WorkManager({
                         {showDismissed ? <button className="button button-primary" type="button" disabled={saving} onClick={() => changeDismissal(item, true)}>Restore</button> : <>
                           <button className="button button-primary" type="button" disabled={saving} onClick={() => usePrimaryAction(item)}>{primaryAction(item).label}</button>
                           {item.status !== "blocked" && item.status !== "done" ? <button className="button" type="button" disabled={saving} onClick={() => setQuickEditor({ itemId: item.id, kind: "block" })}>Block</button> : null}
-                          <details className="work-more-actions"><summary>More</summary><div><button className="work-text-button" type="button" disabled={saving} onClick={() => openEditItem(item)}>Details</button><button className="work-text-button" type="button" disabled={saving} onClick={() => { setRoutingItem(item); setRoutingClientId(routingClients.find((client) => client.channels.length)?.id || ""); }}>Assign client</button><button className="work-text-button" type="button" disabled={saving} onClick={() => changeDismissal(item)}>Dismiss</button></div></details>
+                          <details className="work-more-actions"><summary>More</summary><div><button className="work-text-button" type="button" disabled={saving} onClick={() => openEditItem(item)}>Details</button><button className="work-text-button" type="button" disabled={saving} onClick={() => { setRoutingItem(item); setRoutingClientId(routingClients.find((client) => client.channels.length)?.id || ""); }}>Assign client</button><button className="work-text-button" type="button" disabled={saving} onClick={() => void createItemReviewLink(item)}>Create client link</button><button className="work-text-button" type="button" disabled={saving} onClick={() => changeDismissal(item)}>Dismiss</button></div></details>
                         </>}
                       </div>
                     ) : null}
                   </footer>
+                  {itemReviewUrls[item.id] ? <div className="work-item-link-result" role="status"><span>Client-first work-order link</span><input readOnly value={itemReviewUrls[item.id]} onFocus={(event) => event.currentTarget.select()} /><button className="button" type="button" onClick={() => navigator.clipboard.writeText(itemReviewUrls[item.id])}>Copy</button><a className="button" href={itemReviewUrls[item.id]} target="_blank" rel="noreferrer">Open</a></div> : null}
                   {quickEditor?.itemId === item.id ? (
                     <form className="work-quick-panel" onSubmit={(event) => submitQuickAction(event, item)}>
                       <label>

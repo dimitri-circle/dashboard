@@ -145,6 +145,7 @@ export type WorkReviewLink = {
   id: string;
   client_id: string;
   channel_id: string | null;
+  item_id: string | null;
   label: string;
   expires_at: string | null;
   revoked_at: string | null;

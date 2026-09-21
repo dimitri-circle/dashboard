@@ -39,8 +39,8 @@ export function WorkReview({ snapshot }: { snapshot: WorkReviewSnapshot }) {
             <strong>CircleClick</strong>
             <small>Clear work, shared honestly</small>
           </div>
-        </div>
-        <p>Read-only client view</p>
+      </div>
+        <div className="work-review-header-actions"><p>Read-only client view</p><a className="button" href="/">Open Work Manager</a></div>
       </header>
 
       <section className="work-review-intro" aria-labelledby="work-review-title">
