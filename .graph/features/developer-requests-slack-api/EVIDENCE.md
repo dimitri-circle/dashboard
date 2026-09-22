@@ -111,3 +111,11 @@
 - Result: The production deployment reached Ready after fixing the nullable automated review-link actor type error. The subsequent client-routing implementation was pushed as commit `48dfd88` to both `update/work-manager-live` and `update/seo-intelligence-dashboard`; its build/runtime result remains pending.
 - Exit status: 0 for `6dcaf56`; pending for `48dfd88`.
 - Remaining uncertainty: The newest routing build must reach Ready before its auto-assignment behavior is production-verified.
+
+## Evidence: Exact-client routing publication
+- Date: 2026-09-22
+- Graph node: configure-and-enable-production
+- Command or verification method: GitHub commit-status API and Vercel deployment readback.
+- Result: Commit `9c60cc5`, containing exact-client routing commit `48dfd88` plus the current Graph Loop evidence, completed successfully in Vercel deployment `7Y3Jcdiyedcvqa68bUQCnrBSDhTb` for the CircleClick dashboard project.
+- Exit status: 0
+- Remaining uncertainty: Publication is verified; a fresh Slack command naming a known client is still required to prove production auto-routing and client visibility end to end.

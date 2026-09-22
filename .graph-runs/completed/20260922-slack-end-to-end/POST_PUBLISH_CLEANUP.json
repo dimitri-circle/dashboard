@@ -1,0 +1,30 @@
+{
+  "autoRemoved": [
+    {
+      "bytes": 0,
+      "path": "/Users/ofroot/.codex/worktrees/work-manager-intake/circleclick/.graph-runs/active/20260922-slack-end-to-end/tmp"
+    }
+  ],
+  "completedAt": "2026-09-22T15:31:12.095649+00:00",
+  "preserved": [
+    "application and untracked user files",
+    ".git and .graph durable records",
+    "Graph Loop evidence outside the owned tmp directory",
+    "dependencies and shared build caches",
+    "Git worktrees, branches, stashes, and sessions"
+  ],
+  "publishedEvidence": "Vercel deployment 7Y3Jcdiyedcvqa68bUQCnrBSDhTb for commit 9c60cc5 reported success",
+  "reclaimedBytes": 0,
+  "repository": "/Users/ofroot/.codex/worktrees/work-manager-intake/circleclick",
+  "repositoryDeltaBeforeCleanupBytes": 3187,
+  "reviewOnlySharedArtifacts": {
+    "node_modules": {
+      "baselineBytes": 0,
+      "currentBytes": 0,
+      "deltaBytes": 0
+    }
+  },
+  "runDirectory": "/Users/ofroot/.codex/worktrees/work-manager-intake/circleclick/.graph-runs/active/20260922-slack-end-to-end",
+  "status": "completed",
+  "volumeFreeDeltaAfterCleanupBytes": -8192
+}
