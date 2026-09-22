@@ -1,0 +1,28 @@
+{
+  "capturedAt": "2026-09-22T14:43:29.459323+00:00",
+  "ownedTemporaryBytes": 0,
+  "policy": {
+    "autoClean": [
+      "/Users/ofroot/.codex/worktrees/work-manager-intake/circleclick/.graph-runs/active/20260922-slack-end-to-end/tmp"
+    ],
+    "reviewOnly": [
+      ".next",
+      ".turbo",
+      ".cache",
+      "build",
+      "coverage",
+      "dist",
+      "node_modules",
+      "target",
+      ".venv",
+      "venv"
+    ]
+  },
+  "repository": "/Users/ofroot/.codex/worktrees/work-manager-intake/circleclick",
+  "repositoryBytes": 1783717,
+  "runDirectory": "/Users/ofroot/.codex/worktrees/work-manager-intake/circleclick/.graph-runs/active/20260922-slack-end-to-end",
+  "sharedArtifacts": {
+    "node_modules": 0
+  },
+  "volumeFreeBytes": 4460830720
+}

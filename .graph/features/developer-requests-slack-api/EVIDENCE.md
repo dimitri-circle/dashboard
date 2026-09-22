@@ -95,3 +95,19 @@
 - Result: The first real event exposed `messages must contain between 1 and 50 candidates` because the route passed a singular normalized message. The route now wraps it as `messages: [normalized.message]`; all 63 tests pass and the production build passes. The subsequent real event created the expected task.
 - Exit status: 0
 - Remaining uncertainty: Duplicate retry verification remains.
+
+## Evidence: End-to-end client review link delivery
+- Date: 2026-09-22
+- Graph node: validate-isolated-flow
+- Command or verification method: Slack desktop readback and production client-review URL opened in browser.
+- Result: A real `@circleclick-task-add incorporate final category work into production by Wednesday` message in `#developer-requests` produced a `Request Tracker` reply containing `Work added` and a tokenized `https://dashboard-circleclick.vercel.app/review/...` client-view URL. Opening that URL reached the production read-only review page and displayed the correct Developer Requests context. The empty state was correct because the task was still internal and not yet client-visible.
+- Exit status: 0
+- Remaining uncertainty: The screenshot proves Slack delivery and public review-route reachability, but does not independently prove client/workstream auto-routing for a newly mentioned client.
+
+## Evidence: Production build repair and deployment
+- Date: 2026-09-22
+- Graph node: configure-and-enable-production
+- Command or verification method: Vercel deployment overview for commit `6dcaf56` and GitHub branch readback.
+- Result: The production deployment reached Ready after fixing the nullable automated review-link actor type error. The subsequent client-routing implementation was pushed as commit `48dfd88` to both `update/work-manager-live` and `update/seo-intelligence-dashboard`; its build/runtime result remains pending.
+- Exit status: 0 for `6dcaf56`; pending for `48dfd88`.
+- Remaining uncertainty: The newest routing build must reach Ready before its auto-assignment behavior is production-verified.
