@@ -5,7 +5,7 @@ export async function sendSlackIntakePrompt(input: {
   sourceId: string;
   channelId: string;
   externalId: string;
-  threadTs: string;
+  threadTs?: string;
   text: string;
 }) {
   const supabase = getSupabaseAdminClient();
@@ -35,7 +35,7 @@ export async function sendSlackIntakePrompt(input: {
     const response = await fetch("https://slack.com/api/chat.postMessage", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json; charset=utf-8" },
-      body: JSON.stringify({ channel: input.channelId, text: input.text, thread_ts: input.threadTs, client_msg_id: clientMsgId, reply_broadcast: false, unfurl_links: false }),
+      body: JSON.stringify({ channel: input.channelId, text: input.text, ...(input.threadTs ? { thread_ts: input.threadTs, reply_broadcast: false } : {}), client_msg_id: clientMsgId, unfurl_links: false }),
       signal: AbortSignal.timeout(8000),
     });
     const payload = await response.json() as { ok?: boolean; ts?: string; error?: string };
