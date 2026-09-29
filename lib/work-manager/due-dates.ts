@@ -19,7 +19,7 @@ function validDate(date: Date) {
 export type DueDateParse = { text: string; dueDate: string; reviewNeeded: boolean };
 
 export function extractDueDate(input: string, now = new Date()): DueDateParse {
-  const explicit = input.match(/\bdue:(\d{4}-\d{2}-\d{2})\b/i);
+  const explicit = input.match(/\b(?:due:\s*|by\s+)(\d{4}-\d{2}-\d{2})\b/i);
   if (explicit) {
     const date = new Date(`${explicit[1]}T00:00:00Z`);
     const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(explicit[1]) && !Number.isNaN(date.getTime()) && iso(date) === explicit[1] ? explicit[1] : "";
