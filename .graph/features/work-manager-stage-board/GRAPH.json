@@ -1,0 +1,197 @@
+{
+  "schemaVersion": "1.1",
+  "graphId": "work-manager-stage-board",
+  "featureId": "work-manager-stage-board",
+  "objective": "Build a four-stage Work Manager board with explicit task moves, a sliding detail view, and atomic stage/activity persistence.",
+  "status": "blocked",
+  "createdAt": "2026-09-27T21:29:56Z",
+  "updatedAt": "2026-09-29T13:13:53Z",
+  "iterationCount": 1,
+  "maximumIterations": 12,
+  "rootNodeIds": ["product-and-source-check"],
+  "nodes": [
+    {
+      "id": "product-and-source-check",
+      "type": "observe",
+      "title": "Confirm workflow contract and existing UI/data boundaries",
+      "objective": "Use the approved product check, repository evidence, UI guidance, and official database-function guidance to define the smallest safe stage-board slice.",
+      "status": "completed",
+      "dependencies": [],
+      "requiredSkills": ["graph-loop-engineering", "product-decision", "dashboard-ui-ux", "supabase", "dammyjay93/interface-design"],
+      "acceptanceCriteria": [
+        {"id":"AC-OBS-1","required":true,"status":"passed","evidenceRefs":["E-source-contract"]},
+        {"id":"AC-OBS-2","required":true,"status":"passed","evidenceRefs":["E-ui-guidance","E-db-docs"]},
+        {"id":"AC-OBS-3","required":true,"status":"passed","evidenceRefs":["E-workflow-benchmark"]}
+      ],
+      "inputs": ["User-approved wireframe and product check", "Existing Work Manager code and migration history"],
+      "outputs": ["Fixed stage semantics and component sequence"],
+      "evidenceRefs": ["E-source-contract","E-ui-guidance","E-db-docs","E-workflow-benchmark","E-run-baseline","E-db-boundary"],
+      "attemptCount": 1,
+      "maximumAttempts": 3,
+      "riskLevel": "medium",
+      "approvalRequired": false,
+      "blockingReason": null,
+      "createdAt": "2026-09-27T21:29:56Z",
+      "updatedAt": "2026-09-27T21:29:56Z"
+    },
+    {
+      "id": "stage-transition-persistence",
+      "type": "task",
+      "title": "Add stage model and transactional transition endpoint",
+      "objective": "Persist workflow stage independently from attention status and atomically update each work item with a single auditable stage event.",
+      "status": "partially_verified",
+      "dependencies": ["product-and-source-check"],
+      "requiredSkills": ["graph-loop-engineering","supabase"],
+      "acceptanceCriteria": [
+        {"id":"AC-DATA-1","required":true,"status":"passed","evidenceRefs":["E-implementation","E-tests"]},
+        {"id":"AC-DATA-2","required":true,"status":"passed","evidenceRefs":["E-prod-db-transaction"]},
+        {"id":"AC-DATA-3","required":true,"status":"blocked","evidenceRefs":["E-db-boundary"]}
+      ],
+      "inputs": ["Authenticated client/item", "Target stage or block/resume action", "Optional proof/blocker and explicit client-sharing choice", "Stable operation event ID"],
+      "outputs": ["Saved work item plus one workflow event, or an actionable error with no partial write"],
+      "evidenceRefs": ["E-implementation","E-tests","E-db-boundary","E-prod-db-transaction","E-prod-ui-gap"],
+      "attemptCount": 1,
+      "maximumAttempts": 3,
+      "riskLevel": "high",
+      "approvalRequired": false,
+      "blockingReason": "Production Postgres transaction behavior was verified with rollback; the authenticated board-to-API save path is not yet verified.",
+      "createdAt": "2026-09-27T21:29:56Z",
+      "updatedAt": "2026-09-29T13:13:53Z"
+    },
+    {
+      "id": "stage-board-and-drawer",
+      "type": "task",
+      "title": "Build the four-column board and Jira-like task drawer",
+      "objective": "Show task cards by saved workflow stage, keep attention states visible, and let users move tasks explicitly from cards or the drawer.",
+      "status": "verified",
+      "dependencies": ["stage-transition-persistence"],
+      "requiredSkills": ["graph-loop-engineering","dashboard-ui-ux","dammyjay93/interface-design"],
+      "acceptanceCriteria": [
+        {"id":"AC-UI-1","required":true,"status":"passed","evidenceRefs":["E-preview"]},
+        {"id":"AC-UI-2","required":true,"status":"passed","evidenceRefs":["E-preview","E-tests"]},
+        {"id":"AC-UI-3","required":true,"status":"passed","evidenceRefs":["E-preview"]}
+      ],
+      "inputs": ["Workstream items with stage/status", "Transition endpoint"],
+      "outputs": ["Responsive stage board, accessible one-click transitions, and slide-over issue details"],
+      "evidenceRefs": ["E-implementation","E-tests","E-preview"],
+      "attemptCount": 1,
+      "maximumAttempts": 3,
+      "riskLevel": "medium",
+      "approvalRequired": false,
+      "blockingReason": null,
+      "createdAt": "2026-09-27T21:29:56Z",
+      "updatedAt": "2026-09-27T22:11:00Z"
+    },
+    {
+      "id": "local-validation",
+      "type": "validation",
+      "title": "Validate code, board, and transaction boundary",
+      "objective": "Run focused tests and build, inspect the local desktop/mobile preview, and exercise the real DB transaction path when an isolated Postgres runtime is available.",
+      "status": "partially_verified",
+      "dependencies": ["stage-transition-persistence","stage-board-and-drawer"],
+      "requiredSkills": ["graph-loop-engineering","dashboard-ui-ux"],
+      "acceptanceCriteria": [
+        {"id":"AC-VAL-1","required":true,"status":"passed","evidenceRefs":["E-tests","E-build","E-diff"]},
+        {"id":"AC-VAL-2","required":true,"status":"passed","evidenceRefs":["E-preview"]},
+        {"id":"AC-VAL-3","required":true,"status":"blocked","evidenceRefs":["E-db-boundary"]}
+      ],
+      "inputs": ["Implementation and test suite", "Local Work Manager sample preview", "Local or disposable Postgres"],
+      "outputs": ["Scoped verification evidence and honest release boundary"],
+      "evidenceRefs": ["E-tests","E-build","E-diff","E-preview","E-db-boundary"],
+      "attemptCount": 1,
+      "maximumAttempts": 3,
+      "riskLevel": "high",
+      "approvalRequired": false,
+      "blockingReason": "Runtime database verification depends on a local or disposable Postgres environment.",
+      "createdAt": "2026-09-27T21:29:56Z",
+      "updatedAt": "2026-09-27T22:11:00Z",
+      "validation": {
+        "requiredCommands": [
+          {"id":"tests","command":"npm test","required":true,"outcome":"passed","exitStatus":0,"evidenceRefs":["E-tests"]},
+          {"id":"build","command":"npm run build","required":true,"outcome":"passed","exitStatus":0,"evidenceRefs":["E-build"]},
+          {"id":"diff-check","command":"git diff --check","required":true,"outcome":"passed","exitStatus":0,"evidenceRefs":["E-diff"]}
+        ],
+        "runtimeVerification":"blocked"
+      }
+    },
+    {
+      "id": "production-schema-reconciliation",
+      "type": "human_gate",
+      "title": "Reconcile CircleClick production migration history",
+      "objective": "Confirm the production schema and reconcile divergent local/remote migration history before applying the stage-board migration.",
+      "status": "completed",
+      "dependencies": ["local-validation"],
+      "requiredSkills": ["graph-loop-engineering","supabase"],
+      "acceptanceCriteria": [
+        {"id":"AC-DB-REL-1","required":true,"status":"passed","evidenceRefs":["E-prod-db-release"]},
+        {"id":"AC-DB-REL-2","required":true,"status":"passed","evidenceRefs":["E-prod-db-release","E-prod-db-transaction"]}
+      ],
+      "inputs": ["Linked Supabase project", "Local migration files", "Remote migration ledger and schema"],
+      "outputs": ["Verified schema/ledger reconciliation plan and safe migration order"],
+      "evidenceRefs": ["E-prod-db","E-prod-db-release","E-prod-db-transaction"],
+      "attemptCount": 1,
+      "maximumAttempts": 3,
+      "riskLevel": "high",
+      "approvalRequired": true,
+      "blockingReason": null,
+      "createdAt": "2026-09-27T22:18:00Z",
+      "updatedAt": "2026-09-29T13:13:53Z"
+    },
+    {
+      "id": "production-deployment",
+      "type": "human_gate",
+      "title": "Deploy and verify the Work Manager stage board",
+      "objective": "Publish the verified stage-board build to the CircleClick dashboard production deployment and confirm the canonical page.",
+      "status": "partially_verified",
+      "dependencies": ["production-schema-reconciliation"],
+      "requiredSkills": ["graph-loop-engineering","vercel-deploy"],
+      "acceptanceCriteria": [
+        {"id":"AC-DEPLOY-1","required":true,"status":"passed","evidenceRefs":["E-prod-vercel-release"]},
+        {"id":"AC-DEPLOY-2","required":true,"status":"blocked","evidenceRefs":["E-prod-ui-gap"]}
+      ],
+      "inputs": ["Production-safe commit", "CircleClick Vercel project", "Verified production schema"],
+      "outputs": ["Ready production deployment matching the verified commit and canonical Work Manager view"],
+      "evidenceRefs": ["E-prod-vercel","E-prod-db","E-prod-vercel-release","E-prod-ui-gap"],
+      "attemptCount": 1,
+      "maximumAttempts": 3,
+      "riskLevel": "high",
+      "approvalRequired": true,
+      "blockingReason": "The CircleClick production deployment is Ready; signed-in Work Manager board readback and one persisted UI status save remain unverified.",
+      "createdAt": "2026-09-27T22:18:00Z",
+      "updatedAt": "2026-09-29T13:13:53Z"
+    }
+  ],
+  "edges": [
+    {"from":"product-and-source-check","to":"stage-transition-persistence","type":"depends_on"},
+    {"from":"stage-transition-persistence","to":"stage-board-and-drawer","type":"depends_on"},
+    {"from":"stage-transition-persistence","to":"local-validation","type":"validates"},
+    {"from":"stage-board-and-drawer","to":"local-validation","type":"validates"},
+    {"from":"local-validation","to":"production-schema-reconciliation","type":"depends_on"},
+    {"from":"production-schema-reconciliation","to":"production-deployment","type":"depends_on"}
+  ],
+  "events": [
+    {"timestamp":"2026-09-27T21:29:56Z","type":"graph_created","summary":"Created a bounded graph for the approved Work Manager stage-board build.","evidenceRefs":["E-run-baseline"]},
+    {"timestamp":"2026-09-27T21:29:56Z","type":"skill_selected","nodeId":"product-and-source-check","summary":"Loaded dashboard UI guidance and registry skill dammyjay93/interface-design; applied keyboard-first movement, existing tokens, responsive layout, and reduced motion.","evidenceRefs":["E-ui-guidance"]},
+    {"timestamp":"2026-09-27T21:29:56Z","type":"decision_recorded","nodeId":"product-and-source-check","summary":"Use separate workflow stage and attention status; hold irrecoverable historical stage values for human placement.","evidenceRefs":["E-source-contract"]},
+    {"timestamp":"2026-09-27T22:11:00Z","type":"validation_partially_completed","nodeId":"local-validation","summary":"Full unit suite, production build, diff check, and local board/drawer preview passed; real database transition verification remains blocked by unavailable Docker, with production untouched.","evidenceRefs":["E-tests","E-build","E-diff","E-preview","E-db-boundary"]},
+    {"timestamp":"2026-09-27T22:18:00Z","type":"validation_blocked","nodeId":"production-schema-reconciliation","summary":"Read-only remote migration listing found divergent local/remote history, so the production schema migration was not applied.","evidenceRefs":["E-prod-db"]},
+    {"timestamp":"2026-09-27T22:18:00Z","type":"validation_blocked","nodeId":"production-deployment","summary":"CircleClick production still serves commit 5b3c7fd; stage-board changes are uncommitted, the database gate is unresolved, and deploy CLI identity does not match CircleClick.","evidenceRefs":["E-prod-vercel","E-prod-db"]},
+    {"timestamp":"2026-09-29T13:13:53Z","type":"context_updated","nodeId":"production-schema-reconciliation","summary":"Reconciled the confirmed CircleClick project migration history and applied remaining additive migrations; dry-run is clean and a rolled-back production transition produced one audit event with no lasting change.","evidenceRefs":["E-prod-db-release","E-prod-db-transaction"]},
+    {"timestamp":"2026-09-29T13:13:53Z","type":"validation_partially_completed","nodeId":"production-deployment","summary":"Commit e34c752 is Ready on the canonical CircleClick production domain; the signed-in board-to-API path is not yet verified.","evidenceRefs":["E-release-commit","E-prod-vercel-release","E-prod-ui-gap"]}
+  ],
+  "componentDelivery": {
+    "scopeFingerprint": "302e2af553b911ff0ce711a415da920061e4ccc8785e89d815fa50e69c65fc69",
+    "contracts": [
+      {"id":"stage-transition-db","inputs":"authenticated tenant, item, action, stage, expected current stage, event ID and optional blocker/proof/sharing choice","outputs":"persisted item and one matching activity event","sideEffects":"transactionally updates work_items and inserts work_item_events","failures":"invalid transition, missing proof/blocker, cross-client item, or unauthorized function call fails without partial write","retry":"event ID is stable and unique; a replay returns the existing transition result without duplicating an event","invariants":"stage and attention status remain distinct; only service_role can call the function; historic unknown stages are not guessed","dependencies":[],"realBoundary":true},
+      {"id":"transition-api","inputs":"authenticated PATCH request scoped to the selected client","outputs":"updated work item or actionable 4xx/5xx error","sideEffects":"calls the transactional database function, then performs existing notification/Slack policy checks","failures":"database failure returns error; post-commit delivery failures are recorded separately and never roll back saved work","retry":"same operation event ID is idempotent at the database boundary","invariants":"normal user authentication and tenant scope are checked before RPC","dependencies":["stage-transition-db"],"realBoundary":true},
+      {"id":"stage-board-ui","inputs":"work items, stage metadata, and transition API","outputs":"four stages, visible attention/placement queues, updated cards and drawer","sideEffects":"explicit user moves and activity events","failures":"show server error and retain current card position","retry":"user can retry after refreshing; no optimistic persistence claim","invariants":"Client Review sharing is explicit; keyboard and mobile work; reduced motion is honored","dependencies":["transition-api"]}
+    ],
+    "checks": [
+      {"kind":"component","componentIds":["stage-transition-db","transition-api","stage-board-ui"],"nodeId":"local-validation","scopeFingerprint":"302e2af553b911ff0ce711a415da920061e4ccc8785e89d815fa50e69c65fc69"},
+      {"kind":"connection","componentIds":["stage-transition-db","transition-api"],"nodeId":"local-validation","scopeFingerprint":"302e2af553b911ff0ce711a415da920061e4ccc8785e89d815fa50e69c65fc69","environment":"local/disposable Postgres unavailable; Docker daemon off","realBoundaryVerified":false},
+      {"kind":"connection","componentIds":["transition-api","stage-board-ui"],"nodeId":"local-validation","scopeFingerprint":"302e2af553b911ff0ce711a415da920061e4ccc8785e89d815fa50e69c65fc69","environment":"local browser sample preview; persisted API boundary unverified","realBoundaryVerified":false},
+      {"kind":"assembly","componentIds":["stage-transition-db","transition-api","stage-board-ui"],"nodeId":"local-validation","scopeFingerprint":"302e2af553b911ff0ce711a415da920061e4ccc8785e89d815fa50e69c65fc69","environment":"local browser sample preview; Postgres unavailable","realBoundaryVerified":false}
+    ],
+    "releaseNodeIds": ["production-schema-reconciliation","production-deployment"]
+  }
+}

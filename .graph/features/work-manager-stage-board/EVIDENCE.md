@@ -1,0 +1,31 @@
+# Evidence
+
+- E-run-baseline: Graph Loop run baseline captured at `.graph-runs/active/20260927T212956Z-work-manager-stage-board/SPACE_BASELINE.json`.
+- E-source-contract: Existing `WorkItem.status`, `updateWorkItem`, `work_item_events`, the PATCH route, issue drawer, and Work Manager board were inspected; current status updates write the row and event separately.
+- E-db-boundary: `supabase status` cannot inspect local database because the Docker daemon is unavailable; no remote database was contacted or changed.
+- E-ui-guidance: `dashboard-ui-ux`, `docs/skills/frontend.md`, and registry skill `dammyjay93/interface-design` (UI Skills CLI package 0.2.4, loaded 2026-09-27 UTC) informed keyboard-first stage moves, responsive columns/drawer, reduced-motion support, and use of existing design tokens.
+- E-db-docs: Official Supabase Database Functions documentation recommends `SECURITY INVOKER` by default and explicit function grants; this informs a narrowly granted service-role RPC.
+- E-workflow-benchmark: Linear workflow/board docs and Atlassian board-column docs were reviewed as interaction references; CircleClick's four-stage names and client-sharing gate remain product decisions.
+- E-implementation: Added a nullable/backfilled `workflow_stage`, transactional RPC with a post-lock duplicate-event recheck, authenticated transition API, four-column board, explicit client-review sharing gate, slide-over task details, and stage-aware client activity rendering. Historic states without enough information remain in Needs placement.
+- E-tests: `npm test` passed, 70 tests, 0 failures; includes stage ordering, legacy attention separation, and stage-badge consistency. This does not exercise the Postgres RPC.
+- E-build: `npm run build` passed; Next.js production build and TypeScript completed.
+- E-diff: `git diff --check` passed with exit 0.
+- E-preview: Local preview at `http://localhost:3020/?preview=work-manager&view=work&client=abk-labs` visually showed the four columns and slide-over task details; moving the sample task advanced both its stage and badge from In Progress to Client Review. The preview uses local sample data; persistence was not tested here.
+- E-scope-fingerprint: SHA-256 `302e2af553b911ff0ce711a415da920061e4ccc8785e89d815fa50e69c65fc69` over the listed stage implementation files in sorted path order, with NUL separators between each path and its file bytes.
+- E-prod-db: Read-only `supabase migration list --linked` connected successfully to the repository-linked `circleclick-dashboard` project. Local and remote migration ledgers differ; local-only migrations include `20260924153226`, `20260927075815`, and `20260927213624`, while older remote-only entries also remain. No migration or SQL write was run.
+- E-prod-vercel: Vercel browser readback in the Circleclick Pro account (`dimitri@circleclick`) shows production project `dashboard`, canonical `dashboard-circleclick.vercel.app`, Ready deployment at commit `5b3c7fd` from `update/seo-intelligence-dashboard` (created Sep 22). The stage-board changes are not in that commit. Vercel CLI `whoami` returns `ofroot-tech`, so CLI deployment was not attempted.
+- E-release-checkout: Current branch `update/work-manager-intake` has 29 modified or untracked paths, including the stage board plus related Slack intake/handoff changes; no commit, push, deploy, or database write was made during this release check.
+
+## Validation
+
+At the initial local validation, code, build, diff, and sample preview passed; local Postgres was unavailable because Docker was off. The later production release evidence below supersedes the initial no-remote-write status. Do not treat the sample-preview interaction as proof of the authenticated production UI path.
+
+## Release update: 2026-09-29
+
+- E-prod-db-release: Confirmed linked project `oxfpparkbduckvzsqnkl`; reconciled six equivalent historical migration versions, marked two already-present Work Manager schema changes as applied after checking their columns, constraints and indexes, then applied the five remaining migrations. `supabase db push --linked --dry-run` reported the remote database up to date and all 19 local/remote migration versions matched. The changes are additive; no work rows were deleted.
+- E-prod-db-transaction: On one existing internal `ready` task, `transition_work_item` moved it to `in_progress` and inserted one audit event inside `BEGIN ... ROLLBACK`. A separate read confirmed the task was still `ready`/`new` and the test event count was zero. This proves the database function's basic atomic path, not the signed-in board-to-API connection or concurrent retry behavior.
+- E-release-commit: Code and migration files were committed as `e34c752` on `update/work-manager-intake`, excluding unrelated `AGENTS.md` changes and active run directories. `npm test` passed 70 tests, `npm run build` passed, and `git diff --check` passed before push.
+- E-prod-vercel-release: Circleclick Pro Vercel project `dashboard` showed preview `e34c752` Ready, then production branch `update/seo-intelligence-dashboard` was fast-forwarded from `5b3c7fd` to `e34c752`. Deployment `6Z9Z7SAQGp5XS7Hg2eVkEBYjmfqa` is Ready and Latest, with current domain `dashboard-circleclick.vercel.app`. The canonical domain served the dashboard login page. Prior Ready deployment `5b3c7fd` remains available for application rollback; the additive schema can remain in place.
+- E-prod-ui-gap: The live dashboard browser redirected to `/login?next=%2F`, so no authenticated board-to-API save, card reload, or Slack side-effect check was performed. Production is deployed, but that end-to-end user workflow remains unverified.
+- E-prod-slack-auth: A live unsigned POST to `/api/work-manager/slack/events` returned HTTP 401 and `Slack request verification failed.` This verifies the route is present and rejects an unsigned request; it does not prove a signed event, task creation, or Slack delivery.
+- E-release-graph-gap: The Graph Loop consistency checker with `--require-component-contracts` exited 1 because release began before component delivery passed; it reported components 0/3, connections 0/2, assembly pending, and `ready: false`. The deployed artifact is real, but the graph's full workflow acceptance gate is still open and must not be represented as complete.
