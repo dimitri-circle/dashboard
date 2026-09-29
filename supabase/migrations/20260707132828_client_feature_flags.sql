@@ -18,3 +18,4 @@ set feature_flags_json = '{
   "insights": false
 }'::jsonb
 where feature_flags_json = '{}'::jsonb;
+;

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { rateLimitFromRequest } from "@/lib/seo/rate-limit";
 import { getTenantScopeFromRequest } from "@/lib/seo/tenant";
 import { requireWorkSession, workErrorResponse } from "@/lib/work-manager/http";
-import { routeWorkItem, setWorkItemDismissed, updateWorkItem } from "@/lib/work-manager/service";
+import { routeWorkItem, setWorkItemDismissed, transitionWorkItem, updateWorkItem } from "@/lib/work-manager/service";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -15,6 +15,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       ? await setWorkItemDismissed(scope.userId, id, session.userId, { ...payload, dismissed: payload.action !== "restore" })
       : payload.action === "route"
         ? await routeWorkItem(scope.userId, id, session.userId, payload.targetClientId, payload.targetChannelId)
+        : payload.action === "transition"
+          ? await transitionWorkItem(scope.userId, id, session.userId, payload)
         : await updateWorkItem(scope.userId, id, session.userId, payload) });
   } catch (error) {
     return workErrorResponse(error, "Unable to update work item.");

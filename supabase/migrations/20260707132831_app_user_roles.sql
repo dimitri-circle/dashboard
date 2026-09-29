@@ -30,3 +30,4 @@ create index if not exists seo_app_users_disabled on public.seo_app_users(disabl
 
 alter table public.seo_app_users enable row level security;
 grant select, insert, update on public.seo_app_users to service_role;
+;

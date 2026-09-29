@@ -36,4 +36,4 @@ create index if not exists seo_change_runs_client_created
   on public.seo_change_runs(user_id, created_at desc);
 
 alter table public.seo_watch_baselines enable row level security;
-alter table public.seo_change_runs enable row level security;
+alter table public.seo_change_runs enable row level security;;

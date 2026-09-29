@@ -1,5 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { intakeSlackCandidates } from "@/lib/work-manager/intake";
+import { sendSlackIntakePrompt } from "@/lib/work-manager/slack-intake-prompts";
 import { isValidSlackSignature, normalizeSlackTaskEvent, type SlackEventEnvelope } from "@/lib/work-manager/slack-events";
 
 export const runtime = "nodejs";
@@ -35,11 +36,12 @@ export async function POST(request: Request) {
 
   after(async () => {
     try {
-      await intakeSlackCandidates({
+      const result = await intakeSlackCandidates({
         sourceRef: normalized.sourceRef,
         workspaceRef: normalized.workspaceRef,
         messages: [normalized.message],
       });
+      for (const prompt of result.needsInfo) await sendSlackIntakePrompt({ ...prompt, text: prompt.promptText });
     } catch (error) {
       console.error("Work Manager Slack event intake failed", error);
     }

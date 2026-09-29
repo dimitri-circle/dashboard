@@ -63,6 +63,7 @@ export function normalizeSlackTaskEvent(
       externalId,
       text,
       threadContext: stringValue(event.thread_ts, 80),
+      threadTs: stringValue(event.thread_ts, 80) || externalId,
       sourceUrl: `https://${domain}/archives/${channelId}/p${permalinkTs}`,
       tagged: true,
     },

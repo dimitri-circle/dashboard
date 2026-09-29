@@ -10,14 +10,19 @@ import {
   type WorkItem,
   type WorkReviewLink,
   type WorkReviewSnapshot,
+  type WorkItemActivityEvent,
+  type WorkItemComment,
+  type WorkSlackDelivery,
   type WorkSourceKind,
   type WorkStatus, type WorkDismissalReason,
+  type WorkflowStage,
   type WorkRoutingClient,
   WORK_SLACK_NOTIFICATION_MODES,
   type WorkSlackNotificationMode,
 } from "./types";
 import { safelyCreateWorkNotifications } from "./notifications";
-import { deliverSlackWorkNotification, sourceIdForWorkItem } from "./slack-notifications";
+import { deliverSlackWorkNotification, sendSlackDelivery, sourceIdForWorkItem } from "./slack-notifications";
+import { isWorkflowStage, workflowStageFromStatus } from "./workflow";
 
 const WORK_STORAGE_MESSAGE =
   "Work Manager storage is not installed yet. Apply the reviewed Work Manager migrations to the confirmed CircleClick Supabase project.";
@@ -156,13 +161,13 @@ function workStorageError(error: unknown) {
     : typeof candidate?.message === "string"
       ? [candidate.message, candidate.details, candidate.hint].filter((value) => typeof value === "string" && value).join(" ")
       : String(error);
-  if (/work_(channels|items|item_events|review_links|sources).*does not exist|schema cache/i.test(message)) {
+  if (/work_(channels|items|item_events|item_comments|review_links|slack_notification_deliveries|sources).*does not exist|schema cache/i.test(message)) {
     return new Error(WORK_STORAGE_MESSAGE);
   }
   return error instanceof Error ? error : new Error(message);
 }
 
-function table(name: "work_channels" | "work_items" | "work_item_events" | "work_review_links" | "work_sources" | "seo_clients" | "seo_app_users") {
+function table(name: "work_channels" | "work_items" | "work_item_events" | "work_item_comments" | "work_review_links" | "work_sources" | "work_slack_notification_deliveries" | "seo_clients" | "seo_app_users") {
   return getSupabaseAdminClient().from(name);
 }
 
@@ -228,7 +233,7 @@ export async function updateWorkSource(clientId: string, sourceId: string, paylo
   if (readError) throw workStorageError(readError);
   if (!existing) throw new Error("Automation source not found.");
   const mode = asSlackNotificationMode(payload.slackNotificationMode);
-  const next = { slack_notification_mode: existing.source_kind === "slack" ? mode : "never", slack_notification_thread_ts: existing.source_kind === "slack" ? asNullableText(payload.slackNotificationThreadTs, 80) : null, updated_at: new Date().toISOString() };
+  const next = { slack_notification_mode: existing.source_kind === "slack" ? mode : "never", slack_notification_thread_ts: existing.source_kind === "slack" ? asNullableText(payload.slackNotificationThreadTs, 80) : null, slack_activity_notifications_enabled: existing.source_kind === "slack" && payload.slackActivityNotificationsEnabled === true, updated_at: new Date().toISOString() };
   const { data, error } = await table("work_sources").update(next).eq("id", sourceId).eq("client_id", id).select("*").single();
   if (error) throw workStorageError(error);
   return data as WorkAutomationSource;
@@ -312,7 +317,7 @@ async function ensureChannelBelongsToClient(channelId: string, clientId: string)
 async function addWorkEvent(
   item: WorkItem,
   actorUserId: string,
-  action: "created" | "updated" | "status_changed" | "evidence_added" | "dismissed" | "restored" | "routed",
+  action: "created" | "updated" | "status_changed" | "evidence_added" | "dismissed" | "restored" | "routed" | "commented",
   before: Partial<WorkItem> | null
 ) {
   const eventId = randomUUID();
@@ -358,12 +363,113 @@ export async function routeWorkItem(clientId: string, itemId: string, actorUserI
   const existing = existingData as WorkItem;
   await ensureChannelBelongsToClient(channelId, nextClientId);
   const timestamp = new Date().toISOString();
-  const next: WorkItem = { ...existing, client_id: nextClientId, channel_id: channelId, updated_by_user_id: actorUserId, updated_at: timestamp };
+  const sourceSnapshot = { ...existing.source_snapshot_json };
+  delete sourceSnapshot.routingSuggestionClientId;
+  const next: WorkItem = { ...existing, client_id: nextClientId, channel_id: channelId, source_snapshot_json: sourceSnapshot, updated_by_user_id: actorUserId, updated_at: timestamp };
   const { error: updateError } = await table("work_items").update(next).eq("id", itemId).eq("client_id", currentClientId);
   if (updateError) throw updateError;
   const eventId = await addWorkEvent(next, actorUserId, "routed", existing);
+  if (existing.client_id !== next.client_id || existing.channel_id !== next.channel_id) {
+    const { error: linkError } = await table("work_review_links").update({ revoked_at: timestamp }).eq("item_id", itemId).eq("client_id", existing.client_id).is("revoked_at", null);
+    if (linkError) console.error("Unable to revoke review links for the previous client after routing", linkError);
+  }
   await safelyCreateWorkNotifications(next, existing, actorUserId, eventId);
+  await deliverSlackWorkNotification(await slackSourceForItem(next), next, existing, eventId, "routed");
   return next;
+}
+
+export async function getWorkItemLocation(itemId: string) {
+  const { data, error } = await table("work_items").select("id,client_id,channel_id").eq("id", itemId).maybeSingle();
+  if (error) throw workStorageError(error);
+  if (!data) throw new Error("Work item not found.");
+  return data as Pick<WorkItem, "id" | "client_id" | "channel_id">;
+}
+
+export async function getWorkItemActivity(clientId: string, itemId: string) {
+  const id = normalizeClientId(clientId);
+  const { data: item, error: itemError } = await table("work_items").select("id").eq("id", itemId).eq("client_id", id).maybeSingle();
+  if (itemError) throw workStorageError(itemError);
+  if (!item) throw new Error("Work item not found in the selected client.");
+  const [{ data: comments, error: commentsError }, { data: events, error: eventsError }, { data: deliveries, error: deliveryError }] = await Promise.all([
+    table("work_item_comments").select("id,item_id,author_name,body,client_visible,created_at").eq("item_id", itemId).order("created_at", { ascending: true }),
+    table("work_item_events").select("id,action,actor_user_id,before_json,after_json,created_at").eq("item_id", itemId).order("created_at", { ascending: true }),
+    table("work_slack_notification_deliveries").select("id,kind,status,error_text,created_at").eq("item_id", itemId).order("created_at", { ascending: false }),
+  ]);
+  if (commentsError) throw workStorageError(commentsError);
+  if (eventsError) throw workStorageError(eventsError);
+  if (deliveryError) throw workStorageError(deliveryError);
+  const activity: WorkItemActivityEvent[] = (events || []).filter((event) => event.action !== "commented").map((event) => ({
+    id: event.id,
+    action: event.action,
+    summary: event.action === "status_changed" ? `Status changed to ${String(event.after_json?.status || "updated").replaceAll("_", " ")}`
+      : event.action === "workflow_stage_changed" ? `Moved to ${String(event.after_json?.workflow_stage || "a workflow stage").replaceAll("_", " ")}`
+      : event.action === "routed" ? "Assigned to a client workstream"
+      : event.action === "created" || event.action === "ingested" ? "Work added"
+      : event.action === "commented" ? "Comment added"
+      : event.action === "evidence_added" ? "Completion proof added"
+      : event.action === "dismissed" ? "Work dismissed"
+      : event.action === "restored" ? "Work restored"
+      : "Work updated",
+    created_at: event.created_at,
+    author_name: typeof event.after_json?.authorName === "string" ? event.after_json.authorName : null,
+  }));
+  return { comments: (comments || []) as WorkItemComment[], activity, deliveries: (deliveries || []) as WorkSlackDelivery[] };
+}
+
+export async function addWorkItemComment(clientId: string, itemId: string, actor: { id: string; name: string }, bodyValue: unknown, clientVisibleValue: unknown) {
+  const id = normalizeClientId(clientId);
+  const body = asText(bodyValue, 3000);
+  if (!body) throw new Error("Write a comment before adding it.");
+  const { data: itemData, error: itemError } = await table("work_items").select("*").eq("id", itemId).eq("client_id", id).maybeSingle();
+  if (itemError) throw workStorageError(itemError);
+  if (!itemData) throw new Error("Work item not found in the selected client.");
+  const item = itemData as WorkItem;
+  const comment: WorkItemComment = { id: randomUUID(), item_id: itemId, author_name: asText(actor.name, 120) || "CircleClick team", body, client_visible: clientVisibleValue === true, created_at: new Date().toISOString() };
+  const { error } = await table("work_item_comments").insert({ ...comment, client_id: id, author_user_id: actor.id });
+  if (error) throw workStorageError(error);
+  const eventId = randomUUID();
+  const { error: eventError } = await table("work_item_events").insert({
+    id: eventId,
+    client_id: id,
+    item_id: itemId,
+    actor_user_id: actor.id,
+    action: "commented",
+    before_json: {},
+    after_json: { commentId: comment.id, authorName: comment.author_name },
+    source_evidence_url: null,
+    created_at: comment.created_at,
+  });
+  if (eventError) {
+    const { error: cleanupError } = await table("work_item_comments").delete().eq("id", comment.id).eq("client_id", id);
+    if (cleanupError) console.error("Unable to roll back comment after activity audit failure", cleanupError);
+    throw workStorageError(eventError);
+  }
+  const { error: touchError } = await table("work_items").update({ updated_at: comment.created_at, updated_by_user_id: actor.id }).eq("id", itemId).eq("client_id", id);
+  if (touchError) console.error("Unable to refresh work item timestamp after comment", touchError);
+  await deliverSlackWorkNotification(await slackSourceForItem(item), item, item, eventId, "activity");
+  return comment;
+}
+
+export async function retryWorkSlackDelivery(clientId: string, itemId: string, deliveryId: string) {
+  const id = normalizeClientId(clientId);
+  const { data: itemData, error: itemError } = await table("work_items").select("*").eq("id", itemId).eq("client_id", id).maybeSingle();
+  if (itemError) throw workStorageError(itemError);
+  if (!itemData) throw new Error("Work item not found in the selected client.");
+  const item = itemData as WorkItem;
+  const { data: delivery, error: deliveryError } = await table("work_slack_notification_deliveries").select("*").eq("id", deliveryId).eq("item_id", itemId).maybeSingle();
+  if (deliveryError) throw workStorageError(deliveryError);
+  if (!delivery || !["failed", "uncertain"].includes(delivery.status)) throw new Error("Only a failed or uncertain Slack update can be retried.");
+  const source = await slackSourceForItem(item);
+  if (!source || !source.active || source.source_kind !== "slack") throw new Error("The original Slack connection is no longer active.");
+  const { data: claimed, error: claimError } = await table("work_slack_notification_deliveries")
+    .update({ status: "pending", attempt_count: Number(delivery.attempt_count || 1) + 1, error_text: null, updated_at: new Date().toISOString() })
+    .eq("id", deliveryId)
+    .in("status", ["failed", "uncertain"])
+    .select("id")
+    .maybeSingle();
+  if (claimError) throw workStorageError(claimError);
+  if (!claimed) throw new Error("This Slack update is already being retried.");
+  await sendSlackDelivery(source, item, delivery.event_id, delivery.kind as "intake" | "activity" | "routed" | "completed" | "blocked", deliveryId);
 }
 
 export async function listWorkAssignableUsers() {
@@ -376,12 +482,14 @@ export async function createWorkItem(clientId: string, actorUserId: string, payl
   try {
     const id = normalizeClientId(clientId);
     const input = normalizeWorkItemInput(payload);
+    if (!input.due_date) throw new Error("A due date is required when adding new work.");
     await ensureChannelBelongsToClient(input.channel_id, id);
     const timestamp = new Date().toISOString();
     const item: WorkItem = {
       id: randomUUID(),
       client_id: id,
       ...input,
+      workflow_stage: workflowStageFromStatus(input.status),
       source_snapshot_json: {},
       automation_review_needed: false,
       automation_last_seen_at: null,
@@ -468,6 +576,58 @@ export async function updateWorkItem(clientId: string, itemId: string, actorUser
   }
 }
 
+export async function transitionWorkItem(
+  clientId: string,
+  itemId: string,
+  actorUserId: string,
+  payload: Record<string, unknown>
+) {
+  try {
+    const id = normalizeClientId(clientId);
+    const eventId = asText(payload.operationId, 80);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(eventId)) {
+      throw new Error("Refresh the task and try that move again.");
+    }
+    const action = asText(payload.transition, 20);
+    if (action !== "move" && action !== "block" && action !== "resume") {
+      throw new Error("Choose Move, Block, or Resume.");
+    }
+    const targetStage = payload.workflowStage === undefined ? null : payload.workflowStage;
+    if (action === "move" && !isWorkflowStage(targetStage)) {
+      throw new Error("Choose a valid workflow stage.");
+    }
+    const { data: currentData, error: currentError } = await table("work_items")
+      .select("*").eq("id", itemId).eq("client_id", id).maybeSingle();
+    if (currentError) throw currentError;
+    if (!currentData) throw new Error("Work item not found in the selected client.");
+    const existing = currentData as WorkItem;
+    const blockerText = action === "block" ? asNullableText(payload.blockerText, 1600) : null;
+    const completionEvidenceUrl = payload.completionEvidenceUrl === undefined
+      ? null
+      : asHttpUrl(payload.completionEvidenceUrl);
+    const { data, error } = await getSupabaseAdminClient().rpc("transition_work_item", {
+      p_client_id: id,
+      p_item_id: itemId,
+      p_actor_user_id: actorUserId,
+      p_event_id: eventId,
+      p_action: action,
+      p_target_stage: isWorkflowStage(targetStage) ? targetStage : null,
+      p_expected_stage: existing.workflow_stage || null,
+      p_blocker_text: blockerText,
+      p_completion_evidence_url: completionEvidenceUrl,
+      p_share_with_client: payload.shareWithClient === true,
+    });
+    if (error) throw error;
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("The saved task was not returned; refresh before trying again.");
+    const next = data as WorkItem;
+    await safelyCreateWorkNotifications(next, existing, actorUserId, eventId);
+    await deliverSlackWorkNotification(await slackSourceForItem(next), next, existing, eventId);
+    return next;
+  } catch (error) {
+    throw workStorageError(error);
+  }
+}
+
 export async function createWorkReviewLink(
   clientId: string,
   actorUserId: string | null,
@@ -479,9 +639,10 @@ export async function createWorkReviewLink(
     if (channelId) await ensureChannelBelongsToClient(channelId, id);
     const itemId = asNullableText(payload.itemId, 80);
     if (itemId) {
-      const { data: item, error: itemError } = await table("work_items").select("id,channel_id").eq("id", itemId).eq("client_id", id).maybeSingle();
+      const { data: item, error: itemError } = await table("work_items").select("id,channel_id,client_visible").eq("id", itemId).eq("client_id", id).maybeSingle();
       if (itemError) throw itemError;
       if (!item) throw new Error("Work item does not belong to the selected client.");
+      if (!item.client_visible) throw new Error("Mark this work visible to the client before creating a client review link.");
       if (channelId && item.channel_id !== channelId) throw new Error("Work item does not belong to the selected channel.");
     }
     const label = asText(payload.label, 120) || "Client work review";
@@ -562,7 +723,7 @@ export async function getWorkReviewSnapshot(token: string): Promise<WorkReviewSn
     if (!client) throw new Error("Client workspace is unavailable.");
 
     let itemQuery = table("work_items")
-      .select("id,channel_id,title,now_text,next_text,blocker_text,owner_name,status,due_date,source_url,completion_evidence_url,updated_at")
+      .select("id,channel_id,title,now_text,next_text,blocker_text,owner_name,status,workflow_stage,due_date,source_url,completion_evidence_url,updated_at")
       .eq("client_id", linkData.client_id)
       .eq("client_visible", true)
       .order("updated_at", { ascending: false });
@@ -570,6 +731,25 @@ export async function getWorkReviewSnapshot(token: string): Promise<WorkReviewSn
     if (linkData.item_id) itemQuery = itemQuery.eq("id", linkData.item_id);
     const { data: items, error: itemError } = await itemQuery;
     if (itemError) throw itemError;
+    const itemIds = (items || []).map((item) => item.id);
+    const [{ data: comments, error: commentError }, { data: events, error: activityError }] = itemIds.length
+      ? await Promise.all([
+        table("work_item_comments").select("id,item_id,author_name,body,client_visible,created_at").in("item_id", itemIds).eq("client_visible", true).order("created_at", { ascending: true }),
+        table("work_item_events").select("id,item_id,client_id,action,after_json,created_at").in("item_id", itemIds).eq("client_id", linkData.client_id).in("action", ["routed", "status_changed", "evidence_added", "workflow_stage_changed"]).order("created_at", { ascending: true }),
+      ])
+      : [{ data: [], error: null }, { data: [], error: null }];
+    if (commentError) throw commentError;
+    if (activityError) throw activityError;
+    const commentsByItem = new Map<string, WorkItemComment[]>();
+    for (const comment of (comments || []) as WorkItemComment[]) commentsByItem.set(comment.item_id, [...(commentsByItem.get(comment.item_id) || []), comment]);
+    const activityByItem = new Map<string, WorkItemActivityEvent[]>();
+    for (const event of events || []) {
+      const summary = event.action === "status_changed" ? `Status changed to ${String(event.after_json?.status || "updated").replaceAll("_", " ")}`
+        : event.action === "workflow_stage_changed" ? `Moved to ${String(event.after_json?.workflow_stage || "a workflow stage").replaceAll("_", " ")}`
+        : event.action === "routed" ? "Added to this client workstream"
+        : "Completion proof added";
+      activityByItem.set(event.item_id, [...(activityByItem.get(event.item_id) || []), { id: event.id, action: event.action, summary, created_at: event.created_at, author_name: null }]);
+    }
     const channelById = new Map((channels || []).map((channel) => [channel.id, channel]));
     const selectedChannel = linkData.channel_id ? channelById.get(linkData.channel_id) || null : null;
 
@@ -581,6 +761,8 @@ export async function getWorkReviewSnapshot(token: string): Promise<WorkReviewSn
       items: (items || []).map((item) => ({
         ...item,
         channel_name: channelById.get(item.channel_id)?.name || "Work",
+        shared_comments: commentsByItem.get(item.id) || [],
+        shared_activity: activityByItem.get(item.id) || [],
       })) as WorkReviewSnapshot["items"],
     };
   } catch (error) {

@@ -40,3 +40,4 @@ revoke all on table public.seo_brain_contexts from anon, authenticated;
 revoke all on table public.seo_brain_reports from anon, authenticated;
 grant select, insert, update, delete on table public.seo_brain_contexts to service_role;
 grant select, insert, update, delete on table public.seo_brain_reports to service_role;
+;

@@ -1,7 +1,9 @@
 export const WORK_STATUSES = ["new", "in_progress", "blocked", "done", "needs_evidence", "unknown"] as const;
+export const WORKFLOW_STAGES = ["ready", "in_progress", "client_review", "done"] as const;
 export const WORK_SOURCE_KINDS = ["manual", "slack", "google_meet"] as const;
 
 export type WorkStatus = (typeof WORK_STATUSES)[number];
+export type WorkflowStage = (typeof WORKFLOW_STAGES)[number];
 export type WorkSourceKind = (typeof WORK_SOURCE_KINDS)[number];
 export const WORK_SLACK_NOTIFICATION_MODES = ["never", "completed", "completed_and_blocked"] as const;
 export type WorkSlackNotificationMode = (typeof WORK_SLACK_NOTIFICATION_MODES)[number];
@@ -22,6 +24,7 @@ export type WorkAutomationSource = {
   updated_at: string;
   slack_notification_mode: WorkSlackNotificationMode;
   slack_notification_thread_ts: string | null;
+  slack_activity_notifications_enabled?: boolean;
 };
 
 export type WorkChannel = {
@@ -49,6 +52,7 @@ export type WorkItem = {
   owner_name: string | null;
   owner_user_id: string | null;
   status: WorkStatus;
+  workflow_stage?: WorkflowStage | null;
   due_date: string | null;
   source_kind: WorkSourceKind;
   source_url: string | null;
@@ -124,6 +128,7 @@ export type WorkIngestItemInput = {
   automationReviewNeeded?: boolean;
   targetClientId?: string;
   targetChannelId?: string;
+  routingSuggestionClientId?: string;
 };
 
 export type WorkIngestBatch = {
@@ -169,12 +174,38 @@ export type WorkReviewSnapshot = {
       | "blocker_text"
       | "owner_name"
       | "status"
+      | "workflow_stage"
       | "due_date"
       | "source_url"
       | "completion_evidence_url"
       | "updated_at"
-    > & { channel_name: string }
+    > & { channel_name: string; shared_comments: WorkItemComment[]; shared_activity: WorkItemActivityEvent[] }
   >;
+};
+
+export type WorkItemComment = {
+  id: string;
+  item_id: string;
+  author_name: string;
+  body: string;
+  client_visible: boolean;
+  created_at: string;
+};
+
+export type WorkItemActivityEvent = {
+  id: string;
+  action: string;
+  summary: string;
+  created_at: string;
+  author_name: string | null;
+};
+
+export type WorkSlackDelivery = {
+  id: string;
+  kind: "intake" | "activity" | "completed" | "blocked";
+  status: "pending" | "sent" | "failed" | "uncertain";
+  error_text: string | null;
+  created_at: string;
 };
 
 export type WorkManagerSnapshot = {

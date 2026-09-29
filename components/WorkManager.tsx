@@ -3,8 +3,10 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Joyride, STATUS, type EventData, type Step, type TooltipRenderProps } from "react-joyride";
 import { previewChannels, previewItems, previewSources } from "@/lib/work-manager/preview";
+import { WorkItemActivity } from "@/components/WorkItemActivity";
 import type { WorkGuideProgress, WorkGuideStatus } from "@/lib/work-manager/guide";
-import type { WorkAssignableUser, WorkAutomationSource, WorkChannel, WorkItem, WorkRoutingClient, WorkStatus } from "@/lib/work-manager/types";
+import { WORKFLOW_STAGES, type WorkAssignableUser, type WorkAutomationSource, type WorkChannel, type WorkItem, type WorkRoutingClient, type WorkStatus, type WorkflowStage } from "@/lib/work-manager/types";
+import { nextWorkflowStage, statusForWorkflowStage, workflowBadgeLabel, workflowStageFor, workflowStageLabels } from "@/lib/work-manager/workflow";
 
 type WorkNotice = { type: "success" | "error" | "info"; message: string } | null;
 type QuickEditor = { itemId: string; kind: "complete" | "block" } | null;
@@ -76,10 +78,12 @@ function formatDue(value: string | null) {
 }
 
 function primaryAction(item: WorkItem) {
-  if (item.status === "done") return { label: "Reopen", status: "in_progress" as WorkStatus };
-  if (item.status === "blocked") return { label: "Resume", status: "in_progress" as WorkStatus };
-  if (item.status === "in_progress" || item.status === "needs_evidence") return { label: "Complete", status: "done" as WorkStatus };
-  return { label: "Start", status: "in_progress" as WorkStatus };
+  const stage = workflowStageFor(item);
+  if (item.status === "blocked" && !stage) return { label: "Place in Ready", stage: "ready" as const, transition: "move" as const };
+  if (item.status === "blocked") return { label: "Resume", stage, transition: "resume" as const };
+  if (stage === "done") return { label: "Reopen", stage: "in_progress" as const, transition: "move" as const };
+  const target = nextWorkflowStage(stage) || (stage === null ? "ready" : null);
+  return { label: target ? `Move to ${workflowStageLabels[target]}` : "Choose stage", stage: target, transition: "move" as const };
 }
 
 function proposedItem(item: WorkItem) {
@@ -131,6 +135,7 @@ function previewItemFromForm(clientId: string, item: WorkItem | null, formData: 
     created_at: item?.created_at || timestamp,
     updated_at: timestamp,
     completed_at: status === "done" ? item?.completed_at || timestamp : null,
+    workflow_stage: item?.workflow_stage || (status === "new" ? "ready" : status === "in_progress" ? "in_progress" : status === "done" ? "done" : null),
   };
 }
 
@@ -175,6 +180,9 @@ export function WorkManager({
   const [showDismissed, setShowDismissed] = useState(false);
   const [queueFilter, setQueueFilter] = useState<QueueFilter>("all");
   const [sourceSettingsId, setSourceSettingsId] = useState<string | null>(null);
+  const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
+  const [pendingStageMove, setPendingStageMove] = useState<WorkflowStage | null>(null);
+  const [shareOnReview, setShareOnReview] = useState(false);
 
   const guideSteps = useMemo<Step[]>(() => [
     {
@@ -279,6 +287,10 @@ export function WorkManager({
       setRoutingClients(routingBody.clients);
       const requestedItemId = new URLSearchParams(window.location.search).get("item");
       const requestedItem = itemBody.items.find((item) => item.id === requestedItemId);
+      if (requestedItem) {
+        setFocusedItemId(requestedItem.id);
+        setQueueFilter("all");
+      }
       setSelectedChannelId((current) =>
         requestedItem?.channel_id || (current && channelBody.channels.some((channel) => channel.id === current)
           ? current
@@ -426,8 +438,11 @@ export function WorkManager({
     if (loading) return;
     const itemId = new URLSearchParams(window.location.search).get("item");
     const item = items.find((candidate) => candidate.id === itemId);
-    if (item) openEditItem(item);
-    // Open once when a notification deep link resolves.
+    if (item) {
+      setFocusedItemId(item.id);
+      setSelectedChannelId(item.channel_id);
+    }
+    // Open the issue view once its deep link has resolved.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
 
@@ -435,7 +450,11 @@ export function WorkManager({
     const handleOpenItem = (event: Event) => {
       const itemId = (event as CustomEvent<{ itemId?: string }>).detail?.itemId;
       const item = items.find((candidate) => candidate.id === itemId);
-      if (item) openEditItem(item);
+      if (item) {
+        setFocusedItemId(item.id);
+        setSelectedChannelId(item.channel_id);
+        setQueueFilter("all");
+      }
     };
     window.addEventListener("work-manager:open-item", handleOpenItem);
     return () => window.removeEventListener("work-manager:open-item", handleOpenItem);
@@ -443,6 +462,28 @@ export function WorkManager({
   }, [items]);
 
   const selectedChannel = channels.find((channel) => channel.id === selectedChannelId) || null;
+  const focusedItem = items.find((item) => item.id === focusedItemId) || null;
+
+  useEffect(() => {
+    if (!focusedItemId) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setFocusedItemId(null);
+      setPendingStageMove(null);
+      setShareOnReview(false);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("item");
+      window.history.replaceState({}, "", url);
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [focusedItemId]);
+
   const selectedSources = sources.filter((source) => source.channel_id === selectedChannelId && source.active);
   const visibleItems = useMemo(() => {
     const scoped = items.filter((item) => !selectedChannelId || item.channel_id === selectedChannelId);
@@ -452,17 +493,18 @@ export function WorkManager({
       if (queueFilter === "attention") return item.status === "blocked" || item.status === "needs_evidence" || item.automation_review_needed;
       if (queueFilter === "unassigned") return !item.owner_user_id && !item.owner_name;
       if (queueFilter === "due_soon") return Boolean(item.due_date && item.due_date <= soon && item.status !== "done");
-      if (queueFilter === "in_progress") return item.status === "in_progress";
+      if (queueFilter === "in_progress") return workflowStageFor(item) === "in_progress" || workflowStageFor(item) === "client_review";
       if (queueFilter === "blocked") return item.status === "blocked";
       if (queueFilter === "done") return item.status === "done";
       return true;
     });
   }, [items, selectedChannelId, queueFilter]);
-  const activeCount = visibleItems.filter((item) => item.status === "in_progress" || item.status === "new").length;
+  const activeCount = visibleItems.filter((item) => item.status !== "blocked" && (workflowStageFor(item) === "in_progress" || workflowStageFor(item) === "client_review")).length;
   const blockedCount = visibleItems.filter((item) => item.status === "blocked").length;
   const evidenceCount = visibleItems.filter((item) => item.status === "needs_evidence").length;
 
   function openNewItem() {
+    setFocusedItemId(null);
     setEditingItem(null);
     setEditorOpen(true);
     setShareFormOpen(false);
@@ -472,12 +514,33 @@ export function WorkManager({
   }
 
   function openEditItem(item: WorkItem) {
+    setFocusedItemId(null);
     setEditingItem(item);
     setSelectedChannelId(item.channel_id);
     setEditorOpen(true);
     setShareFormOpen(false);
     setNotice(null);
     setQuickEditor(null);
+  }
+
+  function closeIssueView() {
+    setFocusedItemId(null);
+    setPendingStageMove(null);
+    setShareOnReview(false);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("item");
+    window.history.replaceState({}, "", url);
+  }
+
+  function openIssueView(item: WorkItem) {
+    setFocusedItemId(item.id);
+    setSelectedChannelId(item.channel_id);
+    setQueueFilter("all");
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", "work");
+    url.searchParams.set("client", item.client_id);
+    url.searchParams.set("item", item.id);
+    window.history.pushState({}, "", url);
   }
 
   function openAutomationProposal(item: WorkItem) {
@@ -491,14 +554,23 @@ export function WorkManager({
       let saved: WorkItem;
       if (preview) {
         const timestamp = new Date().toISOString();
-        const status = (payload.status as WorkStatus | undefined) || item.status;
+        const isTransition = payload.action === "transition";
+        const action = String(payload.transition || "");
+        const stage = payload.workflowStage as WorkflowStage | undefined;
+        const status = isTransition
+          ? action === "block" ? "blocked" as WorkStatus
+            : action === "resume" ? statusForWorkflowStage(workflowStageFor(item) || "in_progress")
+              : stage ? statusForWorkflowStage(stage) : item.status
+          : (payload.status as WorkStatus | undefined) || item.status;
         saved = {
           ...item,
           status,
-          blocker_text: payload.blockerText === undefined ? item.blocker_text : String(payload.blockerText || "").trim() || null,
+          workflow_stage: isTransition && action === "move" ? stage || item.workflow_stage || null : item.workflow_stage,
+          blocker_text: action === "resume" || (isTransition && action === "move") ? null : payload.blockerText === undefined ? item.blocker_text : String(payload.blockerText || "").trim() || null,
           completion_evidence_url: payload.completionEvidenceUrl === undefined
             ? item.completion_evidence_url
             : String(payload.completionEvidenceUrl || "").trim() || null,
+          client_visible: payload.shareWithClient === true ? true : item.client_visible,
           automation_review_needed: false,
           updated_by_user_id: "preview-user",
           updated_at: timestamp,
@@ -513,6 +585,8 @@ export function WorkManager({
       }
       setItems((current) => current.map((currentItem) => currentItem.id === saved.id ? saved : currentItem));
       setQuickEditor(null);
+      setPendingStageMove(null);
+      setShareOnReview(false);
       setNotice({ type: "success", message });
     } catch (error) {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to update this work." });
@@ -523,15 +597,25 @@ export function WorkManager({
 
   async function usePrimaryAction(item: WorkItem) {
     const action = primaryAction(item);
-    if (action.status === "done") {
+    if (action.transition === "resume") {
+      await updateItemQuickly(item, { action: "transition", transition: "resume", operationId: crypto.randomUUID() }, `${item.title} is back in ${workflowStageLabels[action.stage || "in_progress"]}.`);
+      return;
+    }
+    if (action.stage === "done") {
+      openIssueView(item);
       setQuickEditor({ itemId: item.id, kind: "complete" });
       return;
     }
-    await updateItemQuickly(
-      item,
-      { status: action.status, ...(item.status === "blocked" ? { blockerText: "" } : {}) },
-      `${item.title} is now in progress.`
-    );
+    if (action.stage === "client_review" && !item.client_visible) {
+      setPendingStageMove("client_review");
+      openIssueView(item);
+      return;
+    }
+    if (action.stage) await updateItemQuickly(item, { action: "transition", transition: "move", workflowStage: action.stage, operationId: crypto.randomUUID() }, `${item.title} moved to ${workflowStageLabels[action.stage]}.`);
+  }
+
+  async function moveItemToStage(item: WorkItem, stage: WorkflowStage, shareWithClient = false, completionEvidenceUrl?: string) {
+    await updateItemQuickly(item, { action: "transition", transition: "move", workflowStage: stage, shareWithClient, completionEvidenceUrl, operationId: crypto.randomUUID() }, `${item.title} moved to ${workflowStageLabels[stage]}.`);
   }
 
   async function submitQuickAction(event: FormEvent<HTMLFormElement>, item: WorkItem) {
@@ -543,7 +627,7 @@ export function WorkManager({
         setNotice({ type: "error", message: "Add a proof link before marking this Done." });
         return;
       }
-      await updateItemQuickly(item, { status: "done", completionEvidenceUrl }, `${item.title} is Done, with proof attached.`);
+      await moveItemToStage(item, "done", false, completionEvidenceUrl);
       return;
     }
     const blockerText = String(formData.get("blockerText") || "").trim();
@@ -551,7 +635,7 @@ export function WorkManager({
       setNotice({ type: "error", message: "Say what would unblock this work." });
       return;
     }
-    await updateItemQuickly(item, { status: "blocked", blockerText }, `${item.title} is marked Blocked.`);
+    await updateItemQuickly(item, { action: "transition", transition: "block", blockerText, operationId: crypto.randomUUID() }, `${item.title} is marked Blocked.`);
   }
 
   async function saveChannel(event: FormEvent<HTMLFormElement>) {
@@ -666,10 +750,10 @@ export function WorkManager({
     const data = new FormData(form);
     try {
       setSaving(true);
-      const payload = { slackNotificationMode: String(data.get("slackNotificationMode") || "never"), slackNotificationThreadTs: String(data.get("slackNotificationThreadTs") || "") };
-      const updated = preview ? { ...source, slack_notification_mode: payload.slackNotificationMode as WorkAutomationSource["slack_notification_mode"], slack_notification_thread_ts: payload.slackNotificationThreadTs || null } : (await workApi<{ source: WorkAutomationSource }>(clientId, `/api/work-manager/sources/${source.id}`, { method: "PATCH", body: JSON.stringify(payload) })).source;
+      const payload = { slackNotificationMode: String(data.get("slackNotificationMode") || "never"), slackNotificationThreadTs: String(data.get("slackNotificationThreadTs") || ""), slackActivityNotificationsEnabled: data.get("slackActivityNotificationsEnabled") === "on" };
+      const updated = preview ? { ...source, slack_notification_mode: payload.slackNotificationMode as WorkAutomationSource["slack_notification_mode"], slack_notification_thread_ts: payload.slackNotificationThreadTs || null, slack_activity_notifications_enabled: payload.slackActivityNotificationsEnabled } : (await workApi<{ source: WorkAutomationSource }>(clientId, `/api/work-manager/sources/${source.id}`, { method: "PATCH", body: JSON.stringify(payload) })).source;
       setSources((current) => current.map((candidate) => candidate.id === source.id ? updated : candidate));
-      setNotice({ type: "success", message: "Slack completion updates saved. No post is sent until a matching status transition occurs." });
+      setNotice({ type: "success", message: payload.slackActivityNotificationsEnabled || payload.slackNotificationMode !== "never" ? "Slack activity updates saved. New comments are never copied into Slack; each post links back to the task." : "Slack activity updates are off. No additional status or comment posts will be sent." });
     } catch (error) {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to save Slack notification settings." });
     } finally {
@@ -681,9 +765,14 @@ export function WorkManager({
     event.preventDefault();
     const form = event.currentTarget;
     const formData = new FormData(form);
-    const status = String(formData.get("status") || "new") as WorkStatus;
+    const status = (editingItem?.status || "new") as WorkStatus;
     const completionEvidenceUrl = String(formData.get("completionEvidenceUrl") || "").trim();
     const blockerText = String(formData.get("blockerText") || "").trim();
+    const dueDate = String(formData.get("dueDate") || "").trim();
+    if (!editingItem && !dueDate) {
+      setNotice({ type: "error", message: "Add a due date so everyone knows when this work is needed." });
+      return;
+    }
     if (status === "done" && !completionEvidenceUrl) {
       setNotice({ type: "error", message: "Add completion proof before marking this Done." });
       return;
@@ -704,7 +793,7 @@ export function WorkManager({
         ownerName: String(formData.get("ownerName") || ""),
         ownerUserId: String(formData.get("ownerUserId") || ""),
         status,
-        dueDate: String(formData.get("dueDate") || ""),
+        dueDate,
         sourceUrl: String(formData.get("sourceUrl") || ""),
         completionEvidenceUrl,
         clientVisible: formData.get("clientVisible") === "on",
@@ -779,7 +868,7 @@ export function WorkManager({
     try {
       setSaving(true);
       if (preview) {
-        setItemReviewUrls((current) => ({ ...current, [item.id]: `${window.location.origin}/review/preview` }));
+        setItemReviewUrls((current) => ({ ...current, [item.id]: `${window.location.origin}/review/preview?item=${encodeURIComponent(item.id)}` }));
       } else {
         const body = await workApi<{ token: string }>(clientId, "/api/work-manager/review-links", {
           method: "POST",
@@ -792,6 +881,17 @@ export function WorkManager({
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to create work-order link." });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function copyItemReviewLink(itemId: string) {
+    const url = itemReviewUrls[itemId];
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setNotice({ type: "success", message: "Client link copied." });
+    } catch {
+      setNotice({ type: "info", message: "Your browser could not copy the link; use Open client view instead." });
     }
   }
 
@@ -869,7 +969,7 @@ export function WorkManager({
         <div data-tone={evidenceCount ? "warn" : "neutral"}><span>Proof needed</span><strong>{evidenceCount}</strong></div>
       </section>
 
-      <div className="work-manager-layout">
+      <div className="work-manager-layout" data-focused={Boolean(focusedItem)}>
         <aside className="work-channel-panel" data-work-guide="channels" aria-label="Client work channels">
           <div className="work-panel-heading">
             <div><span className="eyebrow">Channels</span><h3>Workstreams</h3></div>
@@ -910,7 +1010,7 @@ export function WorkManager({
                 <div className="work-source-route" key={source.id}>
                   <span aria-hidden="true">{source.source_kind === "slack" ? "#" : "◉"}</span>
                   <span><strong>{source.display_name}</strong><small>{source.source_kind === "slack" ? "Slack" : "Google Meet"} → {selectedChannel.name}{source.last_ingested_at ? ` · Seen ${formatUpdated(source.last_ingested_at)}` : " · Waiting for first update"}</small></span>
-                  {source.source_kind === "slack" && canEdit ? <div className="work-source-settings"><button className="work-text-button" type="button" onClick={() => setSourceSettingsId(sourceSettingsId === source.id ? null : source.id)}>{sourceSettingsId === source.id ? "Hide settings" : "Configure Slack updates"}</button>{sourceSettingsId === source.id ? <form className="work-source-notifications" onSubmit={(event) => { event.preventDefault(); void updateSourceNotifications(source, event.currentTarget); }}><p>Off by default. When enabled, only a transition into Completed or Blocked can post to Slack.</p><label>Completion posts<select name="slackNotificationMode" defaultValue={source.slack_notification_mode || "never"}><option value="never">Never</option><option value="completed">Completed only</option><option value="completed_and_blocked">Completed and blocked</option></select></label><label>Optional thread timestamp<input name="slackNotificationThreadTs" defaultValue={source.slack_notification_thread_ts || ""} placeholder="Leave blank for a new channel post" /></label><button className="button button-primary" type="submit" disabled={saving}>Save Slack settings</button></form> : null}</div> : null}
+                  {source.source_kind === "slack" && canEdit ? <div className="work-source-settings"><button className="work-text-button" type="button" onClick={() => setSourceSettingsId(sourceSettingsId === source.id ? null : source.id)}>{sourceSettingsId === source.id ? "Hide settings" : "Configure Slack updates"}</button>{sourceSettingsId === source.id ? <form className="work-source-notifications" onSubmit={(event) => { event.preventDefault(); void updateSourceNotifications(source, event.currentTarget); }}><p>New task links are always acknowledged. Further activity is off by default. Enabled posts stay in the task’s Slack thread and contain a link, never comment text.</p><label>Completion posts<select name="slackNotificationMode" defaultValue={source.slack_notification_mode || "never"}><option value="never">Never</option><option value="completed">Completed only</option><option value="completed_and_blocked">Completed and blocked</option></select></label><label className="work-activity-share"><input name="slackActivityNotificationsEnabled" type="checkbox" defaultChecked={source.slack_activity_notifications_enabled === true} /> Post routing and comment activity links</label><label>Optional Slack thread timestamp<input name="slackNotificationThreadTs" defaultValue={source.slack_notification_thread_ts || ""} placeholder="Leave blank to reply in each task’s source thread" /></label><button className="button button-primary" type="submit" disabled={saving}>Save Slack settings</button></form> : null}</div> : null}
                 </div>
               )) : <p>No automation source is routed here yet.</p>}
               {sourceFormOpen ? (
@@ -960,6 +1060,7 @@ export function WorkManager({
             <form className="work-quick-panel" onSubmit={routeItem}>
               <strong>Assign client and workstream</strong>
               <p>{routingItem.title}</p>
+              {routingItem.source_snapshot_json?.routingSuggestionClientId ? <p className="work-routing-help" role="status">Client name recognized: {routingClients.find((client) => client.id === routingItem.source_snapshot_json?.routingSuggestionClientId)?.name || "suggested client"}. Confirm the right workstream before routing.</p> : null}
               <label>Client<select name="targetClientId" value={routingClientId} onChange={(event) => setRoutingClientId(event.target.value)} required><option value="">Choose a client</option>{routingClients.map((client) => <option key={client.id} value={client.id} disabled={!client.channels.length}>{client.name}{client.channels.length ? "" : " — no workstreams yet"}</option>)}</select></label>
               <label>Workstream<select name="targetChannelId" defaultValue="" required disabled={!routingClients.find((client) => client.id === routingClientId)?.channels.length}><option value="">{routingClientId && !routingClients.find((client) => client.id === routingClientId)?.channels.length ? "This client needs a workstream" : "Choose a workstream"}</option>{(routingClients.find((client) => client.id === routingClientId)?.channels || []).map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}</select></label>
               {routingClientId && !routingClients.find((client) => client.id === routingClientId)?.channels.length ? <p className="work-routing-help">This client has no active workstreams. Choose another client or create a workstream from that client’s Work Manager page first.</p> : null}
@@ -988,57 +1089,111 @@ export function WorkManager({
           ) : null}
 
           {!loading && visibleItems.length ? (
-            <div className="work-item-list" role="list">
-              {visibleItems.map((item) => (
-                <article className="work-item-row" data-status={item.status} key={item.id} role="listitem">
-                  <header>
-                  <div className="work-item-title"><span className="work-status" data-status={item.status}>{statusLabels[item.status]}</span><h4>{item.title}</h4>{!item.owner_user_id && !item.owner_name ? <span className="work-unassigned-label">Internal · owner to confirm</span> : null}</div>
-                    <div className="work-item-owner"><strong>{item.owner_name || "Owner to confirm"}</strong><span>{formatDue(item.due_date)}</span></div>
-                  </header>
-                  <div className="work-handoff">
-                    <section><span>Now</span><p>{item.now_text || "No current update yet."}</p></section>
-                    <span className="work-handoff-arrow" aria-hidden="true">→</span>
-                    <section><span>Next</span><p>{item.next_text || "The next step has not been confirmed."}</p></section>
-                  </div>
-                  {item.blocker_text ? <p className="work-blocker"><strong>What would unblock this:</strong> {item.blocker_text}</p> : null}
-                  {item.automation_review_needed ? (
-                    <div className="work-automation-review" role="status">
-                      <span><strong>New source update</strong>The automation found a change and kept the human update in place.</span>
-                      {canEdit ? <button className="work-text-button" type="button" onClick={() => openAutomationProposal(item)}>Review suggestion</button> : null}
+            <div className="work-stage-board">
+              {visibleItems.some((item) => !workflowStageFor(item)) ? <section className="work-unplaced" aria-labelledby="work-unplaced-title">
+                <div><span className="eyebrow">Needs placement</span><h4 id="work-unplaced-title">Choose a stage for older work</h4><p>These tasks are kept visible because their original step could not be safely recovered.</p></div>
+                <div className="work-unplaced-list">{visibleItems.filter((item) => !workflowStageFor(item)).map((item) => <article className="work-stage-card" data-status={item.status} key={item.id}>
+                  <span className="work-status" data-status={item.status}>{workflowBadgeLabel(item)}</span>
+                  <button className="work-stage-card-title" type="button" onClick={() => openIssueView(item)}>{item.title}</button>
+                  <small>{item.owner_name || "Owner to confirm"} · {formatDue(item.due_date)}</small>
+                    {canEdit ? <button className="button button-primary" type="button" disabled={saving} onClick={() => void moveItemToStage(item, "ready")}>Place in Ready</button> : null}
+                </article>)}</div>
+              </section> : null}
+              <div className="work-stage-columns" aria-label="Workflow stages">
+                {WORKFLOW_STAGES.map((stage, stageIndex) => {
+                  const stageItems = visibleItems.filter((item) => workflowStageFor(item) === stage);
+                  return <section className="work-stage-column" data-stage={stage} key={stage} aria-labelledby={`work-stage-${stage}`}>
+                    <header><div><h4 id={`work-stage-${stage}`}>{workflowStageLabels[stage]}</h4><span>{stageItems.length}</span></div><small>{stageIndex === 0 ? "Ready to begin" : stageIndex === 1 ? "Work is moving" : stageIndex === 2 ? "Waiting for client" : "Finished"}</small></header>
+                    <div className="work-stage-card-list" role="list">
+                      {stageItems.map((item) => {
+                        const nextStage = nextWorkflowStage(stage);
+                        const action = primaryAction(item);
+                        return <article className="work-stage-card" data-status={item.status} key={item.id} role="listitem">
+                          <div className="work-stage-card-flags"><span className="work-status" data-status={item.status}>{workflowBadgeLabel(item)}</span>{item.automation_review_needed ? <span className="work-stage-review-flag">Review update</span> : null}</div>
+                          <button className="work-stage-card-title" type="button" onClick={() => openIssueView(item)}>{item.title}</button>
+                          <p>{item.next_text || "Next step needs to be confirmed."}</p>
+                          {item.blocker_text ? <p className="work-stage-blocker"><strong>Blocked:</strong> {item.blocker_text}</p> : null}
+                          <footer><span>{item.owner_name || "Owner to confirm"}</span><span>{formatDue(item.due_date)}</span></footer>
+                          <div className="work-stage-card-actions">
+                            {showDismissed ? <button className="button button-primary" type="button" disabled={saving} onClick={() => changeDismissal(item, true)}>Restore</button> : <>
+                              {canEdit && item.status !== "done" ? <button className="button" type="button" disabled={saving || item.status === "blocked"} onClick={() => { openIssueView(item); setQuickEditor({ itemId: item.id, kind: "block" }); }}>Block</button> : null}
+                              {canEdit ? <button className="button button-primary" type="button" disabled={saving} onClick={() => void usePrimaryAction(item)}>{action.label}{nextStage && action.stage === nextStage ? " →" : ""}</button> : null}
+                            </>}
+                            <button className="work-text-button" type="button" onClick={() => openIssueView(item)}>Open task</button>
+                          </div>
+                        </article>;
+                      })}
+                      {!stageItems.length ? <div className="work-stage-empty">{stage === "ready" ? "New tasks land here." : "Nothing here yet."}</div> : null}
                     </div>
-                  ) : null}
-                  <footer>
-                    <span>Updated {formatUpdated(item.updated_at)}</span>
-                    <span>{item.client_visible ? "Visible in client review" : "Internal only"}</span>
-                    {item.source_url ? <a href={item.source_url} target="_blank" rel="noreferrer">Source</a> : null}
-                    {canEdit ? (
-                      <div className="work-quick-actions" aria-label={`Actions for ${item.title}`}>
-                        {showDismissed ? <button className="button button-primary" type="button" disabled={saving} onClick={() => changeDismissal(item, true)}>Restore</button> : <>
-                          <button className="button button-primary" type="button" disabled={saving} onClick={() => usePrimaryAction(item)}>{primaryAction(item).label}</button>
-                          {item.status !== "blocked" && item.status !== "done" ? <button className="button" type="button" disabled={saving} onClick={() => setQuickEditor({ itemId: item.id, kind: "block" })}>Block</button> : null}
-                          <details className="work-more-actions"><summary>More</summary><div><button className="work-text-button" type="button" disabled={saving} onClick={() => openEditItem(item)}>Details</button><button className="work-text-button" type="button" disabled={saving} onClick={() => { setRoutingItem(item); setRoutingClientId(routingClients.find((client) => client.channels.length)?.id || ""); }}>Assign client</button><button className="work-text-button" type="button" disabled={saving} onClick={() => void createItemReviewLink(item)}>Create client link</button><button className="work-text-button" type="button" disabled={saving} onClick={() => changeDismissal(item)}>Dismiss</button></div></details>
-                        </>}
-                      </div>
-                    ) : null}
-                  </footer>
-                  {itemReviewUrls[item.id] ? <div className="work-item-link-result" role="status"><span>Client-first work-order link</span><input readOnly value={itemReviewUrls[item.id]} onFocus={(event) => event.currentTarget.select()} /><button className="button" type="button" onClick={() => navigator.clipboard.writeText(itemReviewUrls[item.id])}>Copy</button><a className="button" href={itemReviewUrls[item.id]} target="_blank" rel="noreferrer">Open</a></div> : null}
-                  {quickEditor?.itemId === item.id ? (
-                    <form className="work-quick-panel" onSubmit={(event) => submitQuickAction(event, item)}>
-                      <label>
-                        <span>{quickEditor.kind === "complete" ? "Paste the completion proof" : "What would unblock this?"}</span>
-                        {quickEditor.kind === "complete"
-                          ? <input autoFocus name="completionEvidenceUrl" type="url" placeholder="https://…" required />
-                          : <input autoFocus name="blockerText" maxLength={1600} placeholder="One clear sentence" required />}
-                      </label>
-                      <div><button className="button button-primary" type="submit" disabled={saving}>{saving ? "Saving…" : quickEditor.kind === "complete" ? "Mark Done" : "Mark Blocked"}</button><button className="button" type="button" disabled={saving} onClick={() => setQuickEditor(null)}>Cancel</button></div>
-                    </form>
-                  ) : null}
-                </article>
-              ))}
+                  </section>;
+                })}
+              </div>
             </div>
           ) : null}
         </section>
       </div>
+
+      {focusedItem && !editorOpen ? <div className="work-issue-drawer-scrim" role="presentation" onClick={closeIssueView}>
+        <section className="work-issue-detail" role="dialog" aria-modal="true" aria-labelledby="work-issue-title" onClick={(event) => event.stopPropagation()}>
+          <nav className="work-issue-breadcrumbs" aria-label="Breadcrumb">
+            <span>Work Manager</span><span aria-hidden="true">/</span><span>{clientName}</span><span aria-hidden="true">/</span><span>{selectedChannel?.name || "Work item"}</span>
+          </nav>
+          <div className="work-issue-toolbar">
+            <div><span className="work-issue-key">{focusedItem.source_kind === "slack" ? "SLACK TASK" : "WORK ITEM"}</span><span className="work-status" data-status={focusedItem.status}>{workflowBadgeLabel(focusedItem)}</span></div>
+            <div className="work-issue-toolbar-actions">
+              <button className="button" type="button" disabled={!canEdit || saving} onClick={() => void createItemReviewLink(focusedItem)}>Share client view</button>
+              {canEdit ? <button className="button" type="button" disabled={saving} onClick={() => openEditItem(focusedItem)}>Edit details</button> : null}
+              <button className="work-text-button work-issue-close" type="button" aria-label="Close task details" autoFocus onClick={closeIssueView}>Close</button>
+            </div>
+          </div>
+          {itemReviewUrls[focusedItem.id] ? <div className="work-issue-share-result" role="status"><span>Client link ready</span><a href={itemReviewUrls[focusedItem.id]} target="_blank" rel="noreferrer">Open client view</a><button type="button" className="work-text-button" onClick={() => void copyItemReviewLink(focusedItem.id)}>Copy link</button></div> : null}
+          <section className="work-issue-workflow" aria-label="Task workflow">
+            <div className="work-issue-stage-track" aria-label={`Current stage: ${workflowStageFor(focusedItem) ? workflowStageLabels[workflowStageFor(focusedItem)!] : "Needs placement"}`}>
+              {WORKFLOW_STAGES.map((stage, index) => <div data-current={workflowStageFor(focusedItem) === stage} data-complete={Boolean(workflowStageFor(focusedItem) && WORKFLOW_STAGES.indexOf(workflowStageFor(focusedItem)!) > index)} key={stage}><span>{workflowStageFor(focusedItem) && WORKFLOW_STAGES.indexOf(workflowStageFor(focusedItem)!) > index ? "✓" : index + 1}</span><strong>{workflowStageLabels[stage]}</strong></div>)}
+            </div>
+            {pendingStageMove === "client_review" ? <div className="work-stage-share-confirm" role="group" aria-label="Client Review sharing choice">
+              <div><strong>Share this task in Client Review?</strong><p>Only the task fields and comments already marked client-visible will be shown.</p></div>
+              <label><input type="checkbox" checked={shareOnReview} onChange={(event) => setShareOnReview(event.target.checked)} /> Make this task visible to the client</label>
+              <div><button className="button button-primary" type="button" disabled={saving || !shareOnReview} onClick={() => void moveItemToStage(focusedItem, "client_review", true)}>Share and move</button><button className="button" type="button" disabled={saving} onClick={() => { setPendingStageMove(null); setShareOnReview(false); }}>Cancel</button></div>
+            </div> : <div className="work-issue-stage-actions">
+              {workflowStageFor(focusedItem) ? <span>{workflowStageLabels[workflowStageFor(focusedItem)!]}{focusedItem.status === "blocked" ? " · Blocked" : ""}</span> : <span>Choose where this task belongs.</span>}
+              {canEdit ? <button className="button button-primary" type="button" disabled={saving} onClick={() => void usePrimaryAction(focusedItem)}>{primaryAction(focusedItem).label}{workflowStageFor(focusedItem) && nextWorkflowStage(workflowStageFor(focusedItem)) ? " →" : ""}</button> : null}
+              {canEdit && focusedItem.status !== "blocked" && focusedItem.status !== "done" ? <button className="button" type="button" disabled={saving} onClick={() => setQuickEditor({ itemId: focusedItem.id, kind: "block" })}>Block</button> : null}
+            </div>}
+          </section>
+          {quickEditor?.itemId === focusedItem.id ? <form className="work-quick-panel work-issue-quick-panel" onSubmit={(event) => submitQuickAction(event, focusedItem)}>
+            <label><span>{quickEditor.kind === "complete" ? "Add the proof link to finish this task" : "What would unblock this task?"}</span>{quickEditor.kind === "complete" ? <input autoFocus name="completionEvidenceUrl" type="url" placeholder="https://…" required /> : <input autoFocus name="blockerText" maxLength={1600} placeholder="One clear sentence" required />}</label>
+            <div><button className="button button-primary" type="submit" disabled={saving}>{saving ? "Saving…" : quickEditor.kind === "complete" ? "Move to Done" : "Mark Blocked"}</button><button className="button" type="button" disabled={saving} onClick={() => setQuickEditor(null)}>Cancel</button></div>
+          </form> : null}
+          <div className="work-issue-body">
+            <main className="work-issue-main">
+              <header className="work-issue-title-block"><span className="eyebrow">{focusedItem.source_kind === "slack" ? "Created from Slack" : "Work item"}</span><h2 id="work-issue-title">{focusedItem.title}</h2></header>
+              <section className="work-issue-description" aria-label="Work description">
+                <div><h3>What is happening</h3><p>{focusedItem.now_text || "No update has been added yet."}</p></div>
+                <div><h3>What happens next</h3><p>{focusedItem.next_text || "The next step has not been confirmed."}</p></div>
+                {focusedItem.blocker_text ? <div data-tone="warn"><h3>What is blocking this</h3><p>{focusedItem.blocker_text}</p></div> : null}
+              </section>
+              <section className="work-issue-activity" aria-labelledby="work-issue-activity-title">
+                <h3 id="work-issue-activity-title">Activity</h3>
+                <WorkItemActivity itemId={focusedItem.id} clientId={clientId} canEdit={canEdit} preview={preview} defaultOpen showToggle={false} />
+              </section>
+            </main>
+            <aside className="work-issue-sidebar" aria-label="Task details">
+              <div className="work-issue-sidebar-heading"><h3>Details</h3>{canEdit ? <button className="work-text-button" type="button" disabled={saving} onClick={() => openEditItem(focusedItem)}>Edit</button> : null}</div>
+              <dl className="work-issue-fields">
+                <div><dt>Client</dt><dd>{clientName}</dd></div>
+                <div><dt>Workstream</dt><dd>{selectedChannel?.name || "Unassigned"}</dd></div>
+                <div><dt>Stage</dt><dd>{workflowStageFor(focusedItem) ? workflowStageLabels[workflowStageFor(focusedItem)!] : "Needs placement"}</dd></div>
+                <div><dt>Due date</dt><dd>{formatDue(focusedItem.due_date)}</dd></div>
+                <div><dt>Owner</dt><dd>{focusedItem.owner_name || "Unassigned"}</dd></div>
+                <div><dt>Visibility</dt><dd>{focusedItem.client_visible ? "Client view" : "Internal only"}</dd></div>
+              </dl>
+              <div className="work-issue-source"><strong>{focusedItem.source_kind === "slack" ? "Slack source" : "Source"}</strong>{focusedItem.source_url ? <a href={focusedItem.source_url} target="_blank" rel="noreferrer">Open source ↗</a> : <span>No source link</span>}</div>
+              <div className="work-issue-created"><span>Created</span><strong>{formatUpdated(focusedItem.created_at)}</strong></div>
+            </aside>
+          </div>
+        </section>
+      </div> : null}
     </div>
   );
 }
@@ -1120,8 +1275,8 @@ function WorkItemForm({
         <label>Channel<select name="channelId" defaultValue={editingItem?.channel_id || selectedChannelId} required>{channels.map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}</select></label>
         <label>Person responsible<select name="ownerUserId" defaultValue={editingItem?.owner_user_id || ""}><option value="">Not assigned to a login</option>{assignableUsers.map((user) => <option key={user.id} value={user.id}>{user.email}</option>)}</select></label>
         <label>Team or display name<input name="ownerName" defaultValue={editingItem?.owner_name || ""} placeholder="Optional team name" maxLength={120} /></label>
-        <label>Status<select name="status" defaultValue={editingItem?.status || "new"}>{statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <label>Due date<input name="dueDate" type="date" defaultValue={editingItem?.due_date || ""} /></label>
+        <label>Workflow stage<input readOnly value={editingItem ? workflowStageFor(editingItem) ? workflowStageLabels[workflowStageFor(editingItem)!] : "Needs placement" : "Ready"} /><small>Move stages from the board or task view; each move saves to the activity timeline.</small></label>
+        <label>Due date<input name="dueDate" type="date" defaultValue={editingItem?.due_date || ""} required={!editingItem} /><small>{editingItem ? "Keep the promised date current." : "Required so the handoff has a clear deadline."}</small></label>
         <label className="work-form-wide">What is happening now?<textarea name="nowText" defaultValue={editingItem?.now_text || ""} rows={3} placeholder="Use a sentence a teammate or client can understand without context." /></label>
         <label className="work-form-wide">What happens next?<textarea name="nextText" defaultValue={editingItem?.next_text || ""} rows={3} placeholder="Name the next observable handoff or decision." /></label>
         <label className="work-form-wide">Blocker or decision needed<textarea name="blockerText" defaultValue={editingItem?.blocker_text || ""} rows={2} placeholder="Required when status is Blocked." /></label>

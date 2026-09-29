@@ -13,11 +13,12 @@ import { createReviewToken, hashReviewToken, normalizeWorkItemInput, slugifyWork
 import type { WorkItem } from "../lib/work-manager/types";
 import { notificationReason, plannedNotificationKinds } from "../lib/work-manager/notifications";
 import { normalizeWorkGuideUpdate } from "../lib/work-manager/guide";
-import { normalizeSlackCandidates } from "../lib/work-manager/intake";
+import { buildMissingTaskDetailsPrompt, findRoutingMatch, missingTaskDetails, normalizeSlackCandidates } from "../lib/work-manager/intake";
 import { isValidMeetingDocExportRequest, toMeetingDocItem } from "../lib/work-manager/meeting-docs";
 import { isValidSlackSignature, normalizeSlackTaskEvent } from "../lib/work-manager/slack-events";
 import { extractDueDate } from "../lib/work-manager/due-dates";
 import { allowsSlackNotification, buildSlackWorkUpdate, notificationKindForTransition } from "../lib/work-manager/slack-notifications";
+import { nextWorkflowStage, statusForWorkflowStage, workflowBadgeLabel, workflowStageFor } from "../lib/work-manager/workflow";
 
 function exampleWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {
   return {
@@ -59,10 +60,82 @@ test("channel names become stable human-readable slugs", () => {
   assert.throws(() => slugifyWorkChannel("---"), /Channel name is required/);
 });
 
+test("workflow stages advance in order while attention status stays separate", () => {
+  const item = exampleWorkItem({ status: "blocked", workflow_stage: "client_review" });
+  assert.equal(workflowStageFor(item), "client_review");
+  assert.equal(nextWorkflowStage("ready"), "in_progress");
+  assert.equal(nextWorkflowStage("in_progress"), "client_review");
+  assert.equal(nextWorkflowStage("client_review"), "done");
+  assert.equal(nextWorkflowStage("done"), null);
+  assert.equal(statusForWorkflowStage("client_review"), "in_progress");
+  assert.equal(workflowStageFor(exampleWorkItem({ status: "blocked", workflow_stage: null })), null);
+  assert.equal(workflowStageFor(exampleWorkItem({ status: "new", workflow_stage: undefined })), "ready");
+});
+
+test("workflow badge shows the saved stage instead of a stale compatibility status", () => {
+  assert.equal(workflowBadgeLabel({ status: "in_progress", workflow_stage: "client_review" }), "Client Review");
+  assert.equal(workflowBadgeLabel({ status: "blocked", workflow_stage: "client_review" }), "Blocked");
+});
+
 test("Slack candidate intake recognizes explicit task tags and stays bounded", () => {
   const intake = normalizeSlackCandidates({ workspaceRef: "circleclick", sourceRef: "C0BE2423W75", messages: [{ externalId: "1.2", text: "@circleclick-task-add publish the approved video" }] });
   assert.equal(intake.messages[0].tagged, true);
   assert.throws(() => normalizeSlackCandidates({ sourceRef: "C", messages: [] }), /between 1 and 50/);
+});
+
+test("Slack asks for missing dates and client choices before adding work", () => {
+  assert.equal(buildMissingTaskDetailsPrompt({
+    needsDueDate: true,
+    needsClient: true,
+    clientNames: ["VAST", "ABK Labs"],
+  }), 'Please add a due-by date (example: “by Friday” or “due:2026-09-30”) and a client (choose: ABK Labs, VAST) to the task, then send the command again.');
+  assert.equal(buildMissingTaskDetailsPrompt({
+    needsDueDate: false,
+    needsClient: false,
+    clientNames: [],
+    selectedClientName: "VAST",
+    workstreamNames: ["Social", "Video Queue"],
+  }), 'Please add a workstream for VAST (choose: Social, Video Queue) to the task, then send the command again.');
+});
+
+test("Slack intake blocks missing dates, missing clients, and unclear workstreams", () => {
+  const clients = [{ id: "vast", name: "VAST" }, { id: "abk", name: "ABK Labs" }];
+  const channels = [
+    { id: "vast-video", client_id: "vast", name: "Video Queue" },
+    { id: "vast-social", client_id: "vast", name: "Social" },
+  ];
+  assert.match(missingTaskDetails("@circleclick-task-add VAST Video Queue publish", "", clients, channels)?.prompt || "", /due-by date/);
+  assert.match(missingTaskDetails("@circleclick-task-add due:2026-09-30 publish", "2026-09-30", clients, channels)?.prompt || "", /ABK Labs, VAST/);
+  assert.match(missingTaskDetails("@circleclick-task-add due:2026-09-30 VAST publish", "2026-09-30", clients, channels)?.prompt || "", /Social, Video Queue/);
+  assert.equal(missingTaskDetails("@circleclick-task-add due:2026-09-30 VAST Video Queue publish", "2026-09-30", clients, channels), null);
+});
+
+test("client routing is case-insensitive and requires one exact client and owned workstream", () => {
+  const clients = [{ id: "vast", name: "VAST" }, { id: "abk", name: "ABK Labs" }];
+  const channels = [{ id: "vast-video", client_id: "vast", name: "Video Queue" }, { id: "abk-video", client_id: "abk", name: "Video Queue" }];
+  assert.deepEqual(findRoutingMatch("@circleclick-task-add VAST Video Queue publish new video", clients, channels), {
+    clientId: "vast", channelId: "vast-video", reviewNeeded: false,
+  });
+  assert.deepEqual(findRoutingMatch("@circleclick-task-add vaSt publish new video", clients, channels.slice(0, 1)), {
+    clientId: "vast", channelId: "vast-video", reviewNeeded: false,
+  });
+  assert.deepEqual(findRoutingMatch("@circleclick-task-add vast publish new video", clients, []), {
+    createWorkstreamForClientId: "vast", reviewNeeded: false,
+  });
+  assert.deepEqual(findRoutingMatch("@circleclick-task-add VAST publish", clients, [
+    ...channels.slice(0, 1), { id: "vast-social", client_id: "vast", name: "Social" },
+  ]), { suggestedClientId: "vast", reviewNeeded: true });
+  assert.deepEqual(findRoutingMatch("@circleclick-task-add VAST Social publish", clients, [
+    ...channels.slice(0, 1), { id: "vast-social", client_id: "vast", name: "Social" },
+  ]), { clientId: "vast", channelId: "vast-social", reviewNeeded: false });
+  assert.deepEqual(findRoutingMatch("@circleclick-task-add VAST Video Queue publish", clients, [
+    { id: "vast-video", client_id: "vast", name: "Video Queue", active: false },
+  ]), { suggestedClientId: "vast", reviewNeeded: true });
+  assert.deepEqual(findRoutingMatch("@circleclick-task-add for VAST publish new video", clients, channels), {
+    clientId: "vast", channelId: "vast-video", reviewNeeded: false,
+  });
+  assert.deepEqual(findRoutingMatch("@circleclick-task-add Video Queue publish", clients, channels), { reviewNeeded: false });
+  assert.deepEqual(findRoutingMatch("@circleclick-task-add VAST and ABK Labs: publish video", clients, channels), { reviewNeeded: true });
 });
 
 test("Slack task dates support ISO and Central Time natural language", () => {
@@ -92,6 +165,12 @@ test("Slack Events only forwards the explicit developer-requests command", () =>
     event: { type: "message", channel: "C072BE92C4X", channel_type: "channel", user: "U1", ts: "1789769000.123456", text: "@circleclick-task-add This is a test task" },
   }, { workspaceId: "T09EZFPHN", channelId: "C072BE92C4X" });
   assert.equal(accepted?.message.externalId, "1789769000.123456");
+  assert.equal(accepted?.message.threadTs, "1789769000.123456");
+  const threaded = normalizeSlackTaskEvent({
+    ...base,
+    event: { type: "message", channel: "C072BE92C4X", channel_type: "channel", user: "U1", ts: "1789769001.654321", thread_ts: "1789769000.123456", text: "@circleclick-task-add due:2026-09-30 VAST Video Queue publish new video" },
+  }, { workspaceId: "T09EZFPHN", channelId: "C072BE92C4X" });
+  assert.equal(threaded?.message.threadTs, "1789769000.123456");
   assert.equal(accepted?.message.sourceUrl, "https://circleclick.slack.com/archives/C072BE92C4X/p1789769000123456");
   assert.equal(normalizeSlackTaskEvent({ ...base, event: { type: "message", channel: "C072BE92C4X", ts: "1.2", text: "ordinary conversation" } }, { workspaceId: "T09EZFPHN", channelId: "C072BE92C4X" }), null);
   assert.equal(normalizeSlackTaskEvent({ ...base, event: { type: "message", channel: "C0BE2423W75", ts: "1.3", text: "@circleclick-task-add wrong channel" } }, { workspaceId: "T09EZFPHN", channelId: "C072BE92C4X" }), null);
@@ -229,7 +308,10 @@ test("Slack completion notifications are opt-in and transition-only", () => {
   assert.equal(allowsSlackNotification("never", "completed"), false);
   assert.equal(allowsSlackNotification("completed", "blocked"), false);
   assert.equal(allowsSlackNotification("completed_and_blocked", "blocked"), true);
-  assert.match(buildSlackWorkUpdate(done, "completed"), /Publish founder interview/);
+  assert.match(buildSlackWorkUpdate(done, "completed"), /^Work completed: https:\/\//);
+  assert.doesNotMatch(buildSlackWorkUpdate(done, "completed"), /Publish founder interview/);
+  assert.match(buildSlackWorkUpdate(done, "completed"), /dashboard-circleclick\.vercel\.app\/work-manager\/items\/item-1/);
+  assert.doesNotMatch(buildSlackWorkUpdate(done, "completed"), /example\.com\/source/);
 });
 
 test("work guide progress is bounded and completion always records the final step", () => {
@@ -278,6 +360,10 @@ test("client review is public while Work Manager APIs remain session-protected",
     const protectedApi = await proxy(new NextRequest("https://dashboard.example/api/work-manager/items"));
     assert.equal(protectedApi.status, 307);
     assert.equal(protectedApi.headers.get("location"), "https://dashboard.example/login?next=%2Fapi%2Fwork-manager%2Fitems");
+
+    const protectedItemLink = await proxy(new NextRequest("https://dashboard.example/work-manager/items/item-1"));
+    assert.equal(protectedItemLink.status, 307);
+    assert.equal(protectedItemLink.headers.get("location"), "https://dashboard.example/login?next=%2Fwork-manager%2Fitems%2Fitem-1");
 
     const ingestPost = await proxy(new NextRequest("https://dashboard.example/api/work-manager/ingest", { method: "POST" }));
     assert.equal(ingestPost.headers.get("x-middleware-next"), "1");

@@ -13,8 +13,9 @@ alter table public.work_item_events add constraint work_item_events_action_check
 create table if not exists public.work_slack_notification_deliveries (
   id uuid primary key,
   source_id text not null references public.work_sources(id) on delete cascade,
-  item_id uuid not null references public.work_items(id) on delete cascade,
-  event_id uuid not null references public.work_item_events(id) on delete cascade,
+  -- Work Manager IDs are text ULIDs/IDs, matching the core schema.
+  item_id text not null references public.work_items(id) on delete cascade,
+  event_id text not null references public.work_item_events(id) on delete cascade,
   kind text not null check (kind in ('completed', 'blocked')),
   status text not null default 'pending' check (status in ('pending', 'sent', 'failed')),
   slack_ts text,

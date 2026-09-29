@@ -2,7 +2,8 @@ import crypto, { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "@/lib/seo/db";
 import { safelyCreateWorkNotifications } from "./notifications";
 import { deliverSlackWorkNotification } from "./slack-notifications";
-import { createWorkItemReviewLink, normalizeWorkItemInput } from "./service";
+import { normalizeWorkItemInput } from "./service";
+import { workflowStageFromStatus } from "./workflow";
 import {
   WORK_STATUSES,
   type WorkAutomationSource,
@@ -83,6 +84,7 @@ function normalizeIngestItem(value: unknown, index: number): NormalizedIngestIte
     automationReviewNeeded: item.automationReviewNeeded === true,
     targetClientId: asText(item.targetClientId, 80),
     targetChannelId: asText(item.targetChannelId, 80),
+    routingSuggestionClientId: asText(item.routingSuggestionClientId, 80),
   };
 }
 
@@ -140,6 +142,7 @@ function sourceSnapshot(item: NormalizedIngestItem) {
     sourceUrl: item.sourceUrl,
     completionEvidenceUrl: item.completionEvidenceUrl,
     clientVisible: item.clientVisible,
+    routingSuggestionClientId: item.routingSuggestionClientId || null,
   };
 }
 
@@ -195,32 +198,6 @@ function table(name: "work_sources" | "work_items" | "work_item_events") {
   return getSupabaseAdminClient().from(name);
 }
 
-function slackThreadTsFromPermalink(sourceUrl: string) {
-  const match = sourceUrl.match(/\/p(\d{16,})/);
-  if (!match) return null;
-  const digits = match[1];
-  return `${digits.slice(0, -6)}.${digits.slice(-6)}`;
-}
-
-async function postSlackIntakeLink(source: WorkAutomationSource, item: WorkItem) {
-  const token = process.env.SLACK_BOT_TOKEN?.trim();
-  if (!token || source.source_kind !== "slack" || !item.source_url) return;
-  try {
-    const { token: reviewToken } = await createWorkItemReviewLink(source.client_id, source.created_by_user_id, item);
-    const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || process.env.WORK_MANAGER_PUBLIC_URL || "https://dashboard-circleclick.vercel.app").replace(/\/$/, "");
-    const threadTs = slackThreadTsFromPermalink(item.source_url);
-    const response = await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json; charset=utf-8" },
-      body: JSON.stringify({ channel: source.source_ref, text: `Work added: ${item.title}\nClient view: ${baseUrl}/review/${reviewToken}`, ...(threadTs ? { thread_ts: threadTs } : {}) }),
-    });
-    const payload = await response.json() as { ok?: boolean; error?: string };
-    if (!response.ok || !payload.ok) throw new Error(payload.error || `Slack returned ${response.status}`);
-  } catch (error) {
-    console.error("Slack intake link post failed", error instanceof Error ? error.message : String(error));
-  }
-}
-
 async function addAutomationEvent(item: WorkItem, action: "ingested" | "automation_proposed", before: WorkItem | null) {
   const eventId = randomUUID();
   const { error } = await table("work_item_events").insert({
@@ -264,8 +241,11 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
   for (const item of batch.items) {
     const timestamp = new Date().toISOString();
     const sourceExternalId = createSourceExternalIdentity(source.id, item.externalId);
-    const targetClientId = item.targetClientId || source.client_id;
-    const targetChannelId = item.targetChannelId || source.channel_id;
+    const hasCompleteRoute = Boolean(item.targetClientId && item.targetChannelId);
+    const hasPartialRoute = Boolean(item.targetClientId) !== Boolean(item.targetChannelId);
+    if (hasPartialRoute) throw new Error("Automation routing must include both a client and a workstream.");
+    const targetClientId = hasCompleteRoute ? item.targetClientId as string : source.client_id;
+    const targetChannelId = hasCompleteRoute ? item.targetChannelId as string : source.channel_id;
     const normalized = normalizeWorkItemInput({
       channelId: targetChannelId,
       title: item.title,
@@ -301,6 +281,7 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
         id: randomUUID(),
         client_id: targetClientId,
         ...incoming,
+        workflow_stage: workflowStageFromStatus(incoming.status),
         created_by_user_id: null,
         updated_by_user_id: null,
         created_at: timestamp,
@@ -310,7 +291,7 @@ export async function ingestWorkBatch(value: unknown): Promise<WorkIngestResult>
       if (error) throw error;
       const eventId = await addAutomationEvent(created, "ingested", null);
       await safelyCreateWorkNotifications(created, null, null, eventId);
-      await postSlackIntakeLink({ ...source, client_id: targetClientId, channel_id: targetChannelId }, created);
+      await deliverSlackWorkNotification({ ...source, client_id: targetClientId, channel_id: targetChannelId }, created, null, eventId, "intake");
       result.created += 1;
       result.items.push({ id: created.id, externalId: item.externalId, outcome: "created" });
       continue;

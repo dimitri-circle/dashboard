@@ -1,4 +1,5 @@
 import type { WorkReviewSnapshot, WorkStatus } from "@/lib/work-manager/types";
+import { workflowStageLabels } from "@/lib/work-manager/workflow";
 
 const statusLabels: Record<WorkStatus, string> = {
   new: "Ready to start",
@@ -26,9 +27,11 @@ function formatUpdated(value: string) {
   }).format(new Date(value));
 }
 
-export function WorkReview({ snapshot }: { snapshot: WorkReviewSnapshot }) {
-  const openItems = snapshot.items.filter((item) => item.status !== "done");
-  const blockedItems = snapshot.items.filter((item) => item.status === "blocked");
+export function WorkReview({ snapshot, itemId }: { snapshot: WorkReviewSnapshot; itemId?: string }) {
+  const visibleItems = itemId ? snapshot.items.filter((item) => item.id === itemId) : snapshot.items;
+  const singleItem = itemId ? visibleItems[0] : null;
+  const openItems = visibleItems.filter((item) => item.status !== "done");
+  const blockedItems = visibleItems.filter((item) => item.status === "blocked");
 
   return (
     <main className="work-review-page">
@@ -46,8 +49,8 @@ export function WorkReview({ snapshot }: { snapshot: WorkReviewSnapshot }) {
       <section className="work-review-intro" aria-labelledby="work-review-title">
         <div>
           <span className="eyebrow">{snapshot.client.name}</span>
-          <h1 id="work-review-title">{snapshot.channel?.name || snapshot.label}</h1>
-          <p>{snapshot.channel?.description || "A clear view of current work, next steps, and decisions that need attention."}</p>
+          <h1 id="work-review-title">{singleItem?.title || snapshot.channel?.name || snapshot.label}</h1>
+          <p>{singleItem ? `${singleItem.channel_name} · Read-only view of this work order and its latest shared updates.` : snapshot.channel?.description || "A clear view of current work, next steps, and decisions that need attention."}</p>
         </div>
         <dl className="work-review-summary">
           <div><dt>Open</dt><dd>{openItems.length}</dd></div>
@@ -57,11 +60,11 @@ export function WorkReview({ snapshot }: { snapshot: WorkReviewSnapshot }) {
       </section>
 
       <section className="work-review-list" aria-label="Shared work updates">
-        {snapshot.items.length ? snapshot.items.map((item) => (
+        {visibleItems.length ? visibleItems.map((item) => (
           <article className="work-review-item" key={item.id} data-status={item.status}>
             <header>
               <div>
-                <span className="work-status" data-status={item.status}>{statusLabels[item.status]}</span>
+                <span className="work-status" data-status={item.status}>{item.workflow_stage === "client_review" && item.status === "in_progress" ? workflowStageLabels.client_review : statusLabels[item.status]}</span>
                 <h2>{item.title}</h2>
               </div>
               <div className="work-review-owner">
@@ -83,6 +86,9 @@ export function WorkReview({ snapshot }: { snapshot: WorkReviewSnapshot }) {
             {item.blocker_text ? (
               <p className="work-blocker"><strong>What would unblock this:</strong> {item.blocker_text}</p>
             ) : null}
+            {item.shared_activity.length || item.shared_comments.length ? <section className="work-review-activity" aria-label={`Shared activity for ${item.title}`}><h3>Updates</h3><ol>
+              {[...item.shared_activity, ...item.shared_comments.map((comment) => ({ id: comment.id, summary: `${comment.author_name}: ${comment.body}`, created_at: comment.created_at, action: "commented", author_name: comment.author_name }))].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((entry) => <li key={entry.id}><span>{entry.summary}</span><time dateTime={entry.created_at}>{formatUpdated(entry.created_at)}</time></li>)}
+            </ol></section> : null}
             <footer>
               <span>{item.channel_name}</span>
               <span>Updated {formatUpdated(item.updated_at)}</span>

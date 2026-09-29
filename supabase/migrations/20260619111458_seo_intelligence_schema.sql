@@ -113,4 +113,4 @@ alter table public.seo_insights enable row level security;
 alter table public.seo_metric_snapshots enable row level security;
 alter table public.seo_competitive_analyses enable row level security;
 alter table public.seo_audit_events enable row level security;
-alter table public.seo_app_users enable row level security;
+alter table public.seo_app_users enable row level security;;

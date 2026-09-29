@@ -37,3 +37,4 @@ create index if not exists seo_visitor_events_client_page_received
 alter table public.seo_visitor_events enable row level security;
 
 grant select, insert on public.seo_visitor_events to service_role;
+;
