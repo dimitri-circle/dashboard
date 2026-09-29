@@ -43,7 +43,7 @@ export async function replyWithSlackClientStatus(input: {
   const db = getSupabaseAdminClient();
   const [sourceResult, clientResult] = await Promise.all([
     db.from("work_sources").select("id").eq("source_kind", "slack").eq("workspace_ref", input.workspaceRef).eq("source_ref", input.channelId).eq("active", true).maybeSingle(),
-    db.from("seo_clients").select("id,name").eq("active", true),
+    db.from("seo_clients").select("id,name"),
   ]);
   if (sourceResult.error) throw sourceResult.error;
   if (!sourceResult.data) throw new Error("No active Work Manager source mapping matches this Slack channel.");

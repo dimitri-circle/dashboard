@@ -215,7 +215,7 @@ export async function intakeSlackCandidates(value: unknown) {
   if (error) throw error;
   if (!source) throw new Error("No active Work Manager source mapping matches this Slack channel.");
   const [clientResult, channelResult] = await Promise.all([
-    getSupabaseAdminClient().from("seo_clients").select("id,name").eq("active", true),
+    getSupabaseAdminClient().from("seo_clients").select("id,name"),
     getSupabaseAdminClient().from("work_channels").select("id,client_id,name,active"),
   ]);
   if (clientResult.error) throw clientResult.error;
