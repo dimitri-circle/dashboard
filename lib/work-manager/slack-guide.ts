@@ -88,6 +88,7 @@ export async function runSlackDashboardGuide(now = new Date()) {
       .select("created_at")
       .eq("source_id", source.id)
       .like("external_id", `${GUIDE_KEY_PREFIX}%`)
+      .in("status", ["sent", "uncertain"])
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
