@@ -203,6 +203,13 @@ export async function tryCompleteSlackTaskThread(input: ThreadMessage) {
       return true;
     }
     if (!result.result?.items.length) throw new Error("The completed Slack draft produced no task.");
+    const ingested = result.result.items[0];
+    if (ingested.outcome !== "created") {
+      const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || process.env.WORK_MANAGER_PUBLIC_URL || "https://dashboard-circleclick.vercel.app").replace(/\/$/, "");
+      const label = ingested.outcome === "dismissed" ? "This work was dismissed earlier" : "Work already added";
+      await requireSlackReply({ sourceId, channelId: input.channelId, externalId: input.externalId,
+        threadTs: draft.external_id, text: `${label}: ${baseUrl}/work-manager/items/${encodeURIComponent(ingested.id)}` });
+    }
     const { error: completedError } = await db.from("work_slack_command_drafts")
       .update({ state: "completed", completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq("source_id", sourceId).eq("external_id", draft.external_id).eq("revision", revision).eq("state", "processing")
