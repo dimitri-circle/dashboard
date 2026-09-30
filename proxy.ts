@@ -26,7 +26,7 @@ function isSignedVisitorIngest(request: NextRequest) {
 
 function isScheduledSync(request: NextRequest) {
   // The route validates CRON_SECRET; Vercel cron requests have no app session.
-  return request.method === "GET" && request.nextUrl.pathname === "/api/seo/cron/daily";
+  return request.method === "GET" && ["/api/seo/cron/daily", "/api/work-manager/slack/guide"].includes(request.nextUrl.pathname);
 }
 
 function isWorkManagerIngest(request: NextRequest) {

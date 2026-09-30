@@ -105,3 +105,30 @@ clarification item instead of being lost. Slack text is treated as untrusted dat
 Dismissed work retains its source identity and audit history. Later scans return a
 `dismissed` outcome instead of recreating or changing it. An operator can restore it
 from **Dismissed work** in the dashboard.
+
+## Direct Slack commands and channel guides
+
+The direct Slack Events receiver accepts `@task-add <description> by <date> <client> [workstream]`,
+`@task-status <client> [by <date>]`, and `@task-help` only from the configured CircleClick
+developer and design channels. The status date is inclusive and interpreted in Central
+Time. Replies stay in the command's thread. An incomplete add or status command saves a
+pending draft, asks only for missing details, and accepts a reply from the original author
+in that thread for seven days. Expired drafts are removed during later command handling.
+A completed add draft creates a task using the original message
+timestamp, so repeated Slack delivery cannot create a second task. The older
+`@circleclick-task-add` spelling remains an alias. Status replies include only
+client-visible, non-dismissed work; date-filtered results exclude tasks with no due date.
+
+The dashboard's Vercel cron route `GET /api/work-manager/slack/guide` is protected by
+`CRON_SECRET`. It checks at 9 AM America/Chicago on weekdays and posts one short,
+top-level command guide per configured channel every other workday. The existing
+`work_slack_intake_prompts` unique delivery ledger prevents duplicate posts after
+cron retries or concurrent invocations. Uncertain deliveries are not retried
+automatically, so inspect Slack and the ledger before manually recovering one.
+
+`WORK_MANAGER_SLACK_GUIDE_ENABLED` defaults to `false`. Before enabling it in
+production, verify the new commands on the deployed build, the bot's membership
+and active `work_sources` mapping in both channels, `SLACK_BOT_TOKEN`, and the
+two channel-ID environment variables. Pause the previous Codex reminder to avoid
+two senders. To stop future guide posts, set the flag back to `false` and redeploy;
+this does not alter tasks or past messages.

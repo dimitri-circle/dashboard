@@ -13,9 +13,11 @@ import { createReviewToken, hashReviewToken, normalizeWorkItemInput, slugifyWork
 import type { WorkItem } from "../lib/work-manager/types";
 import { notificationReason, plannedNotificationKinds } from "../lib/work-manager/notifications";
 import { normalizeWorkGuideUpdate } from "../lib/work-manager/guide";
-import { buildMissingTaskDetailsPrompt, findRoutingMatch, missingTaskDetails, normalizeSlackCandidates } from "../lib/work-manager/intake";
+import { buildMissingTaskDetailsPrompt, extractSlackTaskDescription, findRoutingMatch, missingTaskDetails, normalizeSlackCandidates } from "../lib/work-manager/intake";
 import { isValidMeetingDocExportRequest, toMeetingDocItem } from "../lib/work-manager/meeting-docs";
-import { isValidSlackSignature, normalizeSlackTaskEvent } from "../lib/work-manager/slack-events";
+import { isValidSlackSignature, normalizeSlackTaskEvent, parseSlackCommand } from "../lib/work-manager/slack-events";
+import { canonicalizeSlackDraftText, mergeSlackStatusReply, mergeSlackTaskReply } from "../lib/work-manager/slack-command-drafts";
+import { formatSlackStatus, resolveStatusClient } from "../lib/work-manager/slack-status";
 import { extractDueDate } from "../lib/work-manager/due-dates";
 import { allowsSlackNotification, buildSlackWorkUpdate, notificationKindForTransition } from "../lib/work-manager/slack-notifications";
 import { nextWorkflowStage, statusForWorkflowStage, workflowBadgeLabel, workflowStageFor } from "../lib/work-manager/workflow";
@@ -80,6 +82,7 @@ test("workflow badge shows the saved stage instead of a stale compatibility stat
 test("Slack candidate intake recognizes explicit task tags and stays bounded", () => {
   const intake = normalizeSlackCandidates({ workspaceRef: "circleclick", sourceRef: "C0BE2423W75", messages: [{ externalId: "1.2", text: "@circleclick-task-add publish the approved video" }] });
   assert.equal(intake.messages[0].tagged, true);
+  assert.equal(normalizeSlackCandidates({ workspaceRef: "circleclick", sourceRef: "C0ATZ3A3K0X", messages: [{ externalId: "1.3", text: "@task-add Publish the video by Friday VAST" }] }).messages[0].tagged, true);
   assert.throws(() => normalizeSlackCandidates({ sourceRef: "C", messages: [] }), /between 1 and 50/);
 });
 
@@ -88,14 +91,27 @@ test("Slack asks for missing dates and client choices before adding work", () =>
     needsDueDate: true,
     needsClient: true,
     clientNames: ["VAST", "ABK Labs"],
-  }), 'Please add a due-by date (example: “by Friday” or “due:2026-09-30”) and a client (choose: ABK Labs, VAST) to the task, then send the command again.');
+  }), 'Please reply in this thread with a due-by date (example: “by Friday” or “due:2026-09-30”) and a client (choose: ABK Labs, VAST); no need to repeat the command. Example reply: by Friday VAST');
   assert.equal(buildMissingTaskDetailsPrompt({
     needsDueDate: false,
     needsClient: false,
     clientNames: [],
     selectedClientName: "VAST",
     workstreamNames: ["Social", "Video Queue"],
-  }), 'Please add a workstream for VAST (choose: Social, Video Queue) to the task, then send the command again.');
+  }), 'Please reply in this thread with a workstream for VAST (choose: Social, Video Queue); no need to repeat the command. Example reply: Social');
+});
+
+test("Slack thread corrections keep the original command unless a full replacement is supplied", () => {
+  const thursday = new Date("2026-09-24T15:00:00Z");
+  assert.equal(mergeSlackTaskReply("@task-add Fix pricing page", "VAST by Friday", thursday), "@task-add Fix pricing page VAST due:2026-09-25");
+  assert.equal(mergeSlackTaskReply("@task-add Fix pricing page", "@task-add Update VAST design by Friday", thursday), "@task-add Update VAST design due:2026-09-25");
+  assert.equal(mergeSlackTaskReply("@task-add Fix pricing page by 2026-02-31", "VAST by Friday", thursday), "@task-add Fix pricing page VAST due:2026-09-25");
+  assert.equal(mergeSlackTaskReply("@task-add Fix pricing page due:2026-09-25", "by 2026-09-28", thursday), "@task-add Fix pricing page due:2026-09-28");
+  assert.equal(canonicalizeSlackDraftText("@task-add Fix pricing page by Friday", thursday), "@task-add Fix pricing page due:2026-09-25");
+  assert.equal(mergeSlackTaskReply(canonicalizeSlackDraftText("@task-add Fix pricing page by Friday", thursday), "VAST", new Date("2026-09-28T15:00:00Z")), "@task-add Fix pricing page VAST due:2026-09-25");
+  assert.equal(mergeSlackStatusReply("due:2026-09-25", "VAST", new Date("2026-09-28T15:00:00Z")), "VAST due:2026-09-25");
+  assert.equal(mergeSlackStatusReply("Wrong Client due:2026-09-25", "VAST", new Date("2026-09-28T15:00:00Z")), "VAST due:2026-09-25");
+  assert.equal(mergeSlackStatusReply("VAST due:2026-09-25", "by 2026-10-02", new Date("2026-09-28T15:00:00Z")), "VAST due:2026-10-02");
 });
 
 test("Slack intake blocks missing dates, missing clients, and unclear workstreams", () => {
@@ -108,6 +124,8 @@ test("Slack intake blocks missing dates, missing clients, and unclear workstream
   assert.match(missingTaskDetails("@circleclick-task-add due:2026-09-30 publish", "2026-09-30", clients, channels)?.prompt || "", /ABK Labs, VAST/);
   assert.match(missingTaskDetails("@circleclick-task-add due:2026-09-30 VAST publish", "2026-09-30", clients, channels)?.prompt || "", /Social, Video Queue/);
   assert.equal(missingTaskDetails("@circleclick-task-add due:2026-09-30 VAST Video Queue publish", "2026-09-30", clients, channels), null);
+  assert.match(missingTaskDetails("@task-add VAST Video Queue", "", clients, channels)?.prompt || "", /task description.*due-by date/);
+  assert.equal(missingTaskDetails("@task-add Publish the video VAST Video Queue", "2026-09-30", clients, channels), null);
 });
 
 test("client routing is case-insensitive and requires one exact client and owned workstream", () => {
@@ -146,6 +164,14 @@ test("Slack task dates support ISO and Central Time natural language", () => {
     reviewNeeded: false,
   });
   assert.equal(extractDueDate("Publish by February 31", new Date("2026-01-01T12:00:00Z")).reviewNeeded, true);
+  assert.deepEqual(extractDueDate("@task-add Publish the video by 2026-10-02 VAST").dueDate, "2026-10-02");
+  assert.deepEqual(extractDueDate("@task-add Publish by 2026-02-31 VAST").dueDate, "");
+});
+
+test("Slack add command saves the task description without trailing routing labels", () => {
+  assert.equal(extractSlackTaskDescription("@task-add Publish the approved video VAST Video Queue", "VAST", "Video Queue"), "Publish the approved video");
+  assert.equal(extractSlackTaskDescription("@task-add Publish the approved video Video Queue VAST", "VAST", "Video Queue"), "Publish the approved video");
+  assert.equal(extractSlackTaskDescription("@task-add Publish VAST video", "VAST", "Video Queue"), "Publish VAST video");
 });
 
 test("Slack Events verification accepts fresh signed requests and rejects replay or tampering", () => {
@@ -158,22 +184,49 @@ test("Slack Events verification accepts fresh signed requests and rejects replay
   assert.equal(isValidSlackSignature(body, timestamp, signature, secret, 1760000601), false);
 });
 
-test("Slack Events only forwards the explicit developer-requests command", () => {
+test("Slack Events only routes exact commands in the two approved channels", () => {
   const base = { type: "event_callback", team_id: "T09EZFPHN" };
+  const config = { workspaceId: "T09EZFPHN", channelIds: ["C072BE92C4X", "C0ATZ3A3K0X"] };
   const accepted = normalizeSlackTaskEvent({
     ...base,
     event: { type: "message", channel: "C072BE92C4X", channel_type: "channel", user: "U1", ts: "1789769000.123456", text: "@circleclick-task-add This is a test task" },
-  }, { workspaceId: "T09EZFPHN", channelId: "C072BE92C4X" });
+  }, config);
   assert.equal(accepted?.message.externalId, "1789769000.123456");
   assert.equal(accepted?.message.threadTs, "1789769000.123456");
   const threaded = normalizeSlackTaskEvent({
     ...base,
     event: { type: "message", channel: "C072BE92C4X", channel_type: "channel", user: "U1", ts: "1789769001.654321", thread_ts: "1789769000.123456", text: "@circleclick-task-add due:2026-09-30 VAST Video Queue publish new video" },
-  }, { workspaceId: "T09EZFPHN", channelId: "C072BE92C4X" });
+  }, config);
   assert.equal(threaded?.message.threadTs, "1789769000.123456");
+  const design = normalizeSlackTaskEvent({ ...base,
+    event: { type: "message", channel: "C0ATZ3A3K0X", channel_type: "channel", user: "U2", ts: "1789769002.123456", text: "@task-status VAST" },
+  }, config);
+  assert.equal(design?.command.kind, "status");
+  assert.equal(design?.command.argument, "VAST");
+  assert.equal(design?.sourceRef, "C0ATZ3A3K0X");
+  assert.equal(design?.message.userRef, "U2");
+  assert.equal(parseSlackCommand("@task-add Publish the video by Friday VAST")?.kind, "add");
+  assert.equal(parseSlackCommand("@task-help")?.kind, "help");
+  assert.equal(parseSlackCommand("Here is @task-add hidden in a sentence"), null);
+  assert.equal(parseSlackCommand("@task-addendum should not match"), null);
   assert.equal(accepted?.message.sourceUrl, "https://circleclick.slack.com/archives/C072BE92C4X/p1789769000123456");
-  assert.equal(normalizeSlackTaskEvent({ ...base, event: { type: "message", channel: "C072BE92C4X", ts: "1.2", text: "ordinary conversation" } }, { workspaceId: "T09EZFPHN", channelId: "C072BE92C4X" }), null);
-  assert.equal(normalizeSlackTaskEvent({ ...base, event: { type: "message", channel: "C0BE2423W75", ts: "1.3", text: "@circleclick-task-add wrong channel" } }, { workspaceId: "T09EZFPHN", channelId: "C072BE92C4X" }), null);
+  assert.equal(normalizeSlackTaskEvent({ ...base, event: { type: "message", channel: "C072BE92C4X", user: "U1", ts: "1.2", text: "ordinary conversation" } }, config), null);
+  assert.equal(normalizeSlackTaskEvent({ ...base, event: { type: "message", channel: "C072BE92C4X", user: "U1", ts: "1.21", thread_ts: "1.2", text: "VAST by Friday" } }, config)?.command.kind, "followup");
+  assert.equal(normalizeSlackTaskEvent({ ...base, event: { type: "message", channel: "C0BE2423W75", user: "U1", ts: "1.3", text: "@task-add wrong channel" } }, config), null);
+  assert.equal(normalizeSlackTaskEvent({ ...base, event: { type: "message", channel: "C0ATZ3A3K0X", bot_id: "B1", ts: "1.4", text: "@task-status VAST" } }, config), null);
+  assert.equal(normalizeSlackTaskEvent({ ...base, event: { type: "message", channel: "C0ATZ3A3K0X", channel_type: "group", user: "U1", ts: "1.5", text: "@task-status VAST" } }, config), null);
+  assert.equal(normalizeSlackTaskEvent({ ...base, team_id: "TOTHER", event: { type: "message", channel: "C0ATZ3A3K0X", user: "U1", ts: "1.6", text: "@task-status VAST" } }, config), null);
+});
+
+test("task status resolves exact clients and formats only supplied visible work", () => {
+  const clients = [{ id: "vast", name: "VAST" }, { id: "abk", name: "ABK Labs" }];
+  assert.deepEqual(resolveStatusClient("vast", clients), [{ id: "vast", name: "VAST" }]);
+  assert.deepEqual(resolveStatusClient("VA", clients), []);
+  assert.match(formatSlackStatus("VAST", [], 0), /no client-visible work/);
+  const result = formatSlackStatus("VAST", [{ id: "item-1", title: "Publish <@U1> video", status: "blocked", workflow_stage: "in_progress", due_date: "2026-10-02" }], 1);
+  assert.match(result, /Blocked · due 2026-10-02/);
+  assert.match(result, /Publish &lt;@U1&gt; video/);
+  assert.match(result, /\/work-manager\/items\/item-1/);
 });
 
 test("Done and Blocked require explicit evidence", () => {
