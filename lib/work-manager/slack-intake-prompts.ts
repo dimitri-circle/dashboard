@@ -9,7 +9,7 @@ export async function sendSlackIntakePrompt(input: {
   text: string;
 }) {
   const supabase = getSupabaseAdminClient();
-  const { data: delivery, error: insertError } = await supabase
+  const { data: inserted, error: insertError } = await supabase
     .from("work_slack_intake_prompts")
     .insert({
       id: randomUUID(),
@@ -19,8 +19,22 @@ export async function sendSlackIntakePrompt(input: {
     })
     .select("id")
     .maybeSingle();
-  if (insertError?.code === "23505") return { outcome: "duplicate" as const };
-  if (insertError) throw insertError;
+  if (insertError && insertError.code !== "23505") throw insertError;
+  let delivery = inserted;
+  if (insertError?.code === "23505") {
+    const { data: retried, error: retryError } = await supabase.from("work_slack_intake_prompts")
+      .update({ status: "pending", error_text: null, updated_at: new Date().toISOString() })
+      .eq("source_id", input.sourceId).eq("external_id", input.externalId).eq("status", "failed")
+      .select("id").maybeSingle();
+    if (retryError) throw retryError;
+    if (retried) delivery = retried;
+    else {
+      const { data: prior, error: priorError } = await supabase.from("work_slack_intake_prompts")
+        .select("status").eq("source_id", input.sourceId).eq("external_id", input.externalId).maybeSingle();
+      if (priorError) throw priorError;
+      return { outcome: prior?.status === "uncertain" ? "uncertain" as const : "duplicate" as const };
+    }
+  }
   if (!delivery) return { outcome: "duplicate" as const };
 
   const token = process.env.SLACK_BOT_TOKEN?.trim();

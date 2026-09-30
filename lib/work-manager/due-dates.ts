@@ -42,7 +42,7 @@ export function extractDueDate(input: string, now = new Date()): DueDateParse {
     const year = Number(month[3] || today.getUTCFullYear());
     const date = new Date(Date.UTC(year, MONTHS.indexOf(month[1].toLowerCase()), Number(month[2])));
     if (date.getUTCMonth() !== MONTHS.indexOf(month[1].toLowerCase()) || date.getUTCDate() !== Number(month[2])) {
-      return { text: input, dueDate: "", reviewNeeded: true };
+      return { text: input.replace(month[0], " ").replace(/\s+/g, " ").trim(), dueDate: "", reviewNeeded: true };
     }
     if (!month[3] && date < today) date.setUTCFullYear(year + 1);
     return { text: input.replace(month[0], " ").replace(/\s+/g, " ").trim(), dueDate: iso(date), reviewNeeded: false };

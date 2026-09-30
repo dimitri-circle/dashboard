@@ -50,8 +50,9 @@ export function buildSlackDashboardGuide(baseUrl: string) {
   return [
     "*CircleClick Work Manager quick guide*",
     "• Add work: `@task-add Publish the approved video by Friday ABK Labs Video Queue` (include a due date and client; add the workstream if your client has more than one).",
-    "• Check shared client work: `@task-status ABK Labs` (internal-only tasks stay private).",
-    "The bot replies to your command with a task link. Open it to move work, assign an owner, and add comments. Activity lives on that link, so this channel stays quiet.",
+    "• Check shared work: `@task-status ABK Labs` or `@task-status ABK Labs by Friday` (due on or before; internal-only tasks stay private).",
+    "• Need a reminder? `@task-help`. If the bot asks for a missing detail, reply in its thread with just that detail.",
+    "The bot replies in your command thread with task links. Open one to move work, assign an owner, and add comments; the channel stays quiet.",
     `<${baseUrl.replace(/\/$/, "")}/|Open the dashboard>`,
   ].join("\n");
 }

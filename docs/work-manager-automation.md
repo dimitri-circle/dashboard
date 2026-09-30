@@ -108,10 +108,16 @@ from **Dismissed work** in the dashboard.
 
 ## Direct Slack commands and channel guides
 
-The direct Slack Events receiver accepts `@task-add <description> by <date> <client> [workstream]`
-and `@task-status <client>` only from the configured CircleClick developer and design
-channels. Replies stay in the command's thread. The older `@circleclick-task-add` spelling
-remains an alias. Status replies include only client-visible, non-dismissed work.
+The direct Slack Events receiver accepts `@task-add <description> by <date> <client> [workstream]`,
+`@task-status <client> [by <date>]`, and `@task-help` only from the configured CircleClick
+developer and design channels. The status date is inclusive and interpreted in Central
+Time. Replies stay in the command's thread. An incomplete add or status command saves a
+pending draft, asks only for missing details, and accepts a reply from the original author
+in that thread for seven days. Expired drafts are removed during later command handling.
+A completed add draft creates a task using the original message
+timestamp, so repeated Slack delivery cannot create a second task. The older
+`@circleclick-task-add` spelling remains an alias. Status replies include only
+client-visible, non-dismissed work; date-filtered results exclude tasks with no due date.
 
 The dashboard's Vercel cron route `GET /api/work-manager/slack/guide` is protected by
 `CRON_SECRET`. It checks at 9 AM America/Chicago on weekdays and posts one short,

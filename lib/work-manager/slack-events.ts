@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-const COMMAND_PATTERN = /^\s*(?:[•*-]\s*)?@(task-add|circleclick-task-add|task-status)\b:?\s*(.*)$/is;
+const COMMAND_PATTERN = /^\s*(?:[•*-]\s*)?@(task-add|circleclick-task-add|task-status|task-help)\b:?\s*(.*)$/is;
 const MAX_CLOCK_SKEW_SECONDS = 60 * 5;
 
 export type SlackMessageEvent = {
@@ -22,12 +22,14 @@ export type SlackEventEnvelope = {
   event?: SlackMessageEvent;
 };
 
-export type SlackCommandKind = "add" | "status";
+export type SlackCommandKind = "add" | "status" | "help" | "followup";
 
 export function parseSlackCommand(value: string) {
   const match = value.match(COMMAND_PATTERN);
   if (!match) return null;
-  return { kind: match[1].toLowerCase() === "task-status" ? "status" as const : "add" as const, argument: match[2].trim() };
+  const name = match[1].toLowerCase();
+  return { kind: name === "task-status" ? "status" as const : name === "task-help" ? "help" as const : "add" as const,
+    argument: match[2].trim() };
 }
 
 function stringValue(value: unknown, max: number) {
@@ -62,8 +64,10 @@ export function normalizeSlackTaskEvent(
   const externalId = stringValue(event.ts, 80);
   const allowedChannels = config.channelIds || (config.channelId ? [config.channelId] : []);
   if (envelope.type !== "event_callback" || workspaceId !== config.workspaceId || !allowedChannels.includes(channelId)) return null;
-  if (event.type !== "message" || (event.channel_type && event.channel_type !== "channel") || event.subtype || event.bot_id || !event.user || !externalId || !text) return null;
-  const command = parseSlackCommand(text);
+  const userRef = stringValue(event.user, 80);
+  if (event.type !== "message" || (event.channel_type && event.channel_type !== "channel") || event.subtype || event.bot_id || !userRef || !externalId || !text) return null;
+  const threadContext = stringValue(event.thread_ts, 80);
+  const command = parseSlackCommand(text) || (threadContext ? { kind: "followup" as const, argument: text } : null);
   if (!command) return null;
   const domain = stringValue(config.workspaceDomain, 120) || "circleclick.slack.com";
   const permalinkTs = externalId.replace(/\D/g, "");
@@ -73,9 +77,10 @@ export function normalizeSlackTaskEvent(
     command,
     message: {
       externalId,
+      userRef,
       text,
-      threadContext: stringValue(event.thread_ts, 80),
-      threadTs: stringValue(event.thread_ts, 80) || externalId,
+      threadContext,
+      threadTs: threadContext || externalId,
       sourceUrl: `https://${domain}/archives/${channelId}/p${permalinkTs}`,
       tagged: true,
     },

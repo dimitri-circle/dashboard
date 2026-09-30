@@ -162,9 +162,13 @@ export function buildMissingTaskDetailsPrompt(input: {
   if (input.workstreamNames) {
     requirements.push(`a workstream for ${input.selectedClientName || "that client"} (choose: ${formatChoices(input.workstreamNames)})`);
   }
-  const exampleClient = input.selectedClientName || input.clientNames[0] || "<client>";
-  const exampleWorkstream = input.workstreamNames?.[0] ? ` ${input.workstreamNames[0]}` : "";
-  return `Please add ${requirements.join(" and ")} to the task, then send the command again. Example: @task-add Publish the approved video by Friday ${exampleClient}${exampleWorkstream}`;
+  const exampleReply = [
+    input.needsDescription ? "Publish the approved video" : "",
+    input.needsDueDate ? "by Friday" : "",
+    input.needsClient ? input.clientNames[0] || "<client>" : "",
+    input.workstreamNames?.[0] || "",
+  ].filter(Boolean).join(" ");
+  return `Please reply in this thread with ${requirements.join(" and ")}; no need to repeat the command. Example reply: ${exampleReply}`;
 }
 
 export function missingTaskDetails(message: string, dueDate: string, clients: Array<{ id: string; name: string }>, channels: Array<{ id: string; client_id: string; name: string; active?: boolean }>) {
