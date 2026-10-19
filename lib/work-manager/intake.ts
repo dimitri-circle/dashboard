@@ -6,9 +6,23 @@ import { extractDueDate } from "./due-dates";
 
 type Candidate = { externalId: string; text: string; sourceUrl?: string; threadContext?: string; threadTs?: string; tagged?: boolean; dueDate?: string; reviewNeeded?: boolean };
 
-type RoutingMatch = { clientId?: string; channelId?: string; suggestedClientId?: string; createWorkstreamForClientId?: string; reviewNeeded: boolean };
+type RoutingMatch = {
+  clientId?: string;
+  channelId?: string;
+  suggestedClientId?: string;
+  createWorkstreamForClientId?: string;
+  createWorkstreamName?: string;
+  sourceConflict?: boolean;
+  reviewNeeded: boolean;
+};
+
+type SourceRoute = { clientId: string; channelId: string; sharedIntake: boolean };
 
 function text(value: unknown, max: number) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
+
+export function initialSlackStatus(tagged: boolean, classifiedStatus: string) {
+  return tagged ? "new" : classifiedStatus;
+}
 
 export function normalizeSlackCandidates(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Slack intake must be a JSON object.");
@@ -36,7 +50,7 @@ export function normalizeSlackCandidates(value: unknown) {
 
 function fallback(candidate: Candidate) {
   const clean = candidate.text.replace(/^\s*(?:[•*-]\s*)?@(?:task-add|circleclick-task-add)\b:?/i, "").trim();
-  return { externalId: candidate.externalId, title: clean.slice(0, 180), nowText: clean, nextText: "Confirm the owner and next observable step.", status: "unknown", dueDate: candidate.dueDate, sourceUrl: candidate.sourceUrl, automationReviewNeeded: candidate.reviewNeeded };
+  return { externalId: candidate.externalId, title: clean.slice(0, 180), nowText: clean, nextText: "Confirm the owner and next observable step.", status: initialSlackStatus(Boolean(candidate.tagged), "unknown"), dueDate: candidate.dueDate, sourceUrl: candidate.sourceUrl, automationReviewNeeded: candidate.reviewNeeded };
 }
 
 function escapeRegex(value: string) {
@@ -65,35 +79,64 @@ function normalizedName(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-export function findRoutingMatch(message: string, clients: Array<{ id: string; name: string }>, channels: Array<{ id: string; client_id: string; name: string; active?: boolean }>): RoutingMatch {
+export function findRoutingMatch(message: string, clients: Array<{ id: string; name: string }>, channels: Array<{ id: string; client_id: string; name: string; active?: boolean }>, source?: SourceRoute): RoutingMatch {
   const haystack = normalizedName(message);
   const clientMatches = clients.filter((client) => {
     const name = normalizedName(client.name);
     return name.length >= 3 && ` ${haystack} `.includes(` ${name} `);
   });
-  if (clientMatches.length !== 1) return { reviewNeeded: clientMatches.length > 1 };
-  const client = clientMatches[0];
+  if (clientMatches.length > 1) return { reviewNeeded: true };
+  const sourceClient = clients.find((client) => client.id === source?.clientId);
+  const sourceChannel = channels.find((channel) => channel.id === source?.channelId && channel.client_id === source?.clientId);
+  const namedClient = clientMatches[0];
+  if (namedClient && sourceClient && !source?.sharedIntake && namedClient.id !== sourceClient.id) {
+    return { suggestedClientId: namedClient.id, sourceConflict: true, reviewNeeded: true };
+  }
+  const client = namedClient || (!source?.sharedIntake ? sourceClient : undefined);
+  if (!client) return { reviewNeeded: false };
   const clientChannels = channels.filter((channel) => channel.client_id === client.id);
   const activeClientChannels = clientChannels.filter((channel) => channel.active !== false);
-  const channelMatches = activeClientChannels.filter((channel) => {
+  const namedChannels = clientChannels.filter((channel) => {
     const name = normalizedName(channel.name);
     return name.length >= 3 && ` ${haystack} `.includes(` ${name} `);
   });
-  if (channelMatches.length === 1) return { clientId: client.id, channelId: channelMatches[0].id, reviewNeeded: false };
-  if (channelMatches.length > 1) return { suggestedClientId: client.id, reviewNeeded: true };
+  if (namedChannels.length === 1 && namedChannels[0].active !== false) {
+    return { clientId: client.id, channelId: namedChannels[0].id, reviewNeeded: false };
+  }
+  if (namedChannels.length) return { suggestedClientId: client.id, reviewNeeded: true };
+
+  // A dedicated source already names both the client and its destination.
+  if (!namedClient && sourceChannel?.active && sourceClient?.id === client.id) {
+    return { clientId: client.id, channelId: sourceChannel.id, reviewNeeded: false };
+  }
+  // Shared Slack channels name the kind of work. Reuse or create that lane
+  // under the client named in the command, without asking for an assignment.
+  if (sourceChannel) {
+    const sameLane = clientChannels.filter((channel) => normalizedName(channel.name) === normalizedName(sourceChannel.name));
+    if (sameLane.length === 1 && sameLane[0].active !== false) {
+      return { clientId: client.id, channelId: sameLane[0].id, reviewNeeded: false };
+    }
+    if (sameLane.length || sourceChannel.active === false) return { suggestedClientId: client.id, reviewNeeded: true };
+    return { createWorkstreamForClientId: client.id, createWorkstreamName: sourceChannel.name, reviewNeeded: false };
+  }
+
   if (activeClientChannels.length === 1) return { clientId: client.id, channelId: activeClientChannels[0].id, reviewNeeded: false };
-  if (clientChannels.length === 0) return { createWorkstreamForClientId: client.id, reviewNeeded: false };
-  return { suggestedClientId: client.id, reviewNeeded: true };
+  const general = clientChannels.filter((channel) => normalizedName(channel.name) === "general");
+  if (general.length === 1 && general[0].active !== false) return { clientId: client.id, channelId: general[0].id, reviewNeeded: false };
+  if (general.length) return { suggestedClientId: client.id, reviewNeeded: true };
+  return { createWorkstreamForClientId: client.id, createWorkstreamName: "General", reviewNeeded: false };
 }
 
-async function createDefaultWorkstream(clientId: string, createdByUserId: string | null) {
+async function createDefaultWorkstream(clientId: string, name: string, createdByUserId: string | null) {
   const supabase = getSupabaseAdminClient();
+  const slug = normalizedName(name).replaceAll(" ", "-").slice(0, 64).replace(/-+$/, "");
+  if (!slug) throw new Error("The default workstream name is invalid.");
   const candidate = {
     id: randomUUID(),
     client_id: clientId,
-    name: "General",
-    slug: "general",
-    description: "Default workstream created from an explicit client-named task.",
+    name,
+    slug,
+    description: "Workstream created from a client-named Slack task.",
     source_kind: "slack",
     active: true,
     created_by_user_id: createdByUserId,
@@ -105,15 +148,15 @@ async function createDefaultWorkstream(clientId: string, createdByUserId: string
   if (insertError) throw insertError;
   if (inserted?.active) return { id: String(inserted.id), client_id: String(inserted.client_id), name: String(inserted.name), active: true };
 
-  // A concurrent intake may have created the unique General row first.
+  // A concurrent intake may have created this client's lane first.
   const { data: existing, error: existingError } = await supabase.from("work_channels")
     .select("id,client_id,name,active")
     .eq("client_id", clientId)
-    .eq("slug", "general")
+    .eq("slug", slug)
     .eq("active", true)
     .maybeSingle();
   if (existingError) throw existingError;
-  if (!existing) throw new Error("The client's default General workstream could not be created or found.");
+  if (!existing) throw new Error("The client's default workstream could not be created or found.");
   return { id: String(existing.id), client_id: String(existing.client_id), name: String(existing.name), active: true };
 }
 
@@ -122,10 +165,11 @@ async function resolveRoutingMatch(
   clients: Array<{ id: string; name: string }>,
   channels: Array<{ id: string; client_id: string; name: string; active?: boolean }>,
   createdByUserId: string | null,
+  source?: SourceRoute,
 ) {
-  const routing = findRoutingMatch(message, clients, channels);
+  const routing = findRoutingMatch(message, clients, channels, source);
   if (!routing.createWorkstreamForClientId) return routing;
-  const channel = await createDefaultWorkstream(routing.createWorkstreamForClientId, createdByUserId);
+  const channel = await createDefaultWorkstream(routing.createWorkstreamForClientId, routing.createWorkstreamName || "General", createdByUserId);
   channels.push(channel);
   return { clientId: channel.client_id, channelId: channel.id, reviewNeeded: false } satisfies RoutingMatch;
 }
@@ -171,8 +215,12 @@ export function buildMissingTaskDetailsPrompt(input: {
   return `Please reply in this thread with ${requirements.join(" and ")}; no need to repeat the command. Example reply: ${exampleReply}`;
 }
 
-export function missingTaskDetails(message: string, dueDate: string, clients: Array<{ id: string; name: string }>, channels: Array<{ id: string; client_id: string; name: string; active?: boolean }>) {
-  const routing = findRoutingMatch(message, clients, channels);
+export function missingTaskDetails(message: string, dueDate: string, clients: Array<{ id: string; name: string }>, channels: Array<{ id: string; client_id: string; name: string; active?: boolean }>, source?: SourceRoute) {
+  const routing = findRoutingMatch(message, clients, channels, source);
+  if (routing.sourceConflict) {
+    const sourceClient = clients.find((entry) => entry.id === source?.clientId)?.name || "another client";
+    return { routing, prompt: `This channel belongs to ${sourceClient}, but the task names a different client. Please post a new command in the correct channel; no work was added.` };
+  }
   const clientId = routing.clientId || routing.createWorkstreamForClientId || routing.suggestedClientId;
   const client = clients.find((entry) => entry.id === clientId);
   const channel = channels.find((entry) => entry.id === routing.channelId);
@@ -215,7 +263,7 @@ async function classify(candidate: Candidate, apiKey: string) {
 
 export async function intakeSlackCandidates(value: unknown) {
   const input = normalizeSlackCandidates(value);
-  const { data: source, error } = await getSupabaseAdminClient().from("work_sources").select("id,created_by_user_id").eq("source_kind", "slack").eq("workspace_ref", input.workspaceRef).eq("source_ref", input.sourceRef).eq("active", true).maybeSingle();
+  const { data: source, error } = await getSupabaseAdminClient().from("work_sources").select("id,client_id,channel_id,created_by_user_id").eq("source_kind", "slack").eq("workspace_ref", input.workspaceRef).eq("source_ref", input.sourceRef).eq("active", true).maybeSingle();
   if (error) throw error;
   if (!source) throw new Error("No active Work Manager source mapping matches this Slack channel.");
   const [clientResult, channelResult] = await Promise.all([
@@ -226,13 +274,18 @@ export async function intakeSlackCandidates(value: unknown) {
   if (channelResult.error) throw channelResult.error;
   const clients = clientResult.data;
   const channels = channelResult.data;
+  const sourceRoute: SourceRoute = {
+    clientId: String(source.client_id),
+    channelId: String(source.channel_id),
+    sharedIntake: source.client_id === "circleclick-internal",
+  };
   const needsInfo = [] as Array<{ sourceId: string; channelId: string; externalId: string; threadTs: string; promptText: string }>;
   let apiKey = "";
   try { apiKey = await getAvailableOpenAiApiKeyForUser(source.created_by_user_id); } catch { /* Tagged requests retain a deterministic fallback. */ }
   const accepted = [] as Array<Record<string, unknown>>;
   const ignored = [] as Array<{ externalId: string; reason: string }>;
   for (const candidate of input.messages) {
-    const missing = missingTaskDetails(candidate.text, candidate.dueDate || "", clients || [], channels || []);
+    const missing = missingTaskDetails(candidate.text, candidate.dueDate || "", clients || [], channels || [], sourceRoute);
     if (missing) {
       needsInfo.push({
         sourceId: String(source.id),
@@ -244,9 +297,9 @@ export async function intakeSlackCandidates(value: unknown) {
       ignored.push({ externalId: candidate.externalId, reason: "Missing or ambiguous required due date, client, or workstream" });
       continue;
     }
-    const initialRouting = findRoutingMatch(candidate.text, clients || [], channels || []);
+    const initialRouting = findRoutingMatch(candidate.text, clients || [], channels || [], sourceRoute);
     const routing = initialRouting.createWorkstreamForClientId
-      ? await resolveRoutingMatch(candidate.text, clients || [], channels || [], source.created_by_user_id || null)
+      ? await resolveRoutingMatch(candidate.text, clients || [], channels || [], source.created_by_user_id || null, sourceRoute)
       : initialRouting;
     const matchedClient = clients?.find((entry) => entry.id === routing.clientId);
     const matchedChannel = channels?.find((entry) => entry.id === routing.channelId);
@@ -261,7 +314,7 @@ export async function intakeSlackCandidates(value: unknown) {
     try {
       const result = await classify(taskCandidate, apiKey);
       if (result.isWork && (candidate.tagged || result.confidence >= 0.72) && result.item.title) {
-        accepted.push(applyRoutingMatch(result.item, routing));
+        accepted.push(applyRoutingMatch({ ...result.item, status: initialSlackStatus(Boolean(candidate.tagged), result.item.status) }, routing));
       }
       else if (candidate.tagged) accepted.push(applyRoutingMatch(fallback(taskCandidate), routing));
       else ignored.push({ externalId: candidate.externalId, reason: "Not confident this is actionable work" });
