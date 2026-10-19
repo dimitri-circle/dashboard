@@ -39,6 +39,8 @@ test("guide names both supported commands without showing client-only data", () 
   const guide = buildSlackDashboardGuide("https://dashboard-circleclick.vercel.app/");
   assert.match(guide, /@task-add/);
   assert.match(guide, /@task-status/);
+  assert.match(guide, /this channel picks the workstream/);
+  assert.doesNotMatch(guide, /add the workstream if your client has more than one/);
   assert.match(guide, /internal-only tasks stay private/);
   assert.match(guide, /https:\/\/dashboard-circleclick\.vercel\.app\/\|Open the dashboard/);
 });

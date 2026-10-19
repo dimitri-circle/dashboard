@@ -13,7 +13,7 @@ import { createReviewToken, hashReviewToken, normalizeWorkItemInput, slugifyWork
 import type { WorkItem } from "../lib/work-manager/types";
 import { notificationReason, plannedNotificationKinds } from "../lib/work-manager/notifications";
 import { normalizeWorkGuideUpdate } from "../lib/work-manager/guide";
-import { buildMissingTaskDetailsPrompt, extractSlackTaskDescription, findRoutingMatch, missingTaskDetails, normalizeSlackCandidates } from "../lib/work-manager/intake";
+import { buildMissingTaskDetailsPrompt, extractSlackTaskDescription, findRoutingMatch, initialSlackStatus, missingTaskDetails, normalizeSlackCandidates } from "../lib/work-manager/intake";
 import { isValidMeetingDocExportRequest, toMeetingDocItem } from "../lib/work-manager/meeting-docs";
 import { isValidSlackSignature, normalizeSlackTaskEvent, parseSlackCommand } from "../lib/work-manager/slack-events";
 import { canonicalizeSlackDraftText, mergeSlackStatusReply, mergeSlackTaskReply } from "../lib/work-manager/slack-command-drafts";
@@ -114,7 +114,7 @@ test("Slack thread corrections keep the original command unless a full replaceme
   assert.equal(mergeSlackStatusReply("VAST due:2026-09-25", "by 2026-10-02", new Date("2026-09-28T15:00:00Z")), "VAST due:2026-10-02");
 });
 
-test("Slack intake blocks missing dates, missing clients, and unclear workstreams", () => {
+test("Slack intake asks only for missing dates or clients when a lane can be inferred", () => {
   const clients = [{ id: "vast", name: "VAST" }, { id: "abk", name: "ABK Labs" }];
   const channels = [
     { id: "vast-video", client_id: "vast", name: "Video Queue" },
@@ -122,13 +122,13 @@ test("Slack intake blocks missing dates, missing clients, and unclear workstream
   ];
   assert.match(missingTaskDetails("@circleclick-task-add VAST Video Queue publish", "", clients, channels)?.prompt || "", /due-by date/);
   assert.match(missingTaskDetails("@circleclick-task-add due:2026-09-30 publish", "2026-09-30", clients, channels)?.prompt || "", /ABK Labs, VAST/);
-  assert.match(missingTaskDetails("@circleclick-task-add due:2026-09-30 VAST publish", "2026-09-30", clients, channels)?.prompt || "", /Social, Video Queue/);
+  assert.equal(missingTaskDetails("@circleclick-task-add due:2026-09-30 VAST publish", "2026-09-30", clients, channels), null);
   assert.equal(missingTaskDetails("@circleclick-task-add due:2026-09-30 VAST Video Queue publish", "2026-09-30", clients, channels), null);
   assert.match(missingTaskDetails("@task-add VAST Video Queue", "", clients, channels)?.prompt || "", /task description.*due-by date/);
   assert.equal(missingTaskDetails("@task-add Publish the video VAST Video Queue", "2026-09-30", clients, channels), null);
 });
 
-test("client routing is case-insensitive and requires one exact client and owned workstream", () => {
+test("client routing is case-insensitive and gives clear tasks a default workstream", () => {
   const clients = [{ id: "vast", name: "VAST" }, { id: "abk", name: "ABK Labs" }];
   const channels = [{ id: "vast-video", client_id: "vast", name: "Video Queue" }, { id: "abk-video", client_id: "abk", name: "Video Queue" }];
   assert.deepEqual(findRoutingMatch("@circleclick-task-add VAST Video Queue publish new video", clients, channels), {
@@ -138,11 +138,11 @@ test("client routing is case-insensitive and requires one exact client and owned
     clientId: "vast", channelId: "vast-video", reviewNeeded: false,
   });
   assert.deepEqual(findRoutingMatch("@circleclick-task-add vast publish new video", clients, []), {
-    createWorkstreamForClientId: "vast", reviewNeeded: false,
+    createWorkstreamForClientId: "vast", createWorkstreamName: "General", reviewNeeded: false,
   });
   assert.deepEqual(findRoutingMatch("@circleclick-task-add VAST publish", clients, [
     ...channels.slice(0, 1), { id: "vast-social", client_id: "vast", name: "Social" },
-  ]), { suggestedClientId: "vast", reviewNeeded: true });
+  ]), { createWorkstreamForClientId: "vast", createWorkstreamName: "General", reviewNeeded: false });
   assert.deepEqual(findRoutingMatch("@circleclick-task-add VAST Social publish", clients, [
     ...channels.slice(0, 1), { id: "vast-social", client_id: "vast", name: "Social" },
   ]), { clientId: "vast", channelId: "vast-social", reviewNeeded: false });
@@ -154,6 +154,48 @@ test("client routing is case-insensitive and requires one exact client and owned
   });
   assert.deepEqual(findRoutingMatch("@circleclick-task-add Video Queue publish", clients, channels), { reviewNeeded: false });
   assert.deepEqual(findRoutingMatch("@circleclick-task-add VAST and ABK Labs: publish video", clients, channels), { reviewNeeded: true });
+});
+
+test("Slack source channel chooses a client's lane without an assignment step", () => {
+  const clients = [
+    { id: "circleclick-internal", name: "CircleClick Internal" },
+    { id: "vast", name: "VAST" },
+    { id: "abk", name: "ABK Labs" },
+  ];
+  const channels = [
+    { id: "design-internal", client_id: "circleclick-internal", name: "Design Requests" },
+    { id: "vast-video", client_id: "vast", name: "Video Queue" },
+    { id: "vast-design", client_id: "vast", name: "Design Requests" },
+  ];
+  const designSource = { clientId: "circleclick-internal", channelId: "design-internal", sharedIntake: true };
+  assert.deepEqual(findRoutingMatch("@task-add vaSt publish the video", clients, channels, designSource), {
+    clientId: "vast", channelId: "vast-design", reviewNeeded: false,
+  });
+  assert.deepEqual(findRoutingMatch("@task-add vaSt Video Queue publish the video", clients, channels, designSource), {
+    clientId: "vast", channelId: "vast-video", reviewNeeded: false,
+  });
+  assert.deepEqual(findRoutingMatch("@task-add ABK Labs publish the video", clients, channels, designSource), {
+    createWorkstreamForClientId: "abk", createWorkstreamName: "Design Requests", reviewNeeded: false,
+  });
+  assert.match(missingTaskDetails("@task-add publish the video", "2026-10-20", clients, channels, designSource)?.prompt || "", /a client/);
+  assert.equal(missingTaskDetails("@task-add ABK Labs publish the video", "2026-10-20", clients, channels, designSource), null);
+
+  const dedicatedSource = { clientId: "vast", channelId: "vast-video", sharedIntake: false };
+  assert.deepEqual(findRoutingMatch("@task-add publish the video", clients, channels, dedicatedSource), {
+    clientId: "vast", channelId: "vast-video", reviewNeeded: false,
+  });
+  assert.equal(missingTaskDetails("@task-add publish the video", "2026-10-20", clients, channels, dedicatedSource), null);
+  assert.match(missingTaskDetails("@task-add ABK Labs publish the video", "2026-10-20", clients, channels, dedicatedSource)?.prompt || "", /belongs to VAST/);
+  assert.deepEqual(findRoutingMatch("@task-add VAST publish the video", clients, [
+    ...channels.slice(0, 2), { id: "vast-design", client_id: "vast", name: "Design Requests", active: false },
+  ], designSource), { suggestedClientId: "vast", reviewNeeded: true });
+});
+
+test("a new Slack command starts in Ready even when AI returns an unclear status", () => {
+  assert.equal(initialSlackStatus(true, "unknown"), "new");
+  assert.equal(initialSlackStatus(true, "in_progress"), "new");
+  assert.equal(initialSlackStatus(false, "in_progress"), "in_progress");
+  assert.equal(workflowStageFor({ status: "new", workflow_stage: "ready" }), "ready");
 });
 
 test("Slack task dates support ISO and Central Time natural language", () => {

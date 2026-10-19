@@ -49,7 +49,7 @@ export function guideReminderDate(now: Date, lastAttemptAt?: string | null) {
 export function buildSlackDashboardGuide(baseUrl: string) {
   return [
     "*CircleClick Work Manager quick guide*",
-    "• Add work: `@task-add Publish the approved video by Friday ABK Labs Video Queue` (include a due date and client; add the workstream if your client has more than one).",
+    "• Add work: `@task-add Publish the approved video for ABK Labs by Friday` (include a due date and client; this channel picks the workstream unless you name another one).",
     "• Check shared work: `@task-status ABK Labs` or `@task-status ABK Labs by Friday` (due on or before; internal-only tasks stay private).",
     "• Need a reminder? `@task-help`. If the bot asks for a missing detail, reply in its thread with just that detail.",
     "The bot replies in your command thread with task links. Open one to move work, assign an owner, and add comments; the channel stays quiet.",

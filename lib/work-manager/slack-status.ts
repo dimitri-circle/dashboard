@@ -29,7 +29,7 @@ export function parseStatusQuery(argument: string, now = new Date()) {
 }
 
 export function formatSlackTaskHelp() {
-  return "*Work Manager commands*\n• Add work: `@task-add Fix pricing page for VAST by Friday`\n• Check shared work: `@task-status VAST` or `@task-status VAST by Friday` (due on or before Friday)\nReply in the same thread if the bot asks for a missing client or date. Internal tasks stay private.";
+  return "*Work Manager commands*\n• Add work: `@task-add Fix pricing page for VAST by Friday` (this channel chooses the workstream unless you name another one)\n• Check shared work: `@task-status VAST` or `@task-status VAST by Friday` (due on or before Friday)\nReply in the same thread if the bot asks for a missing client or date. Internal tasks stay private.";
 }
 
 export function formatSlackStatus(clientName: string, items: VisibleItem[], total: number, dueOnOrBefore?: string | null) {
